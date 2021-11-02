@@ -1,4 +1,6 @@
 // Copyright 2021 Kuldeep Singh
+// This source code is licensed under a MIT-style
+// license that can be found in the LICENSE file.
 
 package mic
 
