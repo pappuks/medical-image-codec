@@ -1,7 +1,9 @@
 package mic
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -85,7 +87,11 @@ func TestCompressDCMFile(t *testing.T) {
 }
 
 func TestCompressDCMImages(t *testing.T) {
-	dataset, _ := dicom.ParseFile("../1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.400.0.dcm", nil)
+	fileName := "../1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.400.0.dcm"
+	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
+		t.Skip("Skipping test as file does not exist")
+	}
+	dataset, _ := dicom.ParseFile(fileName, nil)
 	pixelDataElement, _ := dataset.FindElementByTag(tag.PixelData)
 	pixelDataInfo := dicom.MustGetPixelDataInfo(pixelDataElement.Value)
 
