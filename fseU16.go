@@ -1,3 +1,9 @@
+// Copyright 2021 Kuldeep Singh
+// This source code is licensed under a MIT-style
+// license that can be found in the LICENSE file.
+// Based on work Copyright 2018 Klaus Post, released user BSD License.
+// Based on work Copyright (c) 2013, Yann Collet, released under BSD License.
+
 package mic
 
 import (

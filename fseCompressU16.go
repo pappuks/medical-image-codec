@@ -1,6 +1,7 @@
-// Copyright 2018 Klaus Post. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// Copyright 2021 Kuldeep Singh
+// This source code is licensed under a MIT-style
+// license that can be found in the LICENSE file. 
+// Based on work Copyright 2018 Klaus Post, released user BSD License.
 // Based on work Copyright (c) 2013, Yann Collet, released under BSD License.
 
 package mic
@@ -15,7 +16,7 @@ import (
 // Note that the output is also kept in the scratch buffer.
 // If input is too hard to compress, ErrIncompressible is returned.
 // If input is a single byte value repeated ErrUseRLE is returned.
-func CompressU16(in []uint16, s *ScratchU16) ([]byte, error) {
+func FSECompressU16(in []uint16, s *ScratchU16) ([]byte, error) {
 	if len(in) <= 1 {
 		return nil, ErrIncompressible
 	}

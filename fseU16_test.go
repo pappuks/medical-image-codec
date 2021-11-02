@@ -1,3 +1,6 @@
+// Copyright 2021 Kuldeep Singh
+// This source code is licensed under a MIT-style
+// license that can be found in the LICENSE file.
 package mic
 
 import (
@@ -135,7 +138,7 @@ func DeltaFSECompress(t *testing.T, shortData []uint16, cols int, rows int, maxS
 
 	var s3 ScratchU16
 
-	deltaFSEComp, errDelta := CompressU16(deltaComp, &s3)
+	deltaFSEComp, errDelta := FSECompressU16(deltaComp, &s3)
 
 	if errDelta != nil {
 		fmt.Printf("got error %v (%T)\n", errDelta, errDelta)
@@ -144,7 +147,7 @@ func DeltaFSECompress(t *testing.T, shortData []uint16, cols int, rows int, maxS
 	fmt.Printf("Delta FSE Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(deltaFSEComp), float64(len(shortData)*2)/float64(len(deltaFSEComp)))
 
 	var s4 ScratchU16
-	deltaDecompFSE, errDeltaDecomp := DecompressU16(deltaFSEComp, &s4)
+	deltaDecompFSE, errDeltaDecomp := FSEDecompressU16(deltaFSEComp, &s4)
 
 	if errDeltaDecomp != nil {
 		fmt.Printf("got error %v (%T)\n", errDeltaDecomp, errDeltaDecomp)
@@ -180,7 +183,7 @@ func DeltaFSECompress(t *testing.T, shortData []uint16, cols int, rows int, maxS
 func FSE16bitCompress(t *testing.T, shortData []uint16) {
 	var s ScratchU16
 
-	b, err := CompressU16(shortData, &s)
+	b, err := FSECompressU16(shortData, &s)
 
 	if err != nil {
 		fmt.Printf("got error %v (%T)\n", err, err)
@@ -189,7 +192,7 @@ func FSE16bitCompress(t *testing.T, shortData []uint16) {
 	fmt.Printf("FSE Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(b), float64(len(shortData)*2)/float64(len(b)))
 
 	var s1 ScratchU16
-	decomp, err1 := DecompressU16(b, &s1)
+	decomp, err1 := FSEDecompressU16(b, &s1)
 
 	if err1 != nil {
 		fmt.Printf("Got decomp error %v (%T)\n", err1, err1)
@@ -221,7 +224,7 @@ func DeltaRLEFSECompress(shortData []uint16, cols int, rows int, maxShort uint16
 	deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
 
 	var s3 ScratchU16
-	deltaFSEComp, errDelta := CompressU16(deltaComp, &s3)
+	deltaFSEComp, errDelta := FSECompressU16(deltaComp, &s3)
 	if errDelta != nil {
 		fmt.Printf("got error %v (%T)\n", errDelta, errDelta)
 	}
@@ -232,7 +235,7 @@ func DeltaRLEFSECompress(shortData []uint16, cols int, rows int, maxShort uint16
 func DeltaRLEFSEDecompress(t *testing.T, shortData []uint16, deltaFSEComp []byte, cols int, rows int, verify bool) time.Duration {
 	var s4 ScratchU16
 	start := time.Now()
-	deltaDecompFSE, errDeltaDecomp := DecompressU16(deltaFSEComp, &s4)
+	deltaDecompFSE, errDeltaDecomp := FSEDecompressU16(deltaFSEComp, &s4)
 	if errDeltaDecomp != nil {
 		fmt.Printf("got error %v (%T)\n", errDeltaDecomp, errDeltaDecomp)
 	}
@@ -272,7 +275,7 @@ func DeltaRleFSETest(t *testing.T, shortData []uint16, cols int, rows int, maxSh
 	fmt.Println("Delta RLE FSE - Delta compress took ", elapsedFile)
 
 	var s3 ScratchU16
-	deltaFSEComp, errDelta := CompressU16(deltaComp, &s3)
+	deltaFSEComp, errDelta := FSECompressU16(deltaComp, &s3)
 	elapsedFile = time.Since(start)
 	fmt.Println("Delta RLE FSE - FSE compress took ", elapsedFile)
 	if errDelta != nil {
@@ -281,7 +284,7 @@ func DeltaRleFSETest(t *testing.T, shortData []uint16, cols int, rows int, maxSh
 	fmt.Printf("Delta RLE FSE Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(deltaFSEComp), float64(len(shortData)*2)/float64(len(deltaFSEComp)))
 	var s4 ScratchU16
 	start = time.Now()
-	deltaDecompFSE, errDeltaDecomp := DecompressU16(deltaFSEComp, &s4)
+	deltaDecompFSE, errDeltaDecomp := FSEDecompressU16(deltaFSEComp, &s4)
 
 	if len(deltaDecompFSE) != len(deltaComp) {
 		t.Errorf("Error in FSE decompression, Orig Len %d Decomp Len %d\n", len(deltaComp), len(deltaDecompFSE))

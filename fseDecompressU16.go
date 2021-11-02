@@ -1,3 +1,9 @@
+// Copyright 2021 Kuldeep Singh
+// This source code is licensed under a MIT-style
+// license that can be found in the LICENSE file. 
+// Based on work Copyright 2018 Klaus Post, released user BSD License.
+// Based on work Copyright (c) 2013, Yann Collet, released under BSD License.
+
 package mic
 
 import (
@@ -16,7 +22,7 @@ const (
 // return an error.
 // It is up to the caller to verify integrity of the returned data.
 // Use a predefined Scrach to set maximum acceptable output size.
-func DecompressU16(b []byte, s *ScratchU16) ([]uint16, error) {
+func FSEDecompressU16(b []byte, s *ScratchU16) ([]uint16, error) {
 	s, err := s.prepare(nil, b)
 	if err != nil {
 		return nil, err
