@@ -4,7 +4,6 @@
 package mic
 
 import (
-	"fmt"
 	"math/bits"
 	"sort"
 )
@@ -55,7 +54,7 @@ func (c *CanHuffmanCompressU16) Compress() {
 	c.OptimizeSymbolCount()
 	c.AddDelimiterToSymbolList()
 	c.GenerateCanHuffmanTable()
-	fmt.Println("SymbolList", len(c.symbolsOfInterestList), "MaxCodeLen", c.maxCodeLength)
+	//fmt.Println("SymbolList", len(c.symbolsOfInterestList), "MaxCodeLen", c.maxCodeLength)
 	c.FindIndexOfDelimiter()
 	c.WriteTable()
 	c.GenerateAllSymbolTable()
