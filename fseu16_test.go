@@ -15,13 +15,44 @@ import (
 	"github.com/suyashkumar/dicom"
 )
 
-func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
-	dataset, _ := dicom.ParseFile("testdata/xr_hands.dcm", nil)
+type testData struct {
+	name     string
+	fileName string
+	isBinary bool
+	rows     int
+	cols     int
+}
+
+var testFiles = []testData{
+	{name: "MR", fileName: "testdata/MR.2564.1", isBinary: false},
+	{name: "CT", fileName: "testdata/CT.3985.1", isBinary: false},
+	{name: "CR", fileName: "testdata/CR.4509.1", isBinary: false},
+	{name: "XR", fileName: "testdata/xr_hands.dcm", isBinary: false},
+	{name: "MG1", fileName: "testdata/MG_image_bin2.bin", isBinary: true, rows: 2457, cols: 1996},
+	{name: "MG2", fileName: "testdata/MG_Image_2_frame.bin", isBinary: true, rows: 2457, cols: 1996},
+}
+
+func ReadBinaryFile(fileName string, cols int, rows int) ([]byte, []uint16, uint16) {
+	byteData, _ := os.ReadFile(fileName)
+	shortData := make([]uint16, cols*rows)
+	var maxShort uint16 = 0
+
+	for i := 0; i < len(byteData); {
+		shortData[i/2] = uint16(byteData[i+1])<<8 + uint16(byteData[i])
+		if shortData[i/2] > maxShort {
+			maxShort = shortData[i/2]
+		}
+		i += 2
+	}
+	return byteData, shortData, maxShort
+}
+
+func ReadDicomFile(fileName string) ([]byte, []uint16, uint16, int, int) {
+	dataset, _ := dicom.ParseFile(fileName, nil)
 	pixelDataElement, _ := dataset.FindElementByTag(tag.PixelData)
 	pixelDataInfo := dicom.MustGetPixelDataInfo(pixelDataElement.Value)
 	fr := pixelDataInfo.Frames[0]
 	nativeFrame, _ := fr.GetNativeFrame()
-	fmt.Printf("rows : %d columns: %d bitspersample: %d\n", nativeFrame.Rows, nativeFrame.Cols, nativeFrame.BitsPerSample)
 	shortData := make([]uint16, nativeFrame.Cols*nativeFrame.Rows)
 	byteData := make([]byte, nativeFrame.Cols*nativeFrame.Rows*2)
 	var maxShort uint16 = 0
@@ -33,29 +64,79 @@ func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
 		byteData[j*2] = byte(shortData[j])
 		byteData[(j*2)+1] = byte(shortData[j] >> 8)
 	}
+	return byteData, shortData, maxShort, nativeFrame.Cols, nativeFrame.Rows
+}
 
-	start := time.Now()
-	var drc DeltaRleCompressU16
-	deltaComp, _ := drc.Compress(shortData, nativeFrame.Cols, nativeFrame.Rows, maxShort)
-	elapsedFile := time.Since(start)
-	fmt.Println("Delta RLE Huff - Delta compress took ", elapsedFile)
-	var c CanHuffmanCompressU16
-	c.Init(deltaComp)
-	c.Compress()
-	elapsedFile = time.Since(start)
-	fmt.Println("Delta RLE Huff - Huff compress took ", elapsedFile)
-	fmt.Printf("Delta RLE Huff Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(c.Out), float64(len(shortData)*2)/float64(len(c.Out)))
+func SetupTests(td testData) ([]byte, []uint16, uint16, int, int) {
+	if td.isBinary {
+		a, b, c := ReadBinaryFile(td.fileName, td.cols, td.rows)
+		return a, b, c, td.cols, td.rows
+	} else {
+		return ReadDicomFile(td.fileName)
+	}
+}
 
-	for i := 0; i < 100; i++ {
-		var d CanHuffmanDecompressU16
-		d.Init(c.Out)
-		d.ReadTable()
-		d.Decompress()
-
-		var drd DeltaRleDecompressU16
-		drd.Decompress(d.Out, nativeFrame.Cols, nativeFrame.Rows)
+func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var drc DeltaRleCompressU16
+			deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
+			var c CanHuffmanCompressU16
+			c.Init(deltaComp)
+			c.Compress()
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var d CanHuffmanDecompressU16
+				d.Init(c.Out)
+				d.ReadTable()
+				d.Decompress()
+				var drd DeltaRleDecompressU16
+				drd.Decompress(d.Out, cols, rows)
+			}
+		})
 	}
 
+}
+
+func BenchmarkDeltaRLEHuffCompress2(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var drc DeltaRleCompressU16
+			deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
+			var c CanHuffmanCompressU16
+			c.Init(deltaComp)
+			c.Compress()
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var d DeltaRleHuffDecompressU16
+				d.Decompress(c.Out, cols, rows)
+			}
+		})
+	}
+}
+
+func BenchmarkDeltaRLEFSECompress(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var drc DeltaRleCompressU16
+			deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
+			var s3 ScratchU16
+			deltaFSEComp, _ := FSECompressU16(deltaComp, &s3)
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var s4 ScratchU16
+				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
+				var drd DeltaRleDecompressU16
+				drd.Decompress(deltaDecompFSE, cols, rows)
+			}
+		})
+	}
 }
 
 func TestCompressDCMFile(t *testing.T) {
