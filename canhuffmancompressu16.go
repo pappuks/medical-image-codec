@@ -21,11 +21,11 @@ type SymbFreq struct {
 
 type CanHuffmanCompressU16 struct {
 	maxValue                       uint16
-	pixelDepth                     uint32
+	pixelDepth                     uint8
 	delimiterForCompressDecompress uint16
 	in                             []uint16
 	symbolsOfInterestList          []SymbFreq
-	maxCodeLength                  uint32
+	maxCodeLength                  uint8
 	symbolsPerCodeLength           []uint32
 	symbolStartPerCodeLength       []uint32
 	canHuffmanTable                []uint32
@@ -124,7 +124,7 @@ func (c *CanHuffmanCompressU16) WriteTable() {
 	// Write maxValue
 	c.bw.addBits16(c.maxValue, 16)
 	//Max code len
-	c.bw.addBits32(c.maxCodeLength, 32)
+	c.bw.addBits16(uint16(c.maxCodeLength), 8)
 	// Write size of symbols of interest, can't be more than 2^16
 	c.bw.addBits16(uint16(len(c.symbolsOfInterestList)), 16)
 	// Store the symbol list
@@ -132,7 +132,7 @@ func (c *CanHuffmanCompressU16) WriteTable() {
 		c.bw.addBits16(v.symbol, uint8(c.pixelDepth))
 	}
 	// Store symbol vs code length
-	maxCodeLenBits := bits.Len32(c.maxCodeLength)
+	maxCodeLenBits := bits.Len8(c.maxCodeLength)
 	for _, v := range c.symbolsOfInterestList {
 		c.bw.addBits32(v.freq, uint8(maxCodeLenBits))
 	}
@@ -150,7 +150,7 @@ func (c *CanHuffmanCompressU16) GenerateFrequencies() {
 		}
 	}
 
-	c.pixelDepth = uint32(bits.Len16(c.maxValue))
+	c.pixelDepth = uint8(bits.Len16(c.maxValue))
 	c.delimiterForCompressDecompress = uint16((1 << (c.pixelDepth)) - 1)
 	regions = uint32(1 << c.pixelDepth)
 
@@ -310,7 +310,7 @@ func (c *CanHuffmanCompressU16) CalculateCodeLengthForGivenSlice(f []SymbFreq) u
 }
 
 func (c *CanHuffmanCompressU16) CalculateCodeLength() {
-	c.maxCodeLength = c.CalculateCodeLengthForGivenSlice(c.symbolsOfInterestList)
+	c.maxCodeLength = uint8(c.CalculateCodeLengthForGivenSlice(c.symbolsOfInterestList))
 }
 
 func (c *CanHuffmanCompressU16) CalculateSymbolsPerCodeLength() {
@@ -323,9 +323,9 @@ func (c *CanHuffmanCompressU16) CalculateSymbolsPerCodeLength() {
 func (c *CanHuffmanCompressU16) CalculateSymbolStartForCodeLength() {
 	c.symbolStartPerCodeLength = make([]uint32, c.maxCodeLength+1)
 	symbolStart := uint32(0)
-	prevCodeLength := uint32(0)
+	prevCodeLength := uint8(0)
 	numberOfSymbolsForPrevCodeLength := uint32(0)
-	for i := uint32(1); i < (c.maxCodeLength + 1); i++ {
+	for i := uint8(1); i < (c.maxCodeLength + 1); i++ {
 		numberOfSymbols := c.symbolsPerCodeLength[i]
 		if numberOfSymbols != 0 {
 			if prevCodeLength == 0 {
