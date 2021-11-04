@@ -87,6 +87,7 @@ func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
 			c.Compress()
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(c.Out)), "ratio")
 			for i := 0; i < b.N; i++ {
 				var d CanHuffmanDecompressU16
 				d.Init(c.Out)
@@ -111,6 +112,7 @@ func BenchmarkDeltaRLEHuffCompress2(b *testing.B) {
 			c.Compress()
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(c.Out)), "ratio")
 			for i := 0; i < b.N; i++ {
 				var d DeltaRleHuffDecompressU16
 				d.Decompress(c.Out, cols, rows)
@@ -129,6 +131,7 @@ func BenchmarkDeltaRLEFSECompress(b *testing.B) {
 			deltaFSEComp, _ := FSECompressU16(deltaComp, &s3)
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(deltaFSEComp)), "ratio")
 			for i := 0; i < b.N; i++ {
 				var s4 ScratchU16
 				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
