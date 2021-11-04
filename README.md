@@ -1,5 +1,5 @@
 # MIC - Medical Image Codec
-This library introduces a lossless medical image compression codec __MIC__ for 16 bit images which provides compression ratio similar to JPEG 2000 but with much higher speed of compression and decompression.
+This library introduces a lossless medical image compression codec __MIC__ for 16 bit images implemented in __Go__ which provides compression ratio similar to JPEG 2000 but with much higher speed of compression and decompression.
 
 |Branch |Status |
 |-------|-------|
@@ -36,3 +36,40 @@ During the encoding process we add a delimiter before each symbol which is also 
 
 The Finite State Entropy algorithm implementation from https://github.com/klauspost/compress has been re-written for 16 bit dataset.
 
+## Benchmarks
+The benchmarks are executed using the golang testing benchmark library. The file __fseu16_test.go__ containes these benchmark tests. These can be executed by using the command `go test -bench=.`
+
+The benchmark tests are run for different DICOM image types MR, CT, CR, XR and MG. All the images are 16 bit with varying level for max pixel values. CT image is the only one with max pixel value of 65535.
+
+The benchmark test focuses on the decompression speed and compression ratio. Compression speed is not considered as we are primarily looking a use case of rendering/decoding compressed images on the fly.
+
+`goos: linux`
+
+`goarch: amd64`
+
+`cpu: Intel(R) Core(TM) i7-7700HQ CPU @ 2.80GHz`
+
+|Test|Decompression|Ratio|
+|----|-------------|-----|
+|BenchmarkDeltaRLEHuffCompress/MR-8|109.85 MB/s|2.349|
+|BenchmarkDeltaRLEHuffCompress/CT-8|99.33 MB/s|2.189|
+|BenchmarkDeltaRLEHuffCompress/CR-8|116.76 MB/s|3.709|
+|BenchmarkDeltaRLEHuffCompress/XR-8|125.38 MB/s|1.752|
+|BenchmarkDeltaRLEHuffCompress/MG1-8|259.15 MB/s|8.895|
+|BenchmarkDeltaRLEHuffCompress/MG2-8|257.38 MB/s|8.884|
+||||
+|BenchmarkDeltaRLEHuffCompress2/MR-8|117.16 MB/s|__2.349__|
+|BenchmarkDeltaRLEHuffCompress2/CT-8|__120.97 MB/s__|2.189|
+|BenchmarkDeltaRLEHuffCompress2/CR-8|128.75 MB/s|__3.709__|
+|BenchmarkDeltaRLEHuffCompress2/XR-8|134.81 MB/s|__1.752__|
+|BenchmarkDeltaRLEHuffCompress2/MG1-8|237.83 MB/s|__8.895__|
+|BenchmarkDeltaRLEHuffCompress2/MG2-8|234.09 MB/s|__8.884__|
+||||
+|BenchmarkDeltaRLEFSECompress/MR-8|__153.26 MB/s__|2.348|
+|BenchmarkDeltaRLEFSECompress/CT-8|90.19 MB/s|__2.238__|
+|BenchmarkDeltaRLEFSECompress/CR-8|__202.38 MB/s__|3.474|
+|BenchmarkDeltaRLEFSECompress/XR-8|__188.15 MB/s__|1.738|
+|BenchmarkDeltaRLEFSECompress/MG1-8|__342.80 MB/s__|7.995|
+|BenchmarkDeltaRLEFSECompress/MG2-8|__343.35 MB/s__|7.984|
+
+`DELTA + RLE + FSE` implementation gives the best speed. The `DELTA + RLE + Huffman` implementation provides the best compression. 
