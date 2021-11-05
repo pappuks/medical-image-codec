@@ -121,6 +121,7 @@ func (d *CanHuffmanDecompressU16) DecodeNext() uint16 {
 }
 
 func (d *CanHuffmanDecompressU16) JustDecodeNext() uint16 {
+	// d.maxCodeLengthBits contains values equal to
 	maxCodeLengthValue := (d.maxCodeLengthBits >> uint32(d.c.pixelDepth)) & d.maxCodeLengthMask
 	codeToSymb := d.codeToSymbolTable[maxCodeLengthValue]
 	outputSymbol := codeToSymb.symbol

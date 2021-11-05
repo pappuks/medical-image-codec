@@ -17,7 +17,7 @@ const (
 	 *  Memory usage formula : N->2^N Bytes (examples : 10 -> 1KB; 12 -> 4KB ; 16 -> 64KB; 20 -> 1MB; etc.)
 	 *  Increasing memory usage improves compression ratio
 	 *  Reduced memory usage can improve speed, due to cache effect
-	 *  Recommended max value is 14, for 16KB, which nicely fits into Intel x86 L1 cache */
+	 *  Max value is set to 18 so that maxTableLog can be 16 to cater for max 16bit value of 65535 */
 	maxMemoryUsage     = 18
 	defaultMemoryUsage = 13
 
@@ -63,7 +63,7 @@ type ScratchU16 struct {
 	// Private
 	count       [maxSymbolValue + 1]uint32
 	norm        [maxSymbolValue + 1]int32
-	br          byteReaderU16
+	br          wordReader // Reads 16bit values
 	brForDecomp byteReader
 	bits        bitReader
 	bw          bitWriter
@@ -75,12 +75,13 @@ type ScratchU16 struct {
 	// These can be used to override compression parameters of the block.
 	// Do not touch, unless you know what you are doing.
 
-	// Out is output buffer.
+	// Out is output buffer for compression
 	// If the scratch is re-used before the caller is done processing the output,
 	// set this field to nil.
 	// Otherwise the output buffer will be re-used for next Compression/Decompression step
 	// and allocation will be avoided.
-	Out    []byte
+	Out []byte
+	// OutU16 is the output buffer for decompression
 	OutU16 []uint16
 
 	// DecompressLimit limits the maximum decoded size acceptable.

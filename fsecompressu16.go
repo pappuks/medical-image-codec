@@ -1,6 +1,6 @@
 // Copyright 2021 Kuldeep Singh
 // This source code is licensed under a MIT-style
-// license that can be found in the LICENSE file. 
+// license that can be found in the LICENSE file.
 // Based on work Copyright 2018 Klaus Post, released user BSD License.
 // Based on work Copyright (c) 2013, Yann Collet, released under BSD License.
 
@@ -54,7 +54,7 @@ func FSECompressU16(in []uint16, s *ScratchU16) ([]byte, error) {
 		return nil, err
 	}
 
-	if true {
+	if false {
 		err = s.validateNorm()
 		if err != nil {
 			return nil, err
@@ -84,7 +84,8 @@ type cStateU16 struct {
 	state      uint32
 }
 
-func (c *cStateU16) init2(bw *bitWriter, ct *cTableU16, tableLog uint8) {
+// initialize the state and set the default state
+func (c *cStateU16) init(bw *bitWriter, ct *cTableU16, tableLog uint8) {
 	c.bw = bw
 	c.stateTable = ct.stateTable
 	c.state = 1 << tableLog
@@ -93,14 +94,8 @@ func (c *cStateU16) init2(bw *bitWriter, ct *cTableU16, tableLog uint8) {
 // encode the output symbol provided and write it to the bitstream.
 func (c *cStateU16) encode(symbolTT symbolTransformU16) {
 	nbBitsOut := (uint32(c.state) + symbolTT.deltaNbBits) >> 16
-	if nbBitsOut > 16 {
-		fmt.Printf("*** nbBitsOut %d\n", nbBitsOut)
-	}
 	dstState := int32(c.state>>(nbBitsOut&31)) + symbolTT.deltaFindState
 	c.bw.addBits32NC(c.state, uint8(nbBitsOut))
-	if dstState < 0 {
-		fmt.Printf("*** Incorrect state %d BitOut %d Delta %d State %d\n", dstState, nbBitsOut, symbolTT.deltaFindState, c.state)
-	}
 	c.state = c.stateTable[dstState]
 }
 
@@ -119,21 +114,16 @@ func (s *ScratchU16) compress(src []uint16) error {
 	tt := s.ct.symbolTT[:65536]
 	s.bw.reset(s.Out)
 
-	// Our two states each encodes every second byte.
-	// Last byte encoded (first byte decoded) will always be encoded by c1.
 	var cState cStateU16
-
-	cState.init2(&s.bw, &s.ct, s.actualTableLog)
+	cState.init(&s.bw, &s.ct, s.actualTableLog)
 
 	// Encode so remaining size is divisible by 4.
 	ip := len(src)
 	if (ip & 1) == 1 {
-		//cState.init(&s.bw, &s.ct, s.actualTableLog, tt[src[ip-1]])
 		cState.encode(tt[src[ip-1]])
 		ip -= 1
 	}
 	if (ip & 2) != 0 {
-		//cState.init(&s.bw, &s.ct, s.actualTableLog, tt[src[ip-1]])
 		cState.encode(tt[src[ip-1]])
 		cState.encode(tt[src[ip-2]])
 		ip -= 2
@@ -644,7 +634,6 @@ func (s *ScratchU16) validateNorm() (err error) {
 		if err == nil {
 			return
 		}
-		fmt.Printf("selected TableLog: %d, Symbol length: %d\n", s.actualTableLog, s.symbolLen)
 		for i, v := range s.norm[:s.symbolLen] {
 			fmt.Printf("%3d: %5d -> %4d \n", i, s.count[i], v)
 		}
