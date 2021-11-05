@@ -27,9 +27,6 @@ type CodeToSymbol struct {
 	symbol      uint16
 	codeLen     uint8
 	isDelimiter bool
-	// codeLenWithDelimiterMask uint8
-	// delimiterMask            uint16
-	// symbolAndMask            uint16
 }
 
 func (d *CanHuffmanDecompressU16) Init(in []byte) {
@@ -74,10 +71,6 @@ func (d *CanHuffmanDecompressU16) ReadTable() {
 			d.codeToSymbolTable[leftShitedCode+i].symbol = symbLen.symbol
 			d.codeToSymbolTable[leftShitedCode+i].codeLen = uint8(symbLen.freq)
 			d.codeToSymbolTable[leftShitedCode+i].isDelimiter = symbLen.symbol == d.c.delimiterForCompressDecompress
-			// delimiterMask, symbolMask := d.GetDelimiterMaskForCurrentSymbol(symbLen.symbol)
-			// d.codeToSymbolTable[leftShitedCode+i].codeLenWithDelimiterMask = uint8(symbLen.freq) + (d.c.pixelDepth)&uint8(delimiterMask)
-			// d.codeToSymbolTable[leftShitedCode+i].delimiterMask = delimiterMask
-			// d.codeToSymbolTable[leftShitedCode+i].symbolAndMask = symbLen.symbol & symbolMask
 		}
 		if symbLen.symbol == d.c.delimiterForCompressDecompress {
 			d.maxMinusDelimiterCodeLength = uint8(d.c.maxCodeLength) - uint8(symbLen.freq)
@@ -98,13 +91,13 @@ func (d *CanHuffmanDecompressU16) Decompress() {
 
 	outCounter := 0
 	for outCounter < (len(d.Out) - 4) {
-		d.Out[outCounter] = d.DecodeNext()
+		d.Out[outCounter] = d.DecodeNextFast()
 		outCounter++
-		d.Out[outCounter] = d.DecodeNext()
+		d.Out[outCounter] = d.DecodeNextFast()
 		outCounter++
-		d.Out[outCounter] = d.DecodeNext()
+		d.Out[outCounter] = d.DecodeNextFast()
 		outCounter++
-		d.Out[outCounter] = d.DecodeNext()
+		d.Out[outCounter] = d.DecodeNextFast()
 		outCounter++
 	}
 
@@ -115,7 +108,19 @@ func (d *CanHuffmanDecompressU16) Decompress() {
 
 }
 
+func (d *CanHuffmanDecompressU16) DecodeNextFast() uint16 {
+	outputSymbol := d.JustDecodeNext()
+	d.GetNextMaxCodeLenPlusPixelDepthBitsFast()
+	return outputSymbol
+}
+
 func (d *CanHuffmanDecompressU16) DecodeNext() uint16 {
+	outputSymbol := d.JustDecodeNext()
+	d.GetNextMaxCodeLenPlusPixelDepthBits()
+	return outputSymbol
+}
+
+func (d *CanHuffmanDecompressU16) JustDecodeNext() uint16 {
 	maxCodeLengthValue := (d.maxCodeLengthBits >> uint32(d.c.pixelDepth)) & d.maxCodeLengthMask
 	codeToSymb := d.codeToSymbolTable[maxCodeLengthValue]
 	outputSymbol := codeToSymb.symbol
@@ -127,26 +132,8 @@ func (d *CanHuffmanDecompressU16) DecodeNext() uint16 {
 	}
 	d.bitsUsed += outputCodeLength
 
-	d.GetNextMaxCodeLenPlusPixelDepthBits()
-
 	return outputSymbol
 }
-
-// func (d *CanHuffmanDecompressU16) DecodeNext2() uint16 {
-// 	maxCodeLengthValue := (d.maxCodeLengthBits >> uint32(d.c.pixelDepth)) & d.maxCodeLengthMask
-// 	codeToSymb := d.codeToSymbolTable[maxCodeLengthValue]
-// 	//outputSymbol := codeToSymb.symbol
-// 	outputCodeLength := codeToSymb.codeLenWithDelimiterMask
-// 	symbolAfterDelimiter := d.GetSymbolAfterDelimiterWithMask(codeToSymb.delimiterMask)
-// 	//delimiterMask, symbolMask := d.GetDelimiterMaskForCurrentSymbol(symbLen.symbol)
-// 	outputSymbol := codeToSymb.symbolAndMask + symbolAfterDelimiter
-// 	//outputCodeLength += uint32(d.c.pixelDepth)&uint32(delimiterMask)
-// 	d.bitsUsed += outputCodeLength
-
-// 	d.GetNextMaxCodeLenPlusPixelDepthBits()
-
-// 	return outputSymbol
-// }
 
 func (d *CanHuffmanDecompressU16) GetDelimiterMaskForCurrentSymbol(currentSymbol uint16) (uint16, uint16) {
 	retMask := uint16(((int(currentSymbol) ^ int(d.c.delimiterForCompressDecompress)) - 1) >> 16)
