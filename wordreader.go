@@ -6,23 +6,23 @@
 
 package mic
 
-// byteReader provides a byte reader that reads
-// little endian values from a byte stream.
+// wordReader provides a word (16bit) reader that reads
+// little endian values from a uint16 stream.
 // The input stream is manually advanced.
 // The reader performs no bounds checks.
-type byteReaderU16 struct {
+type wordReader struct {
 	b   []uint16
 	off int
 }
 
 // init will initialize the reader and set the input.
-func (b *byteReaderU16) init(in []uint16) {
+func (b *wordReader) init(in []uint16) {
 	b.b = in
 	b.off = 0
 }
 
 // Uint32 returns a little endian uint32 starting at current offset.
-func (b byteReaderU16) Uint32() uint32 {
+func (b wordReader) Uint32() uint32 {
 	b2 := b.b[b.off:]
 	b2 = b2[:2]
 	v1 := uint32(b2[1])
@@ -30,7 +30,7 @@ func (b byteReaderU16) Uint32() uint32 {
 	return v0 | (v1 << 16)
 }
 
-// remain will return the number of bytes remaining.
-func (b byteReaderU16) remain() int {
+// remain will return the number of words remaining.
+func (b wordReader) remain() int {
 	return len(b.b) - b.off
 }

@@ -54,13 +54,12 @@ func (c *CanHuffmanCompressU16) Compress() {
 	c.OptimizeSymbolCount()
 	c.AddDelimiterToSymbolList()
 	c.GenerateCanHuffmanTable()
-	//fmt.Println("SymbolList", len(c.symbolsOfInterestList), "MaxCodeLen", c.maxCodeLength)
 	c.FindIndexOfDelimiter()
 	c.WriteTable()
 	c.GenerateAllSymbolTable()
 
 	if c.pixelDepth+c.maxCodeLength > 32 {
-		panic("PixelLength + MaxCodelength is creater than 32 bits")
+		panic("PixelLength + MaxCodelength is greater than 32 bits")
 	}
 
 	for i := 0; i < len(c.in); i++ {
@@ -168,6 +167,7 @@ func (c *CanHuffmanCompressU16) GenerateFrequencies() {
 }
 
 func (c *CanHuffmanCompressU16) OptimizeSymbolCount() {
+	// Old Approach:
 	// // Take only symbols which fall within 1/100 of the max freq symbol.
 	// maxFrequency := c.symbolsOfInterestList[0].freq
 
@@ -185,6 +185,7 @@ func (c *CanHuffmanCompressU16) OptimizeSymbolCount() {
 	// 	c.symbolsOfInterestList = c.symbolsOfInterestList[0:HUFFMAN_SYMBOLS] // remove elements more than HUFFMAN_SYMBOLS
 	// }
 
+	// New Approach: Identify the high frequency symbols which result in code length of less than equal to 14
 	length := len(c.symbolsOfInterestList)
 	for ; length > 0; length-- {
 		tempList := make([]SymbFreq, length)
@@ -198,6 +199,8 @@ func (c *CanHuffmanCompressU16) OptimizeSymbolCount() {
 	c.symbolsOfInterestList = c.symbolsOfInterestList[0:length]
 }
 
+// Add delimiter to the symbol list with a frequency count equal to all symbols which
+// did not make to the symbol list
 func (c *CanHuffmanCompressU16) AddDelimiterToSymbolList() {
 	// Add the delimiter correctly -- START
 	selectedSymbolCount := uint32(0)

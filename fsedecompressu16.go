@@ -1,6 +1,6 @@
 // Copyright 2021 Kuldeep Singh
 // This source code is licensed under a MIT-style
-// license that can be found in the LICENSE file. 
+// license that can be found in the LICENSE file.
 // Based on work Copyright 2018 Klaus Post, released user BSD License.
 // Based on work Copyright (c) 2013, Yann Collet, released under BSD License.
 
@@ -281,7 +281,7 @@ func (s *ScratchU16) decompress() error {
 			if off == 0 {
 				s.OutU16 = append(s.OutU16, tmp...)
 				if len(s.OutU16) >= s.DecompressLimit {
-					return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.Out), s.DecompressLimit)
+					return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.OutU16), s.DecompressLimit)
 				}
 			}
 		}
@@ -298,7 +298,7 @@ func (s *ScratchU16) decompress() error {
 				s.OutU16 = append(s.OutU16, tmp...)
 				// When off is 0, we have overflowed and should write.
 				if len(s.OutU16) >= s.DecompressLimit {
-					return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.Out), s.DecompressLimit)
+					return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.OutU16), s.DecompressLimit)
 				}
 			}
 		}
@@ -309,7 +309,7 @@ func (s *ScratchU16) decompress() error {
 	for {
 		if s1.finished() {
 			if s1.state != 0 {
-				// Adding the final symbol. Ideally this should not be added as the state should be zero.
+				// Adding the final symbol if the state is not zero.
 				s.OutU16 = append(s.OutU16, s1.final())
 			}
 			break
@@ -317,7 +317,7 @@ func (s *ScratchU16) decompress() error {
 		br.fill()
 		s.OutU16 = append(s.OutU16, s1.next())
 		if len(s.OutU16) >= s.DecompressLimit {
-			return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.Out), s.DecompressLimit)
+			return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.OutU16), s.DecompressLimit)
 		}
 	}
 	return br.close()
