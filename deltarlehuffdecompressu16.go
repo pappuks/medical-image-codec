@@ -23,33 +23,55 @@ func (d *DeltaRleHuffDecompressU16) Decompress(in []byte, width int, height int)
 	d.deltaThreshold = (uint16)((1 << (pixelDepth - 1)) - 1)   // For 16 bits this will be 0x7FFF. We have to ensure that 2 * deltaThreshold is less than delimiter
 	d.delimiterForOverflow = (uint16)((1 << (pixelDepth)) - 1) // For 16 bits this will be 0xFFFF
 
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			index := (y * width) + x
-			inputVal := d.decomp.DecodeNext()
-			if inputVal == d.delimiterForOverflow {
-				d.Out[index] = d.decomp.DecodeNext()
-			} else {
-				diff := int32(inputVal) - int32(d.deltaThreshold) // DeltaThreshhold is already ushort
+	// decode for y = 0
+	for x := 0; x < width; x++ {
+		d.DecodeNextSymbol(x, 0, width, height)
+	}
 
-				divVal := 0
-				prevSymbol := int32(0)
-
-				if x > 0 {
-					prevSymbol = int32(d.Out[index-1])
-					divVal++
-				}
-				if y > 0 {
-					prevSymbol += int32(d.Out[index-width])
-					divVal++
-				}
-
-				if divVal == 2 {
-					prevSymbol = prevSymbol >> 1
-				}
-
-				d.Out[index] = uint16(prevSymbol + diff)
-			}
+	for y := 1; y < height; y++ {
+		d.DecodeNextSymbol(0, y, width, height)
+		for x := 1; x < width; x++ {
+			d.DecodeNextSymbolNC(x, y, width, height)
 		}
+	}
+}
+
+func (d *DeltaRleHuffDecompressU16) DecodeNextSymbolNC(x int, y int, width int, height int) {
+	index := (y * width) + x
+	inputVal := d.decomp.DecodeNext()
+	if inputVal == d.delimiterForOverflow {
+		d.Out[index] = d.decomp.DecodeNext()
+	} else {
+		diff := int32(inputVal) - int32(d.deltaThreshold) // DeltaThreshhold is already ushort
+		prevSymbol := (int32(d.Out[index-1]) + int32(d.Out[index-width])) >> 1
+		d.Out[index] = uint16(prevSymbol + diff)
+	}
+}
+
+func (d *DeltaRleHuffDecompressU16) DecodeNextSymbol(x int, y int, width int, height int) {
+	index := (y * width) + x
+	inputVal := d.decomp.DecodeNext()
+	if inputVal == d.delimiterForOverflow {
+		d.Out[index] = d.decomp.DecodeNext()
+	} else {
+		diff := int32(inputVal) - int32(d.deltaThreshold) // DeltaThreshhold is already ushort
+
+		divVal := 0
+		prevSymbol := int32(0)
+
+		if x > 0 {
+			prevSymbol = int32(d.Out[index-1])
+			divVal++
+		}
+		if y > 0 {
+			prevSymbol += int32(d.Out[index-width])
+			divVal++
+		}
+
+		if divVal == 2 {
+			prevSymbol = prevSymbol >> 1
+		}
+
+		d.Out[index] = uint16(prevSymbol + diff)
 	}
 }
