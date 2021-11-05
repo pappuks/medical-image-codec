@@ -24,10 +24,10 @@ type testData struct {
 }
 
 var testFiles = []testData{
-	{name: "MR", fileName: "testdata/MR.2564.1", isBinary: false},
-	{name: "CT", fileName: "testdata/CT.3985.1", isBinary: false},
-	{name: "CR", fileName: "testdata/CR.4509.1", isBinary: false},
-	{name: "XR", fileName: "testdata/xr_hands.dcm", isBinary: false},
+	{name: "MR", fileName: "testdata/MR_256_256_image.bin", isBinary: true, rows: 256, cols: 256},
+	{name: "CT", fileName: "testdata/CT_512_512_image.bin", isBinary: true, rows: 512, cols: 512},
+	{name: "CR", fileName: "testdata/CR_1760_2140_image.bin", isBinary: true, rows: 2140, cols: 1760},
+	{name: "XR", fileName: "testdata/XR_2577_2048_image.bin", isBinary: true, rows: 2048, cols: 2577},
 	{name: "MG1", fileName: "testdata/MG_image_bin2.bin", isBinary: true, rows: 2457, cols: 1996},
 	{name: "MG2", fileName: "testdata/MG_Image_2_frame.bin", isBinary: true, rows: 2457, cols: 1996},
 }
@@ -80,6 +80,11 @@ func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
 	for _, tf := range testFiles {
 		b.Run(tf.name, func(b *testing.B) {
 			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			// if !tf.isBinary {
+			// 	f, _ := os.Create(tf.name + "_" + fmt.Sprint(cols) + "_" + fmt.Sprint(rows) + "_image.bin")
+			// 	f.Write(byteData)
+			// 	_ = f.Close()
+			// }
 			var drc DeltaRleCompressU16
 			deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
 			var c CanHuffmanCompressU16
@@ -142,7 +147,52 @@ func BenchmarkDeltaRLEFSECompress(b *testing.B) {
 	}
 }
 
-func TestCompressDCMFile(t *testing.T) {
+func TestDeltaRleHuffCompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+			DeltaRLEHuffTest(t, shortData, cols, rows, maxShort)
+		})
+	}
+}
+
+func TestDeltaRleHuffCompress2(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+			DeltaRLEHuffTest2(t, shortData, cols, rows, maxShort)
+		})
+	}
+}
+
+func TestDeltaRleFSECompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+			DeltaRleFSETest(t, shortData, cols, rows, maxShort)
+		})
+	}
+}
+
+func TestDeltaFSECompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+			DeltaFSECompress(t, shortData, cols, rows, maxShort)
+		})
+	}
+}
+
+func TestFSECompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, _, _, _ := SetupTests(tf)
+			FSE16bitCompress(t, shortData)
+		})
+	}
+}
+
+func IgnoreTestCompressDCMFile(t *testing.T) {
 	dataset, _ := dicom.ParseFile("testdata/CT.3985.1", nil)
 	pixelDataElement, _ := dataset.FindElementByTag(tag.PixelData)
 	pixelDataInfo := dicom.MustGetPixelDataInfo(pixelDataElement.Value)
@@ -173,7 +223,7 @@ func TestCompressDCMFile(t *testing.T) {
 
 }
 
-func TestCompressDCMImages(t *testing.T) {
+func IgnoreTestCompressDCMImages(t *testing.T) {
 	fileName := "../1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.400.0.dcm"
 	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
 		t.Skip("Skipping test as file does not exist")
