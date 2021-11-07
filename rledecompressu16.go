@@ -76,5 +76,16 @@ func (r *RleDecompressU16) DecodeNext2() uint16 {
 	}
 
 	return output
+}
 
+func (r *RleDecompressU16) Decompress() []uint16 {
+	outlen := uint32(r.in[r.i]) << 16
+	outlen += uint32(r.in[r.i+1])
+	r.i += 2
+	out := make([]uint16, outlen)
+
+	for i := uint32(0); i < outlen; i++ {
+		out[i] = r.DecodeNext2()
+	}
+	return out
 }

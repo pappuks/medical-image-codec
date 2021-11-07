@@ -165,6 +165,15 @@ func TestDeltaRleHuffCompress2(t *testing.T) {
 	}
 }
 
+func TestDeltaZZRleHuffCompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+			DeltaZZRLEHuffTest(t, shortData, cols, rows, maxShort)
+		})
+	}
+}
+
 func TestDeltaRleFSECompress(t *testing.T) {
 	for _, tf := range testFiles {
 		t.Run(tf.name, func(t *testing.T) {
@@ -639,5 +648,62 @@ func DeltaRLEHuffTest2(t *testing.T, shortData []uint16, cols int, rows int, max
 		fmt.Printf("PASSED Delta RLE HUFF 2 16-bit compression-decompression\n")
 	} else {
 		t.Errorf("Delta RLE HUFF 2 16-bit compression-decompression FAILED")
+	}
+}
+
+func DeltaZZRLEHuffTest(t *testing.T, shortData []uint16, cols int, rows int, maxShort uint16) {
+	start := time.Now()
+	var dzz DeltaZZU16
+	dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
+	var rleC RleCompressU16
+	rleC.Init(cols, rows, (dzz.upperThreshold<<1)+1)
+	deltaComp := rleC.Compress(dzzComp)
+	elapsedFile := time.Since(start)
+	fmt.Println("Delta ZZ RLE Huff - Delta ZZ Rle compress took ", elapsedFile)
+	var c CanHuffmanCompressU16
+	c.Init(deltaComp)
+	c.Compress()
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE Huff - Huff compress took ", elapsedFile)
+	fmt.Printf("Delta ZZ RLE Huff Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(c.Out), float64(len(shortData)*2)/float64(len(c.Out)))
+	var d CanHuffmanDecompressU16
+	start = time.Now()
+	d.Init(c.Out)
+	d.ReadTable()
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE Huff - Huff ReadTable decompress took ", elapsedFile)
+	d.Decompress()
+
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE Huff - Huff decompress took ", elapsedFile)
+
+	var rleD RleDecompressU16
+	rleD.Init(d.Out)
+	rleDecompressed := rleD.Decompress()
+
+	var dzzd DeltaZZU16
+	deltaOutput := dzzd.Decompress(rleDecompressed, cols, rows)
+
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE Huff - Delta Rle ZZ decompress took ", elapsedFile)
+	fmt.Println("symbols of interest", len(d.c.symbolsOfInterestList), "maxCodeLength", d.c.maxCodeLength)
+
+
+	passed := true
+	for i := 0; i < len(shortData); i++ {
+		if shortData[i] != deltaOutput[i] {
+			fmt.Printf("*** Different at location %d value in original %d in decomp %d\n", i, shortData[i], deltaOutput[i])
+			passed = false
+			break
+		}
+	}
+	if len(deltaOutput) != len(shortData) {
+		fmt.Printf("Failed to decompress. Original length %d Decomp length %d\n", len(shortData), len(deltaOutput))
+		passed = false
+	}
+	if passed {
+		fmt.Printf("PASSED Delta ZZ RLE HUFF 16-bit compression-decompression\n")
+	} else {
+		t.Errorf("Delta ZZ RLE HUFF 16-bit compression-decompression FAILED")
 	}
 }
