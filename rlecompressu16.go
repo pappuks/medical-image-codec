@@ -81,3 +81,13 @@ func (r *RleCompressU16) Flush() {
 		}
 	}
 }
+
+func (r *RleCompressU16) Compress(input []uint16) []uint16 {
+	r.Out = append(r.Out, uint16(len(input)>>16))
+	r.Out = append(r.Out, uint16(len(input)))
+	for _, v := range input {
+		r.Encode(v)
+	}
+	r.Flush()
+	return r.Out
+}
