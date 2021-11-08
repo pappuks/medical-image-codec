@@ -147,6 +147,65 @@ func BenchmarkDeltaRLEFSECompress(b *testing.B) {
 	}
 }
 
+func BenchmarkDeltaZZRLEHuffCompress(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var dzz DeltaZZU16
+			dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
+			var rleC RleCompressU16
+			rleC.Init(cols, rows, (dzz.upperThreshold<<1)+1)
+			deltaComp := rleC.Compress(dzzComp)
+			var c CanHuffmanCompressU16
+			c.Init(deltaComp)
+			c.Compress()
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(c.Out)), "ratio")
+			for i := 0; i < b.N; i++ {
+				var d CanHuffmanDecompressU16
+				d.Init(c.Out)
+				d.ReadTable()
+				d.Decompress()
+				var rleD RleDecompressU16
+				rleD.Init(d.Out)
+				rleDecompressed := rleD.Decompress()
+
+				var dzzd DeltaZZU16
+				dzzd.Decompress(rleDecompressed, cols, rows)
+			}
+		})
+	}
+}
+
+func BenchmarkDeltaZZRLEFSECompress(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var dzz DeltaZZU16
+			dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
+			var rleC RleCompressU16
+			rleC.Init(cols, rows, (dzz.upperThreshold<<1)+1)
+			deltaComp := rleC.Compress(dzzComp)
+			var s3 ScratchU16
+			deltaFSEComp, _ := FSECompressU16(deltaComp, &s3)
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(deltaFSEComp)), "ratio")
+			for i := 0; i < b.N; i++ {
+				var s4 ScratchU16
+				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
+				var rleD RleDecompressU16
+				rleD.Init(deltaDecompFSE)
+				rleDecompressed := rleD.Decompress()
+
+				var dzzd DeltaZZU16
+				dzzd.Decompress(rleDecompressed, cols, rows)
+			}
+		})
+	}
+}
+
 func TestDeltaRleHuffCompress(t *testing.T) {
 	for _, tf := range testFiles {
 		t.Run(tf.name, func(t *testing.T) {
@@ -174,6 +233,15 @@ func TestDeltaZZRleHuffCompress(t *testing.T) {
 	}
 }
 
+func TestDeltaZZRleFSECompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+			DeltaZZRLEFSETest(t, shortData, cols, rows, maxShort)
+		})
+	}
+}
+
 func TestDeltaRleFSECompress(t *testing.T) {
 	for _, tf := range testFiles {
 		t.Run(tf.name, func(t *testing.T) {
@@ -192,11 +260,29 @@ func TestDeltaFSECompress(t *testing.T) {
 	}
 }
 
+func TestDeltaHuffCompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+			DeltaHuffCompress(t, shortData, cols, rows, maxShort)
+		})
+	}
+}
+
 func TestFSECompress(t *testing.T) {
 	for _, tf := range testFiles {
 		t.Run(tf.name, func(t *testing.T) {
 			_, shortData, _, _, _ := SetupTests(tf)
 			FSE16bitCompress(t, shortData)
+		})
+	}
+}
+
+func TestHuffCompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, _, _, _ := SetupTests(tf)
+			HuffTest(t, shortData)
 		})
 	}
 }
@@ -659,7 +745,7 @@ func DeltaZZRLEHuffTest(t *testing.T, shortData []uint16, cols int, rows int, ma
 	rleC.Init(cols, rows, (dzz.upperThreshold<<1)+1)
 	deltaComp := rleC.Compress(dzzComp)
 	elapsedFile := time.Since(start)
-	fmt.Println("Delta ZZ RLE Huff - Delta ZZ Rle compress took ", elapsedFile)
+	fmt.Println("Delta ZZ RLE Huff - Delta ZZ Rle compress took ", elapsedFile, "Rle Size", len(deltaComp), "Delta Size", len(dzzComp))
 	var c CanHuffmanCompressU16
 	c.Init(deltaComp)
 	c.Compress()
@@ -681,6 +767,9 @@ func DeltaZZRLEHuffTest(t *testing.T, shortData []uint16, cols int, rows int, ma
 	rleD.Init(d.Out)
 	rleDecompressed := rleD.Decompress()
 
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE Huff - Rle decompress took ", elapsedFile, "Huff size", len(d.Out), "Rle Size", len(rleDecompressed))
+
 	var dzzd DeltaZZU16
 	deltaOutput := dzzd.Decompress(rleDecompressed, cols, rows)
 
@@ -688,8 +777,11 @@ func DeltaZZRLEHuffTest(t *testing.T, shortData []uint16, cols int, rows int, ma
 	fmt.Println("Delta ZZ RLE Huff - Delta Rle ZZ decompress took ", elapsedFile)
 	fmt.Println("symbols of interest", len(d.c.symbolsOfInterestList), "maxCodeLength", d.c.maxCodeLength)
 
-
 	passed := true
+	if len(deltaOutput) != len(shortData) {
+		fmt.Printf("Failed to decompress. Original length %d Decomp length %d\n", len(shortData), len(deltaOutput))
+		passed = false
+	}
 	for i := 0; i < len(shortData); i++ {
 		if shortData[i] != deltaOutput[i] {
 			fmt.Printf("*** Different at location %d value in original %d in decomp %d\n", i, shortData[i], deltaOutput[i])
@@ -697,13 +789,159 @@ func DeltaZZRLEHuffTest(t *testing.T, shortData []uint16, cols int, rows int, ma
 			break
 		}
 	}
-	if len(deltaOutput) != len(shortData) {
-		fmt.Printf("Failed to decompress. Original length %d Decomp length %d\n", len(shortData), len(deltaOutput))
-		passed = false
-	}
+
 	if passed {
 		fmt.Printf("PASSED Delta ZZ RLE HUFF 16-bit compression-decompression\n")
 	} else {
 		t.Errorf("Delta ZZ RLE HUFF 16-bit compression-decompression FAILED")
+	}
+}
+
+func DeltaZZRLEFSETest(t *testing.T, shortData []uint16, cols int, rows int, maxShort uint16) {
+	start := time.Now()
+	var dzz DeltaZZU16
+	dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
+	var rleC RleCompressU16
+	rleC.Init(cols, rows, (dzz.upperThreshold<<1)+1)
+	deltaComp := rleC.Compress(dzzComp)
+	elapsedFile := time.Since(start)
+	fmt.Println("Delta ZZ RLE FSE - Delta ZZ Rle compress took ", elapsedFile, "Rle Size", len(deltaComp), "Delta Size", len(dzzComp))
+	var s3 ScratchU16
+	deltaFSEComp, errDelta := FSECompressU16(deltaComp, &s3)
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta RLE FSE - FSE compress took ", elapsedFile)
+	if errDelta != nil {
+		fmt.Printf("got error %v (%T)\n", errDelta, errDelta)
+	}
+	fmt.Printf("Delta RLE FSE Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(deltaFSEComp), float64(len(shortData)*2)/float64(len(deltaFSEComp)))
+	var s4 ScratchU16
+	start = time.Now()
+	deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
+
+	if len(deltaDecompFSE) != len(deltaComp) {
+		t.Errorf("Error in FSE decompression, Orig Len %d Decomp Len %d\n", len(deltaComp), len(deltaDecompFSE))
+	}
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE FSE - FSE decompress took ", elapsedFile)
+
+	var rleD RleDecompressU16
+	rleD.Init(deltaDecompFSE)
+	rleDecompressed := rleD.Decompress()
+
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE FSE - Rle decompress took ", elapsedFile, "Rle Size", len(rleDecompressed))
+
+	var dzzd DeltaZZU16
+	deltaOutput := dzzd.Decompress(rleDecompressed, cols, rows)
+
+	elapsedFile = time.Since(start)
+	fmt.Println("Delta ZZ RLE FSE - Delta Rle ZZ decompress took ", elapsedFile)
+
+	passed := true
+	if len(deltaOutput) != len(shortData) {
+		fmt.Printf("Failed to decompress. Original length %d Decomp length %d\n", len(shortData), len(deltaOutput))
+		passed = false
+	}
+	for i := 0; i < len(shortData); i++ {
+		if shortData[i] != deltaOutput[i] {
+			fmt.Printf("*** Different at location %d value in original %d in decomp %d\n", i, shortData[i], deltaOutput[i])
+			passed = false
+			break
+		}
+	}
+
+	if passed {
+		fmt.Printf("PASSED Delta ZZ RLE FSE 16-bit compression-decompression\n")
+	} else {
+		t.Errorf("Delta ZZ RLE FSE 16-bit compression-decompression FAILED")
+	}
+}
+
+func HuffTest(t *testing.T, shortData []uint16) {
+	start := time.Now()
+	var c CanHuffmanCompressU16
+	c.Init(shortData)
+	c.Compress()
+	elapsedFile := time.Since(start)
+	fmt.Println("Huff - Huff compress took ", elapsedFile)
+	fmt.Printf("Huff Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(c.Out), float64(len(shortData)*2)/float64(len(c.Out)))
+	var d CanHuffmanDecompressU16
+	start = time.Now()
+	d.Init(c.Out)
+	d.ReadTable()
+	elapsedFile = time.Since(start)
+	fmt.Println("Huff - Huff ReadTable decompress took ", elapsedFile)
+	d.Decompress()
+
+	elapsedFile = time.Since(start)
+	fmt.Println("Huff - Huff decompress took ", elapsedFile)
+	deltaOutput := d.Out
+
+	elapsedFile = time.Since(start)
+	fmt.Println("Huff - Delta Rle ZZ decompress took ", elapsedFile)
+	fmt.Println("symbols of interest", len(d.c.symbolsOfInterestList), "maxCodeLength", d.c.maxCodeLength)
+
+	passed := true
+	if len(deltaOutput) != len(shortData) {
+		fmt.Printf("Failed to decompress. Original length %d Decomp length %d\n", len(shortData), len(deltaOutput))
+		passed = false
+	}
+	for i := 0; i < len(shortData); i++ {
+		if shortData[i] != deltaOutput[i] {
+			fmt.Printf("*** Different at location %d value in original %d in decomp %d\n", i, shortData[i], deltaOutput[i])
+			passed = false
+			break
+		}
+	}
+
+	if passed {
+		fmt.Printf("PASSED HUFF 16-bit compression-decompression\n")
+	} else {
+		t.Errorf("HUFF 16-bit compression-decompression FAILED")
+	}
+}
+
+func DeltaHuffCompress(t *testing.T, shortData []uint16, cols int, rows int, maxShort uint16) {
+	startTime := time.Now()
+	deltaComp, _ := DeltaCompressU16(shortData, cols, rows, maxShort)
+	elapsedTime := time.Since(startTime)
+	fmt.Println("Delta compress", elapsedTime, "Delta size", len(deltaComp))
+
+	var c CanHuffmanCompressU16
+	c.Init(deltaComp)
+	c.Compress()
+
+	fmt.Printf("Delta Huff Compress: %d short %d -> %d bytes (%.2f:1)\n", len(shortData), len(shortData)*2, len(c.Out), float64(len(shortData)*2)/float64(len(c.Out)))
+
+	var d CanHuffmanDecompressU16
+	startTime = time.Now()
+	d.Init(c.Out)
+	d.ReadTable()
+	elapsedTime = time.Since(startTime)
+	fmt.Println("Huff - Huff ReadTable decompress took ", elapsedTime)
+	d.Decompress()
+
+	deltaOutput := DeltaDecompressU16(d.Out, cols, rows)
+
+	elapsedTime = time.Since(startTime)
+	fmt.Println("Delta Decompress", elapsedTime)
+
+	var passed = true
+
+	for i := 0; i < len(shortData); i++ {
+		if shortData[i] != deltaOutput[i] {
+			fmt.Printf("***** Delta FSE Different at location %d value in original %d in decomp %d\n", i, shortData[i], deltaOutput[i])
+			passed = false
+			break
+		}
+	}
+	if len(deltaOutput) != len(shortData) {
+		fmt.Printf(" Delta FSE Failed to decompress. Original length %d Decomp length %d\n", len(shortData), len(deltaOutput))
+		passed = false
+	}
+	if passed {
+		fmt.Printf("Delta FSE PASSED 16-bit compression-decompression\n")
+	} else {
+		t.Errorf("Delta FSE 16-bit compression-decompression FAILED")
 	}
 }

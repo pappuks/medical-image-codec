@@ -9,14 +9,16 @@ import (
 )
 
 type DeltaZZU16 struct {
-	pixelDepth     uint8
-	upperThreshold uint16
-	Out            []uint16
+	pixelDepth           uint8
+	upperThreshold       uint16
+	delimiterForOverflow uint16
+	Out                  []uint16
 }
 
 func (c *DeltaZZU16) Compress(in []uint16, width int, height int, maxValue uint16) ([]uint16, error) {
 	c.pixelDepth = uint8(bits.Len16(maxValue))
 	c.upperThreshold = (uint16)((1 << (c.pixelDepth - 1)) - 1)
+	c.delimiterForOverflow = (uint16)((1 << (c.pixelDepth)) - 1)
 	c.Out = make([]uint16, width*height*2)
 	c.Out[0] = maxValue
 
@@ -25,20 +27,9 @@ func (c *DeltaZZU16) Compress(in []uint16, width int, height int, maxValue uint1
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			index := (y * width) + x
-
-			divVal := 0
 			prevSymbol := int32(0)
 			if x > 0 {
 				prevSymbol = int32(in[index-1])
-				divVal += 1
-			}
-			if y > 0 {
-				prevSymbol += int32(in[index-width])
-				divVal += 1
-			}
-
-			if divVal == 2 {
-				prevSymbol = prevSymbol >> 1
 			}
 
 			inputVal := in[index]
@@ -46,7 +37,7 @@ func (c *DeltaZZU16) Compress(in []uint16, width int, height int, maxValue uint1
 			diff := int32(int32(inputVal) - prevSymbol)
 
 			if uint16(abs(diff)) >= c.upperThreshold { // We have to ensure that diff + deltaThreshold is not equal to delimiter.
-				c.Out[o] = c.upperThreshold
+				c.Out[o] = c.delimiterForOverflow
 				c.Out[o+1] = inputVal
 				o += 2
 			} else {
@@ -65,6 +56,7 @@ func (d *DeltaZZU16) Decompress(in []uint16, width int, height int) []uint16 {
 	d.Out = make([]uint16, width*height)
 	d.pixelDepth = uint8(bits.Len16(maxValue))
 	d.upperThreshold = (uint16)((1 << (d.pixelDepth - 1)) - 1)
+	d.delimiterForOverflow = (uint16)((1 << (d.pixelDepth)) - 1)
 	inputCounter := int32(1)
 
 	for y := 0; y < height; y++ {
@@ -72,26 +64,15 @@ func (d *DeltaZZU16) Decompress(in []uint16, width int, height int) []uint16 {
 			index := (y * width) + x
 			inputVal := in[inputCounter]
 			inputCounter++
-			if inputVal == d.upperThreshold {
+			if inputVal == d.delimiterForOverflow {
 				d.Out[index] = in[inputCounter]
 				inputCounter++
 			} else {
 				diff := int32(UnZigZag(inputVal))
-
-				divVal := 0
 				prevSymbol := int32(0)
 
 				if x > 0 {
 					prevSymbol = int32(d.Out[index-1])
-					divVal++
-				}
-				if y > 0 {
-					prevSymbol += int32(d.Out[index-width])
-					divVal++
-				}
-
-				if divVal == 2 {
-					prevSymbol = prevSymbol >> 1
 				}
 
 				d.Out[index] = uint16(prevSymbol + diff)
