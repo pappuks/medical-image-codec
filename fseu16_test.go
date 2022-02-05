@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -182,29 +183,106 @@ func BenchmarkDeltaZZRLEHuffCompress(b *testing.B) {
 	}
 }
 
+func BenchmarkRLEHuffCompress(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var dzz RleCompressU16
+			dzz.Init(cols, rows, maxShort)
+			dzzComp := dzz.Compress(shortData)
+			var c CanHuffmanCompressU16
+			c.Init(dzzComp)
+			c.Compress()
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(c.Out)), "ratio")
+			for i := 0; i < b.N; i++ {
+				var d CanHuffmanDecompressU16
+				d.Init(c.Out)
+				d.ReadTable()
+				d.Decompress()
+				var dzzd RleDecompressU16
+				dzzd.Init(d.Out)
+				dzzd.Decompress()
+			}
+		})
+	}
+}
+
+func BenchmarkDelta(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			dzzComp, _ := DeltaCompressU16(shortData, cols, rows, maxShort)
+			//PrintHistogram(dzzComp)
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(dzzComp)*2), "ratio")
+			for i := 0; i < b.N; i++ {
+				DeltaDecompressU16(dzzComp, cols, rows)
+			}
+		})
+	}
+}
+
+func BenchmarkRLECompress(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var dzz RleCompressU16
+			dzz.Init(cols, rows, maxShort)
+			dzzComp := dzz.Compress(shortData)
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(dzzComp)*2), "ratio")
+			for i := 0; i < b.N; i++ {
+				var dzzd RleDecompressU16
+				dzzd.Init(dzzComp)
+				dzzd.Decompress()
+			}
+		})
+	}
+}
+
 func BenchmarkDeltaZZRLEFSECompress(b *testing.B) {
 	for _, tf := range testFiles {
 		b.Run(tf.name, func(b *testing.B) {
 			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
-			var dzz DeltaZZU16
+			var dzz DeltaRleZZU16
 			dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
-			var rleC RleCompressU16
-			rleC.Init(cols, rows, (dzz.upperThreshold<<1)+1)
-			deltaComp := rleC.Compress(dzzComp)
 			var s3 ScratchU16
-			deltaFSEComp, _ := FSECompressU16(deltaComp, &s3)
+			deltaFSEComp, _ := FSECompressU16(dzzComp, &s3)
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(deltaFSEComp)), "ratio")
 			for i := 0; i < b.N; i++ {
 				var s4 ScratchU16
 				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
-				var rleD RleDecompressU16
-				rleD.Init(deltaDecompFSE)
-				rleDecompressed := rleD.Decompress()
+				var dzzd DeltaRleZZU16
+				dzzd.Decompress(deltaDecompFSE, cols, rows)
+			}
+		})
+	}
+}
 
-				var dzzd DeltaZZU16
-				dzzd.Decompress(rleDecompressed, cols, rows)
+func BenchmarkRLEFSECompress(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			var dzz RleCompressU16
+			dzz.Init(cols, rows, maxShort)
+			dzzComp := dzz.Compress(shortData)
+			var s3 ScratchU16
+			deltaFSEComp, _ := FSECompressU16(dzzComp, &s3)
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			b.ReportMetric(float64(len(byteData))/float64(len(deltaFSEComp)), "ratio")
+			for i := 0; i < b.N; i++ {
+				var s4 ScratchU16
+				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
+				var dzzd RleDecompressU16
+				dzzd.Init(deltaDecompFSE)
+				dzzd.Decompress()
 			}
 		})
 	}
@@ -216,6 +294,7 @@ func BenchmarkDeltaZZFSECompress(b *testing.B) {
 			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
 			var dzz DeltaZZU16
 			dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
+			//PrintHistogram(dzzComp)
 			var s3 ScratchU16
 			deltaFSEComp, _ := FSECompressU16(dzzComp, &s3)
 			b.SetBytes(int64(len(byteData)))
@@ -1207,4 +1286,38 @@ func TestKlausCompressExtra(t *testing.T) {
 	t.Logf("klaus: %d/%d (%.2f:1)", klaus, before, float64(before)/float64(klaus))
 	t.Logf("rle: %d/%d (%.2f:1)", rle2, before, float64(before)/float64(rle2))
 	t.Logf("rle+gap: %d/%d (%.2f:1)", rle3, before, float64(before)/float64(rle3))
+}
+
+func PrintHistogram(in []uint16) {
+	regions := uint32(1 << 16)
+	distributionArray := make([]uint32, regions)
+
+	maxValue := uint16(0)
+	for _, v := range in {
+		distributionArray[v]++
+		if v > maxValue {
+			maxValue = v
+		}
+	}
+
+	symbolsOfInterestList := make([]SymbFreq, 0)
+
+	for i := uint32(0); i < regions; i++ {
+		if distributionArray[i] > 0 {
+			symbolsOfInterestList = append(symbolsOfInterestList, SymbFreq{uint16(i), distributionArray[i]})
+		}
+	}
+
+	sort.Slice(symbolsOfInterestList, func(i, j int) bool {
+		return symbolsOfInterestList[i].freq > symbolsOfInterestList[j].freq
+	}) // Sort in descending order
+
+	fmt.Println("Total symbols", len(symbolsOfInterestList))
+	for i := 0; i < len(symbolsOfInterestList); i++ {
+		if i == 50 {
+			break
+		}
+		fmt.Printf("{%d %d}\t", symbolsOfInterestList[i].symbol, symbolsOfInterestList[i].freq)
+	}
+	fmt.Println()
 }
