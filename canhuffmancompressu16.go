@@ -197,6 +197,11 @@ func (c *CanHuffmanCompressU16) OptimizeSymbolCount() {
 	}
 
 	c.symbolsOfInterestList = c.symbolsOfInterestList[0:length]
+
+	// // Take only the first 500 symbols
+	// if len(c.symbolsOfInterestList) > HUFFMAN_SYMBOLS {
+	// 	c.symbolsOfInterestList = c.symbolsOfInterestList[0:HUFFMAN_SYMBOLS] // remove elements more than HUFFMAN_SYMBOLS
+	// }
 }
 
 // Add delimiter to the symbol list with a frequency count equal to all symbols which
