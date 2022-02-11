@@ -5,25 +5,106 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"sync"
 
 	"github.com/klauspost/compress/fse"
 )
 
+const printSizes = false
+
 func CompressKlaus(in []uint16, width int, height int) []byte {
-	return compressKlaus(in, width, height, width)
+	// Process in blocks of max maxSize X maxSize
+	const maxSize = 192
+
+	// Add global gap removal.
+	const globalGapRemoval = true
+
+	const singleThreaded = printSizes
+
+	const tryWithAndWithoutGapRemoval = true
+
+	results := make([][]byte, ((width+maxSize-1)/maxSize)*((height+maxSize-1)/maxSize))
+	idx := 0
+	var wg sync.WaitGroup
+	var gap []byte
+	if globalGapRemoval {
+		// Try global gap removal.
+		// Disabled for now.
+		gap = RemoveGaps(in, width, height, width)
+	}
+	for y := 0; y < height; y += maxSize {
+		endY := y + maxSize
+		if endY > height {
+			endY = height
+		}
+		// Forward input to out line...
+		in := in[y*width:]
+		for x := 0; x < width; x += maxSize {
+			endX := x + maxSize
+			if endX > width {
+				endX = width
+			}
+			if singleThreaded {
+				fmt.Printf("x:%d, y:%d, w:%d, h:%d\n", x, y, endX-x, endY-y)
+				results[idx] = compressKlaus(in[x:], endX-x, endY-y, width, !tryWithAndWithoutGapRemoval)
+				if tryWithAndWithoutGapRemoval {
+					withGap := compressKlaus(in[x:], endX-x, endY-y, width, true)
+					if len(withGap) < len(results[idx]) {
+						fmt.Printf("Gap removed smaller, %d < %d\n", len(withGap), len(results[idx]))
+						results[idx] = withGap
+					} else {
+						fmt.Printf("Keeping gapped version, %d >= %d\n", len(withGap), len(results[idx]))
+					}
+				}
+			} else {
+				wg.Add(1)
+				go func(in []uint16, i, width, height, stride int) {
+					results[i] = compressKlaus(in, width, height, stride, !tryWithAndWithoutGapRemoval)
+					if tryWithAndWithoutGapRemoval {
+						withGap := compressKlaus(in, width, height, stride, true)
+						if len(withGap) < len(results[i]) {
+							results[i] = withGap
+						}
+					}
+					wg.Done()
+				}(in[x:], idx, endX-x, endY-y, width)
+			}
+			idx++
+		}
+	}
+	var combined = make([]byte, 0, len(in))
+	if globalGapRemoval {
+		var tmp [binary.MaxVarintLen64]byte
+		n := binary.PutUvarint(tmp[:], uint64(len(gap)))
+		combined = append(combined, tmp[:n]...)
+		combined = append(combined, gap...)
+	} else {
+		combined = append(combined, 0)
+	}
+	wg.Wait()
+	// Combine in order...
+	for _, b := range results {
+		combined = append(combined, b...)
+	}
+	return combined
 }
 
-func compressKlaus(in []uint16, width, height, stride int) []byte {
+func compressKlaus(in []uint16, width, height, stride int, gap bool) []byte {
 	var codes []byte
+	var codesHistogram [256]int // Used for stats only.
 	var extra bitWriter
 	var bitMapCompressed []byte
+	var fseCompressed []byte
 	rleVal := uint16(0)
 	rleLen := uint16(0)
 	var freq [1 << 16]int
 	const minRLEvals = 3  // If we have this many RLE codes, always emit as RLE
 	const rleMaxBits = 32 // Maximum extra bits where we may emit literals. Must be <= 32
 	const rleLitCost = 0
-	const printDebug = true
+	const printDebug = printSizes
+	const maxFSEsize = 1 << 17 // Probably a reasonable upper limit...
+	const fseSizeLimit = maxFSEsize - 2
+
 	var maxValP1 = uint16(0)
 
 	zigZag := func(x int16) uint16 {
@@ -42,14 +123,17 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 	// Adds an FSE compressed bitmap with 0 for gaps with no values and 1 for filled.
 	// Once the image has been decompressed this must be applied in reverse to recreate the gaps.
 	// First "extra" bit will indicate if a bitmap is present or not.
-	if true {
+	if gap && width*height > 256 {
 		var bitmap [65536]byte
 		max := uint16(0)
-		for off := range in {
-			v := in[off]
-			bitmap[v] = 1
-			if v > max {
-				max = v
+		for y := 0; y < height; y++ {
+			in := in[y*stride : y*stride+width]
+			for off := range in {
+				v := in[off]
+				bitmap[v] = 1
+				if v > max {
+					max = v
+				}
 			}
 		}
 		gaps := 0
@@ -58,7 +142,7 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 			gaps += 1 - int(f)
 		}
 		if printDebug {
-			fmt.Println("max", max, "gaps", gaps, "=", max-uint16(gaps), "values")
+			fmt.Println("max", max, "gaps", gaps, "=", valLen-gaps, "values")
 		}
 		if (1+int(max))*2 <= math.MaxUint16 {
 			// Just to avoid overflow.
@@ -68,7 +152,7 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 		// If one in every 4 or more pixels are gaps.
 		// TODO: Could include bitmap size for metric, but best would be try one with gap removal
 		// and one without and compare sizes.
-		if gaps*4 > int(max) {
+		if max > 4 && gaps*8 > int(max) {
 			var inToOut [65536]uint16
 			out := uint16(0)
 			extra.addBits32NC(1, 1)
@@ -94,12 +178,26 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 				maxCnt = hist[1]
 			}
 			s.HistogramFinished(1, int(maxCnt))
-			bitMapCompressed, _ = fse.Compress(bitmap[:valLen], &s)
+			var err error
+			bitMapCompressed, err = fse.Compress(bitmap[:valLen], &s)
+			if err != nil {
+				// Should not be currently possible...
+				// Just abort gap removal if it should become possible in the future.
+				panic(err)
+			}
+			if maxValP1 == 1 {
+				// TODO: We know all values are now 0,
+				// we can store RLE codes for all pixels and be done.
+				// We could even shortcut this and not store any more.
+			}
 			if printDebug {
 				fmt.Println("Adding Bitmap, size:", len(bitMapCompressed), "of", (valLen+7)/8, "bytes")
 			}
-			for off := range in {
-				in[off] = inToOut[in[off]]
+			for y := 0; y < height; y++ {
+				in := in[y*stride : y*stride+width]
+				for off := range in {
+					in[off] = inToOut[in[off]]
+				}
 			}
 		} else {
 			extra.addBits32NC(0, 1)
@@ -150,7 +248,7 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 	predictUpLeft2 := func(index int) uint16 {
 		// Decide predictor based on upper left delta to neighbors
 		// If zigzag-encoded delta is <= pred2MinDelta we use both.
-		const pred2MinDelta = 48
+		const pred2MinDelta = 32
 
 		c := in[index]
 		left := in[index-1]
@@ -176,7 +274,7 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 	globalPred := uint8(predUpLeft)
 	if true {
 		// Check only every subSample pixels in each direction
-		const subSample = 4
+		const subSample = 2
 		predictBits := func(b uint16) int {
 			// We don't care for values 0->15, since cost is determined by FSE distribution.
 			_, dBits := deltaCode(b)
@@ -234,6 +332,48 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 		return int(b)
 	}
 
+	var s fse.Scratch
+	s.MaxSymbolValue = tableSize + predLast - 1
+	s.TableLog = 12
+	codesTotalLen := 0
+
+	addCodes := func(codes []byte) []byte {
+		// Only store if we have any codes.
+		if len(codes) > 0 {
+			codesTotalLen += len(codes)
+			var tmp [binary.MaxVarintLen64]byte
+			for _, v := range codes {
+				codesHistogram[v]++
+			}
+			// TODO: Allow reusing tables.
+			// We keep negative size reserved for tableless codes.
+			// For now we only compress with tables...
+			ccodes, err := fse.Compress(codes, &s)
+			if err != nil {
+				// Unable to compressed, store length 0 to indicate RLE or Uncompressed...
+				n := binary.PutVarint(tmp[:], 0)
+				fseCompressed = append(fseCompressed, tmp[:n]...)
+				if err == fse.ErrUseRLE {
+					// RLE: Store length as negative.
+					n := binary.PutVarint(tmp[:], int64(-len(codes)))
+					fseCompressed = append(fseCompressed, tmp[:n]...)
+					fseCompressed = append(fseCompressed, codes[0])
+				} else {
+					// Store as uncompressed. Length as positive.
+					n := binary.PutVarint(tmp[:], int64(len(codes)))
+					fseCompressed = append(fseCompressed, tmp[:n]...)
+					fseCompressed = append(fseCompressed, codes...)
+				}
+			} else {
+				// Store length as positive.
+				n := binary.PutVarint(tmp[:], int64(len(ccodes)))
+				fseCompressed = append(fseCompressed, tmp[:n]...)
+				fseCompressed = append(fseCompressed, ccodes...)
+			}
+		}
+		return codes[:0]
+	}
+
 	const dynamicPredictors = true
 	const dynamicBorder = 1
 	currMethod := uint8(predNone)
@@ -254,11 +394,11 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 			}
 
 			index := (y * stride) + x
-			const predictAhead = 64 // Must be power of 2
-			if dynamicPredictors && y >= dynamicBorder && x%predictAhead == dynamicBorder && width-x > predictAhead-dynamicBorder {
+			const predictAhead = 64
+			const checkEvery = 32
+			if dynamicPredictors && y >= dynamicBorder && x%checkEvery == dynamicBorder && width-x > predictAhead-dynamicBorder {
 				var left, up, ul2, ul, med, none int
 				// Estimate for next predictAhead pixels...
-				// We don't bother checking 'none'.
 				for i := 0; i < predictAhead; i++ {
 					none += bitsFromDelta(predictNone(index + i))
 					left += bitsFromDelta(predictLeft(index + i))
@@ -268,7 +408,7 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 					med += bitsFromDelta(predictMedian(index + i))
 				}
 				// Prefer current
-				const penalty = 14                  // Ratio to 16 we must save.
+				const penalty = 15                  // Ratio to 16 we must save.
 				const penaltyOff = predictAhead / 2 // We must save at least 0.5 bit per pixel
 				best := 0
 				switch currMethod {
@@ -322,6 +462,10 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 					codes = append(codes, predFseOffset+currMethod)
 				}
 			}
+			if len(codes) >= fseSizeLimit {
+				codes = addCodes(codes)
+			}
+
 			val := uint16(0)
 			switch currMethod {
 			case predNone:
@@ -418,35 +562,28 @@ func compressKlaus(in []uint16, width, height, stride int) []byte {
 			fmt.Printf("%d: %d (%.2f)\n", i, v, 100*float64(total)/float64(width*height))
 		}
 	}
-	// TODO: Reuse scratch..
-	var s fse.Scratch
-	s.MaxSymbolValue = tableSize + predLast - 1
-	// TODO : Maybe restrict tablelog for speed
-	s.TableLog = 12
-	ccodes, err := fse.Compress(codes, &s)
-	if err != nil {
-		// TODO: Handle rare "RLE"
-		panic(err)
-	}
+
+	codes = addCodes(codes)
 
 	if printDebug {
-		fmt.Println("codes:", s.Histogram()[:maxLLCode])
-		fmt.Println("rle:", s.Histogram()[maxLLCode:tableSize])
-		fmt.Println("pred:", s.Histogram()[tableSize:tableSize+predLast])
-		fmt.Printf("code size: %d, %.2f bits/code, remainder size: %d\n", len(ccodes), float64(len(ccodes)*8)/float64(len(codes)), len(extra.out)+int(extra.nBits+7/8))
+		fmt.Println("codes:", codesHistogram[:maxLLCode])
+		fmt.Println("rle:", codesHistogram[maxLLCode:tableSize])
+		fmt.Println("pred:", codesHistogram[tableSize:tableSize+predLast])
+		fmt.Printf("code size: %d, %.2f bits/code, remainder size: %d\n", len(fseCompressed), float64(len(fseCompressed)*8)/float64(codesTotalLen), len(extra.out)+int((extra.nBits+7)/8))
 	}
 	// Encode codes length
+	// Technically this is not needed
 	var codesLen [binary.MaxVarintLen64]byte
-	nCodes := binary.PutUvarint(codesLen[:], uint64(len(ccodes)))
+	nCodes := binary.PutUvarint(codesLen[:], uint64(len(fseCompressed)))
 
 	// Encode bitmap length
 	var tmpBM [binary.MaxVarintLen64]byte
 	nBM := binary.PutUvarint(tmpBM[:], uint64(len(bitMapCompressed)))
 
 	extra.flushAlign()
-	dst := make([]byte, 0, nCodes+len(ccodes)+len(extra.out)+nBM+len(bitMapCompressed))
+	dst := make([]byte, 0, nCodes+len(fseCompressed)+len(extra.out)+nBM+len(bitMapCompressed))
 	dst = append(dst, codesLen[:nCodes]...)
-	dst = append(dst, ccodes...)
+	dst = append(dst, fseCompressed...)
 	dst = append(dst, extra.out...)
 	if len(bitMapCompressed) > 0 {
 		dst = append(dst, tmpBM[:nBM]...)
@@ -556,4 +693,72 @@ func rleCode(repeats uint16) (code, bits uint8) {
 		//fmt.Println(repeats, "->", code, "+", llBitsTable[code], "bits")
 	}
 	return code, llBitsTable[code]
+}
+
+func RemoveGaps(in []uint16, width int, height, stride int) []byte {
+	var bitmap [65536]byte
+	max := uint16(0)
+	for y := 0; y < height; y++ {
+		in := in[y*stride : y*stride+width]
+		for off := range in {
+			v := in[off]
+			bitmap[v] = 1
+			if v > max {
+				max = v
+			}
+		}
+	}
+	gaps := 0
+	valLen := int(max) + 1
+	for _, f := range bitmap[:valLen] {
+		gaps += 1 - int(f)
+	}
+	if gaps*4 < int(max) {
+		return nil
+	}
+	if true {
+		fmt.Println("RemoveGaps: max", max, "gaps", gaps, "=", max-uint16(gaps), "values")
+	}
+	if (1+int(max))*2 <= math.MaxUint16 {
+		// Just to avoid overflow.
+		// TODO: Should be stored....
+		// maxValP1 = max + 1
+	}
+
+	// If one in every 4 or more pixels are gaps.
+	// TODO: Could include bitmap size for metric, but best would be try one with gap removal
+	// and one without and compare sizes.
+	var inToOut [65536]uint16
+	out := uint16(0)
+	var s fse.Scratch
+	hist := s.Histogram()
+	hist = hist[:256]
+
+	for i, f := range bitmap[:valLen] {
+		hist[f]++
+		if f == 1 {
+			inToOut[i] = out
+			out++
+		}
+	}
+
+	maxCnt := hist[0]
+	if hist[1] > maxCnt {
+		maxCnt = hist[1]
+	}
+	s.HistogramFinished(1, int(maxCnt))
+	bitMapCompressed, err := fse.Compress(bitmap[:valLen], &s)
+	if err != nil {
+		// Should not be currently possible...
+		// Just abort gap removal if it should become possible in the future.
+		panic(err)
+	}
+
+	for y := 0; y < height; y++ {
+		in := in[y*stride : y*stride+width]
+		for off := range in {
+			in[off] = inToOut[in[off]]
+		}
+	}
+	return bitMapCompressed
 }
