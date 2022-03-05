@@ -1,8 +1,12 @@
 github.com/golang/mock v1.4.4/go.mod h1:l3mdAwkq5BuhzHwde/uurv3sEJeZMXNpwsxVWU71h+4=
 github.com/google/go-cmp v0.5.2 h1:X2ev0eStA3AbceY54o37/0PQ/UWqKEiiO2dKL5OPaFM=
 github.com/google/go-cmp v0.5.2/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
+github.com/klauspost/compress v1.15.0 h1:xqfchp4whNFxn5A4XFyyYtitiWI8Hy5EW59jEwcyL6U=
+github.com/klauspost/compress v1.15.0/go.mod h1:/3/Vjq9QcHkK5uEr5lBEmyoZ1iFhe47etQ6QUkpK6sk=
 github.com/suyashkumar/dicom v1.0.4 h1:a2S9w7vo0DT3WdMhviTgWxLxPBkal4Gb+3WnYFk0KFI=
 github.com/suyashkumar/dicom v1.0.4/go.mod h1:bXhNY97UnGkBWqXSbSeMgdTv70LIwoOhZJDEGzswIUQ=
+github.com/suyashkumar/dicom v1.0.5 h1:2b2pdEhGoKrHYHTQjNBXGsRbv8Py5AX/9QNPJJqiIpw=
+github.com/suyashkumar/dicom v1.0.5/go.mod h1:bXhNY97UnGkBWqXSbSeMgdTv70LIwoOhZJDEGzswIUQ=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/net v0.0.0-20190311183353-d8887717615a/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
 golang.org/x/sync v0.0.0-20190423024810-112230192c58/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
