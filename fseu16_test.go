@@ -31,6 +31,8 @@ var testFiles = []testData{
 	{name: "XR", fileName: "testdata/XR_2577_2048_image.bin", isBinary: true, rows: 2048, cols: 2577},
 	{name: "MG1", fileName: "testdata/MG_image_bin2.bin", isBinary: true, rows: 2457, cols: 1996},
 	{name: "MG2", fileName: "testdata/MG_Image_2_frame.bin", isBinary: true, rows: 2457, cols: 1996},
+	{name: "MG3", fileName: "testdata/MG1.RAW", isBinary: true, rows: 4774, cols: 3064},
+	{name: "MG4", fileName: "testdata/mg-dcm-file.dcm", isBinary: false, rows: 4096, cols: 3328},
 }
 
 func ReadBinaryFile(fileName string, cols int, rows int) ([]byte, []uint16, uint16) {
