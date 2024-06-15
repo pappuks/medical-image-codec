@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/suyashkumar/dicom/pkg/tag"
-
 	"github.com/suyashkumar/dicom"
+	"github.com/suyashkumar/dicom/pkg/tag"
 )
 
 type testData struct {
@@ -33,6 +33,7 @@ var testFiles = []testData{
 	{name: "MG2", fileName: "testdata/MG_Image_2_frame.bin", isBinary: true, rows: 2457, cols: 1996},
 	{name: "MG3", fileName: "testdata/MG1.RAW", isBinary: true, rows: 4774, cols: 3064},
 	{name: "MG4", fileName: "testdata/mg-dcm-file.dcm", isBinary: false, rows: 4096, cols: 3328},
+	//{name: "MG5", fileName: "testdata/mg-mf-dcm.dcm", isBinary: false, rows: 4096, cols: 3328},
 }
 
 func ReadBinaryFile(fileName string, cols int, rows int) ([]byte, []uint16, uint16) {
@@ -96,14 +97,20 @@ func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(c.Out)), "ratio")
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var d CanHuffmanDecompressU16
-				d.Init(c.Out)
-				d.ReadTable()
-				d.Decompress()
-				var drd DeltaRleDecompressU16
-				drd.Decompress(d.Out, cols, rows)
+				wg.Add(1)
+				go func() {
+					var d CanHuffmanDecompressU16
+					d.Init(c.Out)
+					d.ReadTable()
+					d.Decompress()
+					var drd DeltaRleDecompressU16
+					drd.Decompress(d.Out, cols, rows)
+					defer wg.Done()
+				}()
 			}
+			wg.Wait()
 		})
 	}
 
@@ -129,6 +136,7 @@ func BenchmarkDeltaRLEHuffCompress2(b *testing.B) {
 	}
 }
 
+// Command : go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
 func BenchmarkDeltaRLEFSECompress(b *testing.B) {
 	for _, tf := range testFiles {
 		b.Run(tf.name, func(b *testing.B) {
@@ -140,12 +148,18 @@ func BenchmarkDeltaRLEFSECompress(b *testing.B) {
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(deltaFSEComp)), "ratio")
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var s4 ScratchU16
-				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
-				var drd DeltaRleDecompressU16
-				drd.Decompress(deltaDecompFSE, cols, rows)
+				wg.Add(1)
+				go func() {
+					var s4 ScratchU16
+					deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
+					var drd DeltaRleDecompressU16
+					drd.Decompress(deltaDecompFSE, cols, rows)
+					defer wg.Done()
+				}()
 			}
+			wg.Wait()
 		})
 	}
 }
