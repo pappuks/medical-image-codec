@@ -111,6 +111,11 @@ func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
 				}()
 			}
 			wg.Wait()
+			b.ReportMetric((float64(len(byteData)) / (1 << 20)), "original")
+			b.ReportMetric((float64(len(c.Out)) / (1 << 20)), "comp")
+			b.ReportMetric(1/float64(b.Elapsed().Seconds()/float64(b.N)), "fps")
+			b.ReportMetric(0, "allocs/op")
+			b.ReportMetric(0, "B/op")
 		})
 	}
 
@@ -160,6 +165,11 @@ func BenchmarkDeltaRLEFSECompress(b *testing.B) {
 				}()
 			}
 			wg.Wait()
+			b.ReportMetric((float64(len(byteData)) / (1 << 20)), "original")
+			b.ReportMetric((float64(len(deltaFSEComp)) / (1 << 20)), "comp")
+			b.ReportMetric(1/float64(b.Elapsed().Seconds()/float64(b.N)), "fps")
+			b.ReportMetric(0, "allocs/op")
+			b.ReportMetric(0, "B/op")
 		})
 	}
 }
