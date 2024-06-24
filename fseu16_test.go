@@ -6,10 +6,11 @@ package mic
 import (
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"testing"
 	"time"
 
@@ -40,13 +41,23 @@ func ReadBinaryFile(fileName string, cols int, rows int) ([]byte, []uint16, uint
 	byteData, _ := os.ReadFile(fileName)
 	shortData := make([]uint16, cols*rows)
 	var maxShort uint16 = 0
-
+	const export = false
 	for i := 0; i < len(byteData); {
 		shortData[i/2] = uint16(byteData[i+1])<<8 + uint16(byteData[i])
 		if shortData[i/2] > maxShort {
 			maxShort = shortData[i/2]
 		}
+		if export {
+			byteData[i+1], byteData[i] = byteData[i], byteData[i+1]
+		}
 		i += 2
+	}
+	if export {
+		img := image.NewGray16(image.Rect(0, 0, cols, rows))
+		img.Pix = byteData
+		f, _ := os.Create(fileName + ".png")
+		png.Encode(f, img)
+		f.Close()
 	}
 	return byteData, shortData, maxShort
 }
@@ -86,6 +97,19 @@ func SetupTests(td testData) ([]byte, []uint16, uint16, int, int) {
 	} else {
 		return ReadDicomFile(nil, td.fileName)
 	}
+}
+
+func WalkTestDir(tb testing.TB, path string, fn func(name string, imgData []uint16, width, height, orgSize int)) {
+	filepath.Walk(path, func(path string, info fs.FileInfo, err error) error {
+		if info.IsDir() {
+			return nil
+		}
+		_, imgData, _, width, height := ReadDicomFile(tb, path)
+		if len(imgData) > 0 {
+			fn(filepath.Base(info.Name()), imgData, width, height, int(info.Size()))
+		}
+		return nil
+	})
 }
 
 func BenchmarkDeltaRLEHuffCompress(b *testing.B) {
@@ -183,106 +207,29 @@ func BenchmarkDeltaZZRLEHuffCompress(b *testing.B) {
 	}
 }
 
-func BenchmarkRLEHuffCompress(b *testing.B) {
-	for _, tf := range testFiles {
-		b.Run(tf.name, func(b *testing.B) {
-			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
-			var dzz RleCompressU16
-			dzz.Init(cols, rows, maxShort)
-			dzzComp := dzz.Compress(shortData)
-			var c CanHuffmanCompressU16
-			c.Init(dzzComp)
-			c.Compress()
-			b.SetBytes(int64(len(byteData)))
-			b.ResetTimer()
-			b.ReportMetric(float64(len(byteData))/float64(len(c.Out)), "ratio")
-			for i := 0; i < b.N; i++ {
-				var d CanHuffmanDecompressU16
-				d.Init(c.Out)
-				d.ReadTable()
-				d.Decompress()
-				var dzzd RleDecompressU16
-				dzzd.Init(d.Out)
-				dzzd.Decompress()
-			}
-		})
-	}
-}
-
-func BenchmarkDelta(b *testing.B) {
-	for _, tf := range testFiles {
-		b.Run(tf.name, func(b *testing.B) {
-			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
-			dzzComp, _ := DeltaCompressU16(shortData, cols, rows, maxShort)
-			//PrintHistogram(dzzComp)
-			b.SetBytes(int64(len(byteData)))
-			b.ResetTimer()
-			b.ReportMetric(float64(len(byteData))/float64(len(dzzComp)*2), "ratio")
-			for i := 0; i < b.N; i++ {
-				DeltaDecompressU16(dzzComp, cols, rows)
-			}
-		})
-	}
-}
-
-func BenchmarkRLECompress(b *testing.B) {
-	for _, tf := range testFiles {
-		b.Run(tf.name, func(b *testing.B) {
-			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
-			var dzz RleCompressU16
-			dzz.Init(cols, rows, maxShort)
-			dzzComp := dzz.Compress(shortData)
-			b.SetBytes(int64(len(byteData)))
-			b.ResetTimer()
-			b.ReportMetric(float64(len(byteData))/float64(len(dzzComp)*2), "ratio")
-			for i := 0; i < b.N; i++ {
-				var dzzd RleDecompressU16
-				dzzd.Init(dzzComp)
-				dzzd.Decompress()
-			}
-		})
-	}
-}
-
 func BenchmarkDeltaZZRLEFSECompress(b *testing.B) {
 	for _, tf := range testFiles {
 		b.Run(tf.name, func(b *testing.B) {
 			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
-			var dzz DeltaRleZZU16
+			var dzz DeltaZZU16
 			dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
+			var rleC RleCompressU16
+			rleC.Init(cols, rows, (dzz.upperThreshold<<1)+1)
+			deltaComp := rleC.Compress(dzzComp)
 			var s3 ScratchU16
-			deltaFSEComp, _ := FSECompressU16(dzzComp, &s3)
+			deltaFSEComp, _ := FSECompressU16(deltaComp, &s3)
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(deltaFSEComp)), "ratio")
 			for i := 0; i < b.N; i++ {
 				var s4 ScratchU16
 				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
-				var dzzd DeltaRleZZU16
-				dzzd.Decompress(deltaDecompFSE, cols, rows)
-			}
-		})
-	}
-}
+				var rleD RleDecompressU16
+				rleD.Init(deltaDecompFSE)
+				rleDecompressed := rleD.Decompress()
 
-func BenchmarkRLEFSECompress(b *testing.B) {
-	for _, tf := range testFiles {
-		b.Run(tf.name, func(b *testing.B) {
-			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
-			var dzz RleCompressU16
-			dzz.Init(cols, rows, maxShort)
-			dzzComp := dzz.Compress(shortData)
-			var s3 ScratchU16
-			deltaFSEComp, _ := FSECompressU16(dzzComp, &s3)
-			b.SetBytes(int64(len(byteData)))
-			b.ResetTimer()
-			b.ReportMetric(float64(len(byteData))/float64(len(deltaFSEComp)), "ratio")
-			for i := 0; i < b.N; i++ {
-				var s4 ScratchU16
-				deltaDecompFSE, _ := FSEDecompressU16(deltaFSEComp, &s4)
-				var dzzd RleDecompressU16
-				dzzd.Init(deltaDecompFSE)
-				dzzd.Decompress()
+				var dzzd DeltaZZU16
+				dzzd.Decompress(rleDecompressed, cols, rows)
 			}
 		})
 	}
@@ -294,7 +241,6 @@ func BenchmarkDeltaZZFSECompress(b *testing.B) {
 			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
 			var dzz DeltaZZU16
 			dzzComp, _ := dzz.Compress(shortData, cols, rows, maxShort)
-			//PrintHistogram(dzzComp)
 			var s3 ScratchU16
 			deltaFSEComp, _ := FSECompressU16(dzzComp, &s3)
 			b.SetBytes(int64(len(byteData)))
@@ -390,6 +336,128 @@ func TestDeltaZZRleFSECompress(t *testing.T) {
 			DeltaZZRLEFSETest(t, shortData, cols, rows, maxShort)
 		})
 	}
+}
+
+func TestKlausCompress(t *testing.T) {
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			_, shortData, _, cols, rows := SetupTests(tf)
+			DeltaKlausTest(t, shortData, cols, rows)
+		})
+	}
+}
+
+func TestKlausCompressExtra(t *testing.T) {
+	before := int64(0)
+	klaus := int64(0)
+	rle2 := int64(0)
+	rle3 := int64(0)
+	WalkTestDir(t, "testdata/dcim", func(name string, imgData []uint16, width, height, orgSize int) {
+		t.Run(name, func(t *testing.T) {
+
+			t.Run("klaus", func(t *testing.T) {
+				//DeltaKlausTest(t, imgData, width, height)
+				data := append([]uint16{}, imgData...)
+				start := time.Now()
+				comp := CompressKlaus(data, width, height)
+				elapsedFile := time.Since(start)
+				t.Logf(name+": Klaus compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp), float64(len(imgData)*2)/float64(len(comp)))
+				before += int64(len(imgData) * 2)
+				klaus += int64(len(comp))
+			})
+			t.Run("rle", func(t *testing.T) {
+				var drc DeltaRleCompressU16
+				start := time.Now()
+				maxShort := uint16(0)
+				for _, v := range imgData {
+					if v > maxShort {
+						maxShort = v
+					}
+				}
+				deltaComp, _ := drc.Compress(imgData, width, height, maxShort)
+				var c CanHuffmanCompressU16
+				c.Init(deltaComp)
+				c.Compress()
+				comp := c.Out
+				elapsedFile := time.Since(start)
+				t.Logf(name+": DeltaRleCompressU16 compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp), float64(len(imgData)*2)/float64(len(comp)))
+				rle2 += int64(len(comp))
+			})
+			t.Run("rle-gap", func(t *testing.T) {
+				imgData := imgData
+				var drc DeltaRleCompressU16
+				start := time.Now()
+				maxShort := uint16(0)
+				for _, v := range imgData {
+					if v > maxShort {
+						maxShort = v
+					}
+				}
+				var bm []byte
+				if true {
+					var bitmap [65536]byte
+					max := uint16(0)
+					for off := range imgData {
+						v := imgData[off]
+						bitmap[v] = 1
+						if v > max {
+							max = v
+						}
+					}
+					gaps := 0
+					valLen := int(max) + 1
+					for _, f := range bitmap[:valLen] {
+						gaps += 1 - int(f)
+					}
+
+					// If one in every 4 or more pixels are gaps.
+					// TODO: Could include bitmap size for metric, but best would be try one with gap removal
+					// and one without and compare sizes.
+					if gaps*4 > int(max) {
+						in := append([]uint16{}, imgData...)
+
+						var inToOut [65536]uint16
+						out := uint16(0)
+						var s fse.Scratch
+						hist := s.Histogram()
+						hist = hist[:256]
+
+						for i, f := range bitmap[:valLen] {
+							hist[f]++
+							if f == 1 {
+								inToOut[i] = out
+								out++
+							}
+						}
+
+						maxCnt := hist[0]
+						if hist[1] > maxCnt {
+							maxCnt = hist[1]
+						}
+						maxShort = out - 1
+						s.HistogramFinished(1, int(maxCnt))
+						bm, _ = fse.Compress(bitmap[:valLen], &s)
+						for off := range in {
+							in[off] = inToOut[in[off]]
+						}
+						imgData = in
+						//fmt.Println("out:", out)
+					}
+				}
+				deltaComp, _ := drc.Compress(imgData, width, height, maxShort)
+				var c CanHuffmanCompressU16
+				c.Init(deltaComp)
+				c.Compress()
+				comp := c.Out
+				elapsedFile := time.Since(start)
+				t.Logf(name+": Gap+DeltaRleCompressU16 compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp)+len(bm), float64(len(imgData)*2)/float64(len(comp)))
+				rle3 += int64(len(comp) + len(bm))
+			})
+		})
+	})
+	t.Logf("klaus: %d/%d (%.2f:1)", klaus, before, float64(before)/float64(klaus))
+	t.Logf("rle: %d/%d (%.2f:1)", rle2, before, float64(before)/float64(rle2))
+	t.Logf("rle+gap: %d/%d (%.2f:1)", rle3, before, float64(before)/float64(rle3))
 }
 
 func TestDeltaRleFSECompress(t *testing.T) {
@@ -997,6 +1065,13 @@ func DeltaZZRLECombHuffTest(t *testing.T, shortData []uint16, cols int, rows int
 	}
 }
 
+func DeltaKlausTest(t *testing.T, shortData []uint16, cols int, rows int) {
+	start := time.Now()
+	comp := CompressKlaus(shortData, cols, rows)
+	elapsedFile := time.Since(start)
+	t.Logf("Klaus compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp), float64(len(shortData)*2)/float64(len(comp)))
+}
+
 func DeltaZZRLEFSETest(t *testing.T, shortData []uint16, cols int, rows int, maxShort uint16) {
 	start := time.Now()
 	var dzz DeltaZZU16
@@ -1144,180 +1219,4 @@ func DeltaHuffCompress(t *testing.T, shortData []uint16, cols int, rows int, max
 	} else {
 		t.Errorf("Delta FSE 16-bit compression-decompression FAILED")
 	}
-}
-
-func DeltaKlausTest(t *testing.T, shortData []uint16, cols int, rows int) {
-	start := time.Now()
-	comp := CompressKlaus(shortData, cols, rows)
-	elapsedFile := time.Since(start)
-	t.Logf("Klaus compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp), float64(len(shortData)*2)/float64(len(comp)))
-}
-
-func TestKlausCompress(t *testing.T) {
-	for _, tf := range testFiles {
-		t.Run(tf.name, func(t *testing.T) {
-			_, shortData, _, cols, rows := SetupTests(tf)
-			DeltaKlausTest(t, shortData, cols, rows)
-		})
-	}
-}
-
-func WalkTestDir(tb testing.TB, path string, fn func(name string, imgData []uint16, width, height, orgSize int)) {
-	filepath.Walk(path, func(path string, info fs.FileInfo, err error) error {
-		if info.IsDir() {
-			return nil
-		}
-		_, imgData, _, width, height := ReadDicomFile(tb, path)
-		if len(imgData) > 0 {
-			fn(filepath.Base(info.Name()), imgData, width, height, int(info.Size()))
-		}
-		return nil
-	})
-}
-
-func TestKlausCompressExtra(t *testing.T) {
-	before := int64(0)
-	klaus := int64(0)
-	rle2 := int64(0)
-	rle3 := int64(0)
-	WalkTestDir(t, "testdata/dcim", func(name string, imgData []uint16, width, height, orgSize int) {
-		t.Run(name, func(t *testing.T) {
-
-			t.Run("klaus", func(t *testing.T) {
-				//DeltaKlausTest(t, imgData, width, height)
-				data := append([]uint16{}, imgData...)
-				start := time.Now()
-				comp := CompressKlaus(data, width, height)
-				elapsedFile := time.Since(start)
-				t.Logf(name+": Klaus compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp), float64(len(imgData)*2)/float64(len(comp)))
-				before += int64(len(imgData) * 2)
-				klaus += int64(len(comp))
-			})
-			t.Run("rle", func(t *testing.T) {
-				var drc DeltaRleCompressU16
-				start := time.Now()
-				maxShort := uint16(0)
-				for _, v := range imgData {
-					if v > maxShort {
-						maxShort = v
-					}
-				}
-				deltaComp, _ := drc.Compress(imgData, width, height, maxShort)
-				var c CanHuffmanCompressU16
-				c.Init(deltaComp)
-				c.Compress()
-				comp := c.Out
-				elapsedFile := time.Since(start)
-				t.Logf(name+": DeltaRleCompressU16 compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp), float64(len(imgData)*2)/float64(len(comp)))
-				rle2 += int64(len(comp))
-			})
-			t.Run("rle-gap", func(t *testing.T) {
-				imgData := imgData
-				var drc DeltaRleCompressU16
-				start := time.Now()
-				maxShort := uint16(0)
-				for _, v := range imgData {
-					if v > maxShort {
-						maxShort = v
-					}
-				}
-				var bm []byte
-				if true {
-					var bitmap [65536]byte
-					max := uint16(0)
-					for off := range imgData {
-						v := imgData[off]
-						bitmap[v] = 1
-						if v > max {
-							max = v
-						}
-					}
-					gaps := 0
-					valLen := int(max) + 1
-					for _, f := range bitmap[:valLen] {
-						gaps += 1 - int(f)
-					}
-
-					// If one in every 4 or more pixels are gaps.
-					// TODO: Could include bitmap size for metric, but best would be try one with gap removal
-					// and one without and compare sizes.
-					if gaps*4 > int(max) {
-						in := append([]uint16{}, imgData...)
-
-						var inToOut [65536]uint16
-						out := uint16(0)
-						var s fse.Scratch
-						hist := s.Histogram()
-						hist = hist[:256]
-
-						for i, f := range bitmap[:valLen] {
-							hist[f]++
-							if f == 1 {
-								inToOut[i] = out
-								out++
-							}
-						}
-
-						maxCnt := hist[0]
-						if hist[1] > maxCnt {
-							maxCnt = hist[1]
-						}
-						maxShort = out - 1
-						s.HistogramFinished(1, int(maxCnt))
-						bm, _ = fse.Compress(bitmap[:valLen], &s)
-						for off := range in {
-							in[off] = inToOut[in[off]]
-						}
-						imgData = in
-						//fmt.Println("out:", out)
-					}
-				}
-				deltaComp, _ := drc.Compress(imgData, width, height, maxShort)
-				var c CanHuffmanCompressU16
-				c.Init(deltaComp)
-				c.Compress()
-				comp := c.Out
-				elapsedFile := time.Since(start)
-				t.Logf(name+": Gap+DeltaRleCompressU16 compress took %v, Output Size: %v (%.2f:1)", elapsedFile, len(comp)+len(bm), float64(len(imgData)*2)/float64(len(comp)))
-				rle3 += int64(len(comp) + len(bm))
-			})
-		})
-	})
-	t.Logf("klaus: %d/%d (%.2f:1)", klaus, before, float64(before)/float64(klaus))
-	t.Logf("rle: %d/%d (%.2f:1)", rle2, before, float64(before)/float64(rle2))
-	t.Logf("rle+gap: %d/%d (%.2f:1)", rle3, before, float64(before)/float64(rle3))
-}
-
-func PrintHistogram(in []uint16) {
-	regions := uint32(1 << 16)
-	distributionArray := make([]uint32, regions)
-
-	maxValue := uint16(0)
-	for _, v := range in {
-		distributionArray[v]++
-		if v > maxValue {
-			maxValue = v
-		}
-	}
-
-	symbolsOfInterestList := make([]SymbFreq, 0)
-
-	for i := uint32(0); i < regions; i++ {
-		if distributionArray[i] > 0 {
-			symbolsOfInterestList = append(symbolsOfInterestList, SymbFreq{uint16(i), distributionArray[i]})
-		}
-	}
-
-	sort.Slice(symbolsOfInterestList, func(i, j int) bool {
-		return symbolsOfInterestList[i].freq > symbolsOfInterestList[j].freq
-	}) // Sort in descending order
-
-	fmt.Println("Total symbols", len(symbolsOfInterestList))
-	for i := 0; i < len(symbolsOfInterestList); i++ {
-		if i == 50 {
-			break
-		}
-		fmt.Printf("{%d %d}\t", symbolsOfInterestList[i].symbol, symbolsOfInterestList[i].freq)
-	}
-	fmt.Println()
 }
