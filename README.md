@@ -79,7 +79,8 @@ The benchmark test focuses on the decompression speed and compression ratio. Com
 Test Command: 
 `go test -benchmem -run=^$ -benchtime=200x -bench ^BenchmarkDeltaRLEFSECompress$ mic`
 
-__Observation : Faster RAM has a big impact on performance. Any machine with DDR5 RAM gives better performance__
+__Observation : Faster RAM has a big impact on performance. For example any machine with DDR5 RAM gives better performance as compared to older machine, even if the older machine has higher number of cores__
+
 
 ```
 c7g.metal
@@ -89,54 +90,41 @@ pkg: mic
 ```
 |Test|Iterations|Decompression MB/s|Compressed Size (MB)|FPS|Original Size(MB)|Ratio|
 |----|----------|------------------|--------------------|---|-----------------|-----|
-|BenchmarkDeltaRLEFSECompress/MR-64|640|2004.97 MB/s|0.05323 comp|15297 fps|0.1250 original|2.348 ratio|
-|BenchmarkDeltaRLEFSECompress/CT-64|640|4264.35 MB/s|0.2235 comp|8134 fps|0.5000 original|2.238 ratio|
-|BenchmarkDeltaRLEFSECompress/CR-64|640|7945.67 MB/s|2.068 comp|1055 fps|7.184 original|3.474 ratio|
-|BenchmarkDeltaRLEFSECompress/XR-64|640|8821.79 MB/s|5.792 comp|835.8 fps|10.07 original|1.738 ratio|
-|BenchmarkDeltaRLEFSECompress/MG1-64|640|17413.43 MB/s|1.170 comp|1775 fps |9.354 original|7.995 ratio|
-|BenchmarkDeltaRLEFSECompress/MG2-64|640|15333.45 MB/s|1.172 comp|1563 fps|9.354 original|7.984 ratio|
-|BenchmarkDeltaRLEFSECompress/MG3-64|640|7376.50 MB/s|12.19 comp|258.1 fps|27.26 original|2.237 ratio|
-|BenchmarkDeltaRLEFSECompress/MG4-64|640|15064.65 MB/s|7.485 comp|552.6 fps|26.00 original|3.474 ratio|
+|BenchmarkDeltaRLEFSECompress/MR-64|1280|2282.11 MB/s|0.05323 comp|17411 fps|0.1250 original|2.348 ratio|
+|BenchmarkDeltaRLEFSECompress/CT-64|1280|4432.93 MB/s|0.2235 comp|8455 fps|0.5000 original|2.238 ratio|
+|BenchmarkDeltaRLEFSECompress/CR-64|1280|8526.87 MB/s|2.068 comp|1132 fps|7.184 original|3.474 ratio|
+|BenchmarkDeltaRLEFSECompress/XR-64|1280|9411.37 MB/s|5.792 comp|891.6 fps|10.07 original|1.738 ratio|
+|BenchmarkDeltaRLEFSECompress/MG1-64|1280|16387.11 MB/s|1.170 comp|1671 fps|9.354 original|7.995 ratio|
+|BenchmarkDeltaRLEFSECompress/MG2-64|1280|16023.00 MB/s|1.172 comp|1634 fps|9.354 original|7.984 ratio|
+|BenchmarkDeltaRLEFSECompress/MG3-64|1280|8043.95 MB/s|12.19 comp|281.4 fps|27.26 original|2.237 ratio|
+|BenchmarkDeltaRLEFSECompress/MG4-64|1280|15212.83 MB/s|7.485 comp|558.0 fps|26.00 original|3.474 ratio|
 
-```
-c7g.metal
-goos: linux
-goarch: arm64
-pkg: mic
-BenchmarkDeltaRLEFSECompress/MR-64  1280        2282.11 MB/s             0.05323 comp        17411 fps           0.1250 original                 2.348 ratio
-BenchmarkDeltaRLEFSECompress/CT-64  1280            118271 ns/op        4432.93 MB/s             0.2235 comp          8455 fps           0.5000 original                 2.238 ratio
-BenchmarkDeltaRLEFSECompress/CR-64  1280            883419 ns/op        8526.87 MB/s             2.068 comp           1132 fps           7.184 original          3.474 ratio
-BenchmarkDeltaRLEFSECompress/XR-64  1280           1121557 ns/op        9411.37 MB/s             5.792 comp            891.6 fps                10.07 original           1.738 ratio
-BenchmarkDeltaRLEFSECompress/MG1-64 1280            598540 ns/op        16387.11 MB/s            1.170 comp           1671 fps           9.354 original          7.995 ratio
-BenchmarkDeltaRLEFSECompress/MG2-64 1280            612142 ns/op        16023.00 MB/s            1.172 comp           1634 fps           9.354 original          7.984 ratio
-BenchmarkDeltaRLEFSECompress/MG3-64 1280           3553102 ns/op        8043.95 MB/s            12.19 comp             281.4 fps                27.26 original           2.237 ratio
-BenchmarkDeltaRLEFSECompress/MG4-64 1280           1792104 ns/op        15212.83 MB/s            7.485 comp            558.0 fps                26.00 original           3.474 ratio
-PASS
-ok      mic     14.460s
-```
 ```
 AWS EC2 Instance Type: c7i.8xlarge
 goos: linux
 goarch: amd64
 pkg: mic
 cpu: Intel(R) Xeon(R) Platinum 8488C
-BenchmarkDeltaRLEFSECompress/MR-32           200            114760 ns/op        1142.14 MB/s             0.05323 comp         8714 fps           0.1250 original                 2.348 ratio
-BenchmarkDeltaRLEFSECompress/CT-32           200            434163 ns/op        1207.58 MB/s             0.2235 comp          2303 fps           0.5000 original                 2.238 ratio
-BenchmarkDeltaRLEFSECompress/CR-32           200           2374440 ns/op        3172.45 MB/s             2.068 comp            421.2 fps                 7.184 original          3.474 ratio
-BenchmarkDeltaRLEFSECompress/XR-32           200           3229206 ns/op        3268.73 MB/s             5.792 comp            309.7 fps                10.07 original           1.738 ratio
-BenchmarkDeltaRLEFSECompress/MG1-32                  200           1879142 ns/op        5219.59 MB/s             1.170 comp            532.2 fps                 9.354 original          7.995 ratio
-BenchmarkDeltaRLEFSECompress/MG2-32                  200           1914325 ns/op        5123.66 MB/s             1.172 comp            522.4 fps                 9.354 original          7.984 ratio
-BenchmarkDeltaRLEFSECompress/MG3-32                  200           8240490 ns/op        3468.36 MB/s            12.19 comp             121.4 fps                27.26 original           2.237 ratio
-BenchmarkDeltaRLEFSECompress/MG4-32                  200           5492502 ns/op        4963.67 MB/s             7.485 comp            182.1 fps                26.00 original           3.474 ratio
-PASS
-ok      mic     6.877s
 ```
+|Test|Iterations|Decompression MB/s|Compressed Size (MB)|FPS|Original Size(MB)|Ratio|
+|----|----------|------------------|--------------------|---|-----------------|-----|
+|BenchmarkDeltaRLEFSECompress/MR-32|200|1142.14 MB/s|0.05323 comp|8714 fps|0.1250 original|2.348 ratio|
+|BenchmarkDeltaRLEFSECompress/CT-32|200|1207.58 MB/s|0.2235 comp|2303 fps|0.5000 original|2.238 ratio|
+|BenchmarkDeltaRLEFSECompress/CR-32|200|3172.45 MB/s|2.068 comp|421.2 fps|7.184 original|3.474 ratio|
+|BenchmarkDeltaRLEFSECompress/XR-32|200|3268.73 MB/s|5.792 comp|309.7 fps|10.07 original|1.738 ratio|
+|BenchmarkDeltaRLEFSECompress/MG1-32|200|5219.59 MB/s|1.170 comp|532.2 fps|9.354 original|7.995 ratio|
+|BenchmarkDeltaRLEFSECompress/MG2-32|200|5123.66 MB/s|1.172 comp|522.4 fps|9.354 original|7.984 ratio|
+|BenchmarkDeltaRLEFSECompress/MG3-32|200|3468.36 MB/s|12.19 comp|121.4 fps|27.26 original|2.237 ratio|
+|BenchmarkDeltaRLEFSECompress/MG4-32|200|4963.67 MB/s|7.485 comp|182.1 fps|26.00 original|3.474 ratio|
+
 
 ```
 c7g.8xlarge
 goos: linux
 goarch: arm64
 pkg: mic
+```
+
 BenchmarkDeltaRLEFSECompress/MR-32           200             86009 ns/op        1523.94 MB/s             0.05323 comp        11627 fps           0.1250 original                 2.348 ratio
 BenchmarkDeltaRLEFSECompress/CT-32           200            239831 ns/op        2186.07 MB/s             0.2235 comp          4170 fps           0.5000 original                 2.238 ratio
 BenchmarkDeltaRLEFSECompress/CR-32           200           1755793 ns/op        4290.26 MB/s             2.068 comp            569.5 fps                 7.184 original          3.474 ratio
@@ -145,26 +133,26 @@ BenchmarkDeltaRLEFSECompress/MG1-32                  200           1101935 ns/op
 BenchmarkDeltaRLEFSECompress/MG2-32                  200           1244885 ns/op        7878.92 MB/s             1.172 comp            803.3 fps                 9.354 original          7.984 ratio
 BenchmarkDeltaRLEFSECompress/MG3-32                  200           6415846 ns/op        4454.75 MB/s            12.19 comp             155.9 fps                27.26 original           2.237 ratio
 BenchmarkDeltaRLEFSECompress/MG4-32                  200           3822598 ns/op        7132.05 MB/s             7.485 comp            261.6 fps                26.00 original           3.474 ratio
-PASS
-ok      mic     6.004s
-```
+
+
 ```
 Mac Studio
 CPU : M2 Max
 goos: darwin
 goarch: arm64
 pkg: mic
-BenchmarkDeltaRLEFSECompress/MR-12           200            124324 ns/op        1054.28 MB/s             0.05323 comp         8044 fps           0.1250 original                 2.348 ratio 
-BenchmarkDeltaRLEFSECompress/CT-12           200            467862 ns/op        1120.60 MB/s             0.2235 comp          2137 fps           0.5000 original                 2.238 ratio
-BenchmarkDeltaRLEFSECompress/CR-12           200           3605936 ns/op        2089.00 MB/s             2.068 comp            277.3 fps                 7.184 original          3.474 ratio
-BenchmarkDeltaRLEFSECompress/XR-12           200           5023703 ns/op        2101.12 MB/s             5.792 comp            199.1 fps                10.07 original           1.738 ratio
-BenchmarkDeltaRLEFSECompress/MG1-12                  200           2675320 ns/op        3666.23 MB/s             1.170 comp            373.8 fps                 9.354 original          7.995 ratio
-BenchmarkDeltaRLEFSECompress/MG2-12                  200           2680334 ns/op        3659.37 MB/s             1.172 comp            373.1 fps                 9.354 original          7.984 ratio
-BenchmarkDeltaRLEFSECompress/MG3-12                  200          12762981 ns/op        2239.37 MB/s            12.19 comp              78.35 fps               27.26 original           2.237 ratio
-BenchmarkDeltaRLEFSECompress/MG4-12                  200           8551203 ns/op        3188.20 MB/s             7.485 comp            116.9 fps                26.00 original           3.474 ratio
-PASS
-ok      mic     8.972s
 ```
+|Test|Iterations|Decompression MB/s|Compressed Size (MB)|FPS|Original Size(MB)|Ratio|
+|----|----------|------------------|--------------------|---|-----------------|-----|
+|BenchmarkDeltaRLEFSECompress/MR-12|200|1054.28 MB/s|0.05323 comp|8044 fps|0.1250 original|2.348 ratio| 
+|BenchmarkDeltaRLEFSECompress/CT-12|200|1120.60 MB/s|0.2235 comp|2137 fps|0.5000 original|2.238 ratio|
+|BenchmarkDeltaRLEFSECompress/CR-12|200|2089.00 MB/s|2.068 comp|277.3 fps|7.184 original|3.474 ratio|
+|BenchmarkDeltaRLEFSECompress/XR-12|200|2101.12 MB/s|5.792 comp|199.1 fps|10.07 original|1.738 ratio|
+|BenchmarkDeltaRLEFSECompress/MG1-12|200|3666.23 MB/s|1.170 comp|373.8 fps|9.354 original|7.995 ratio|
+|BenchmarkDeltaRLEFSECompress/MG2-12|200|3659.37 MB/s|1.172 comp|373.1 fps|9.354 original|7.984 ratio|
+|BenchmarkDeltaRLEFSECompress/MG3-12|200|2239.37 MB/s|12.19 comp|78.35 fps|27.26 original|2.237 ratio|
+|BenchmarkDeltaRLEFSECompress/MG4-12|200|3188.20 MB/s|7.485 comp|116.9 fps|26.00 original|3.474 ratio|
+
 ```
 AWS EC2 Instance Type : c5a.8xlarge
 goos: linux
