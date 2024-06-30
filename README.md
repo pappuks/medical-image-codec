@@ -5,6 +5,11 @@ This library introduces a lossless medical image compression codec __MIC__ for 1
 |-------|-------|
 |main |![example workflow](https://github.com/pappuks/medical-image-codec/actions/workflows/go.yml/badge.svg)
 
+
+## Performance of MIC and comparison with High Throughput JPEG 2000 (HTJ2K)
+
+![Comparison with HTJ2K](./testdata/MIC-HTJ2K-Comparison.png)
+
 ## Compression Algorithm
 The compression algorithm uses a combination of [Delta Encoding](https://en.wikipedia.org/wiki/Delta_encoding), [RLE](https://en.wikipedia.org/wiki/Run-length_encoding) and [Huffman Coding](https://en.wikipedia.org/wiki/Huffman_coding) or [Finite State Entropy (FSE)](https://github.com/Cyan4973/FiniteStateEntropy) to achieve the best compression and get best performance. By tweaking each of the algorithms to efficiently function on 16 bit greyscale medical images we have achieved good compression with very good decompression speed.
 
