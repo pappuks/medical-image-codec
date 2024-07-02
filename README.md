@@ -137,3 +137,10 @@ BenchmarkDeltaRLEFSECompress/MG4-32|261.6|7132.05 MB/s|
 
 ---
 
+## TO DO
+
+No project can be complete without a to-do list:
+- Implement browser based decoding in JS and WASM.
+- Multi resolution progressive encoding by using Wavelet Transform (5-3 integer filter ) https://lnkd.in/gTxRbthM
+- Try and implement few of the suggestions provided by [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)
+
