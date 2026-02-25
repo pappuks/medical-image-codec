@@ -4,7 +4,6 @@
 package mic
 
 import (
-	"fmt"
 	"math/bits"
 )
 
@@ -177,9 +176,7 @@ func (d *CanHuffmanDecompressU16) GetNextPixelDepthBits() {
 		d.maxCodeLengthBits = (d.maxCodeLengthBits << ((d.c.pixelDepth) - (d.c.maxCodeLength - d.bitsUsed))) & d.pixelDepthMask
 		d.maxCodeLengthBits |= d.br.getBits32NFillFwd(((d.c.pixelDepth) - (d.c.maxCodeLength - d.bitsUsed)))
 		d.bitsUsed = 0
-	} else if d.bitsUsed == 0 {
-		fmt.Printf("***Error case with bitsUsed = 0\n")
+	} else {
 		d.maxCodeLengthBits |= d.br.getBits32NFillFwd((d.c.pixelDepth - (d.c.maxCodeLength)))
 	}
-
 }
