@@ -95,8 +95,7 @@ func DeltaDecompressU16(in []uint16, width int, height int) []uint16 {
 }
 
 func abs(x int32) int32 {
-	if x < 0 {
-		return -x
-	}
-	return x
+	// Branchless absolute value using arithmetic right shift.
+	mask := x >> 31
+	return (x ^ mask) - mask
 }

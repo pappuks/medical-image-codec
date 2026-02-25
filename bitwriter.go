@@ -48,12 +48,6 @@ var bitMask64 = [65]uint64{
 	0x1FFFFFFFFFFFFFFF, 0x3FFFFFFFFFFFFFFF, 0x7FFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF} /* up to 64 bits */
 
 func (b *bitWriter) addBits32NC(value uint32, bits uint8) {
-	if bits > 32 {
-		fmt.Printf("*** bits > 32 %d\n", bits)
-	}
-	if (bits + b.nBits) > 64 {
-		fmt.Printf("*** Overflow : bits + b.nBits > 64 %d\n", bits+b.nBits)
-	}
 	b.bitContainer |= uint64(value&bitMask32[bits&63]) << (b.nBits & 63)
 	b.nBits += bits
 }

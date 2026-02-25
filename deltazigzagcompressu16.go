@@ -106,17 +106,11 @@ func (d *DeltaZZU16) DecodeNextSymbol(x int, y int, width int, height int) {
 }
 
 func ZigZag(x int16) uint16 {
-	ux := uint16(x) << 1
-	if x < 0 {
-		ux = ^ux
-	}
-	return uint16(ux)
+	// Branchless: positive x -> 2x, negative x -> bitwise complement of 2x.
+	return uint16((x << 1) ^ (x >> 15))
 }
 
 func UnZigZag(ux uint16) int16 {
-	x := int16(ux >> 1)
-	if ux&1 != 0 {
-		x = ^x
-	}
-	return int16(x)
+	// Branchless inverse of ZigZag.
+	return int16((ux >> 1) ^ -(ux & 1))
 }
