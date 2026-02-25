@@ -424,18 +424,20 @@ func (s *ScratchU16) buildCTable() error {
 // Returns the biggest count.
 // Does not update s.clearCount.
 func (s *ScratchU16) countSimple(in []uint16) (max int) {
+	var symLen uint32
 	for _, v := range in {
 		s.count[v]++
+		if uint32(v) >= symLen {
+			symLen = uint32(v) + 1
+		}
 	}
 	m := uint32(0)
-	for i, v := range s.count[:] {
+	for _, v := range s.count[:symLen] {
 		if v > m {
 			m = v
 		}
-		if v > 0 {
-			s.symbolLen = uint32(i) + 1
-		}
 	}
+	s.symbolLen = symLen
 	return int(m)
 }
 

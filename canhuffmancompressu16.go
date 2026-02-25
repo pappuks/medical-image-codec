@@ -83,26 +83,25 @@ func (c *CanHuffmanCompressU16) Compress() {
 func (c *CanHuffmanCompressU16) GenerateAllSymbolTable() {
 	c.allSymbols = make([]SymbolLenDelimiter, 1<<c.pixelDepth)
 
-	for i := 0; i < len(c.allSymbols); i++ {
-		var v SymbolLenDelimiter
-		found := false
-		if i != int(c.delimiterForCompressDecompress) {
-			for j, w := range c.symbolsOfInterestList {
-				if i == int(w.symbol) {
-					v.delimiter = false
-					v.codeLen = uint8(w.freq)
-					v.code = c.canHuffmanTable[j]
-					found = true
-					break
-				}
+	// Initialize all entries to the delimiter escape code (O(N)).
+	delimEntry := SymbolLenDelimiter{
+		delimiter: true,
+		code:      c.delimiterCode,
+		codeLen:   uint8(c.delimiterCodeLength),
+	}
+	for i := range c.allSymbols {
+		c.allSymbols[i] = delimEntry
+	}
+
+	// Override entries for symbols in the interest list (O(M) instead of O(N*M)).
+	for j, w := range c.symbolsOfInterestList {
+		if w.symbol != c.delimiterForCompressDecompress {
+			c.allSymbols[w.symbol] = SymbolLenDelimiter{
+				delimiter: false,
+				codeLen:   uint8(w.freq),
+				code:      c.canHuffmanTable[j],
 			}
 		}
-		if !found {
-			v.delimiter = true
-			v.code = c.delimiterCode
-			v.codeLen = uint8(c.delimiterCodeLength)
-		}
-		c.allSymbols[i] = v
 	}
 }
 
@@ -167,41 +166,23 @@ func (c *CanHuffmanCompressU16) GenerateFrequencies() {
 }
 
 func (c *CanHuffmanCompressU16) OptimizeSymbolCount() {
-	// Old Approach:
-	// // Take only symbols which fall within 1/100 of the max freq symbol.
-	// maxFrequency := c.symbolsOfInterestList[0].freq
-
-	// minAllowedFrequency := uint32(maxFrequency / HUFFMAN_DIV_FACTOR)
-
-	// for i := 0; i < len(c.symbolsOfInterestList); i++ {
-	// 	if c.symbolsOfInterestList[i].freq < minAllowedFrequency {
-	// 		c.symbolsOfInterestList = c.symbolsOfInterestList[0:i] // remove elements with low frequency
-	// 		break
-	// 	}
-	// }
-
-	// // Take only the first 500 symbols
-	// if len(c.symbolsOfInterestList) > HUFFMAN_SYMBOLS {
-	// 	c.symbolsOfInterestList = c.symbolsOfInterestList[0:HUFFMAN_SYMBOLS] // remove elements more than HUFFMAN_SYMBOLS
-	// }
-
-	// New Approach: Identify the high frequency symbols which result in code length of less than equal to 14
-	length := len(c.symbolsOfInterestList)
-	for ; length > 0; length-- {
-		tempList := make([]SymbFreq, length)
+	// Binary search for the maximum number of symbols that yield a max code length <= 14.
+	// As we increase the symbol count the code length is monotonically non-decreasing,
+	// so binary search finds the upper bound in O(log N) probes instead of O(N).
+	n := len(c.symbolsOfInterestList)
+	lo, hi := 0, n
+	for lo < hi {
+		mid := (lo + hi + 1) / 2 // upper-mid prevents infinite loop
+		tempList := make([]SymbFreq, mid)
 		copy(tempList, c.symbolsOfInterestList)
 		codeLen := c.CalculateCodeLengthForGivenSlice(tempList)
 		if codeLen <= 14 {
-			break
+			lo = mid
+		} else {
+			hi = mid - 1
 		}
 	}
-
-	c.symbolsOfInterestList = c.symbolsOfInterestList[0:length]
-
-	// // Take only the first 500 symbols
-	// if len(c.symbolsOfInterestList) > HUFFMAN_SYMBOLS {
-	// 	c.symbolsOfInterestList = c.symbolsOfInterestList[0:HUFFMAN_SYMBOLS] // remove elements more than HUFFMAN_SYMBOLS
-	// }
+	c.symbolsOfInterestList = c.symbolsOfInterestList[0:lo]
 }
 
 // Add delimiter to the symbol list with a frequency count equal to all symbols which
