@@ -79,6 +79,9 @@ var testImages = []testImage{
 	{name: "MR", file: "testdata/MR_256_256_image.bin", cols: 256, rows: 256},
 	{name: "CT", file: "testdata/CT_512_512_image.bin", cols: 512, rows: 512},
 	{name: "CR", file: "testdata/CR_1760_2140_image.bin", cols: 1760, rows: 2140},
+	{name: "MG1", file: "testdata/MG_image_bin2.bin", cols: 1996, rows: 2457},
+	{name: "MG2", file: "testdata/MG_Image_2_frame.bin", cols: 1996, rows: 2457},
+	{name: "MG3", file: "testdata/MG1.RAW", cols: 3064, rows: 4774},
 }
 
 func main() {

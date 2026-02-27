@@ -100,9 +100,12 @@
 
   <!-- Controls -->
   <div class="controls">
-    <button id="loadTestMR">Load Test: MR (256x256)</button>
-    <button id="loadTestCT">Load Test: CT (512x512)</button>
-    <button id="loadTestCR">Load Test: CR (1760x2140)</button>
+    <button id="loadTestMR">MR (256x256)</button>
+    <button id="loadTestCT">CT (512x512)</button>
+    <button id="loadTestCR">CR (1760x2140)</button>
+    <button id="loadTestMG1">MG1 (1996x2457)</button>
+    <button id="loadTestMG2">MG2 (1996x2457)</button>
+    <button id="loadTestMG3">MG3 (3064x4774)</button>
     <span style="color:#555">|</span>
     <label>Decoder:
       <select id="decoderType">
@@ -378,6 +381,9 @@ async function loadTestFile(name) {
 $('loadTestMR').addEventListener('click', () => loadTestFile('MR'));
 $('loadTestCT').addEventListener('click', () => loadTestFile('CT'));
 $('loadTestCR').addEventListener('click', () => loadTestFile('CR'));
+$('loadTestMG1').addEventListener('click', () => loadTestFile('MG1'));
+$('loadTestMG2').addEventListener('click', () => loadTestFile('MG2'));
+$('loadTestMG3').addEventListener('click', () => loadTestFile('MG3'));
 
 log('MIC Decoder ready. Drop a .mic file or load a test image.');
 </script>
