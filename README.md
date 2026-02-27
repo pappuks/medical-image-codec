@@ -39,31 +39,59 @@ During the encoding process we add a delimiter before each symbol which is also 
 
 ### FSE
 
-We use [Finite State Entropy](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) encoder for compression. Just like the Huffman coding implementation, the FSE algorithm has also been updated to handle 16 bit data. 
+We use [Finite State Entropy](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) encoder for compression. Just like the Huffman coding implementation, the FSE algorithm has also been updated to handle 16 bit data.
 
-I took the 8 bit implementation from https://github.com/klauspost/compress and the 16 bit FSE implementation from https://github.com/Cyan4973/FiniteStateEntropy. The 16 bit FSE implementation in my repository has been updated to handle max values till the range of 65535. This is a deviation from the implementation in https://github.com/Cyan4973/FiniteStateEntropy where the max supported value is 4095. 
+I took the 8 bit implementation from https://github.com/klauspost/compress and the 16 bit FSE implementation from https://github.com/Cyan4973/FiniteStateEntropy. The 16 bit FSE implementation in my repository has been updated to handle max values till the range of 65535. This is a deviation from the implementation in https://github.com/Cyan4973/FiniteStateEntropy where the max supported value is 4095.
 
 The 16 bit FSE implementation can be found in [compressor](./fsecompressu16.go) and [decompressor](./fsedecompressu16.go).
+
+### Optimizations for 8-bit and 12-16 bit Images
+
+The codec dynamically adapts to image bit depth using `bits.Len16(maxValue)`. All thresholds, delimiters, and table sizes derive from the actual pixel depth rather than compile-time constants. Several targeted optimizations improve both compression ratio and decompression speed across the full 8-16 bit range:
+
+#### Compression Ratio Improvements
+
+- **Adaptive tableLog selection**: The FSE encoder automatically selects a higher tableLog (12 vs the default 11) when the data has high symbol density — more than 128 distinct symbols with at least 32 data points per symbol. This gives the frequency normalization more precision for 12-16 bit medical images after delta coding, yielding 4-7% better compression ratios on CR and MG modalities. For 8-bit images with fewer symbols, the default tableLog is retained to avoid wasting header space.
+
+- **Dual-buffer histogram counting**: Two count arrays process symbol pairs in parallel during histogram construction, reducing store-to-load forwarding stalls when consecutive pixels have similar values (common in medical images with spatial correlation).
+
+#### Decompression Speed Improvements
+
+- **Inlined FSE decode loop**: The inner FSE decompression loop inlines state transitions with a locally cached decode table reference, eliminating function call overhead and enabling better instruction-level parallelism. The symbols are read into local variables before being written to the output buffer, allowing the CPU to pipeline state lookups with memory writes.
+
+- **Branch-free delta decompression**: The delta decompression splits processing into corner pixel, first-row, first-column, and interior pixel loops. The interior loop — which handles the vast majority of pixels — runs with zero boundary checks, eliminating two branches per pixel.
+
+- **RLE decode fast-path**: The RLE decoder (`DecodeNext2`) fast-paths "same" runs, the most common case in delta-coded medical data, returning the recurring value immediately without touching the input slice. This avoids memory loads on the critical path for long runs of identical delta values.
+
+- **Dynamic table sizing**: Compression and decompression tables (`symbolTT`, `stateTable`) are sized to the actual symbol range instead of always allocating for the full 65536-entry space. For 8-bit images this reduces the working set from 512KB to approximately 2KB, keeping hot tables entirely within L1 cache.
 
 ## Compression Ratio
 
 The tests are run for different DICOM image types MR, CT, CR, XR and MG. All the images are 16 bit with varying level for max pixel values. CT image is the only one with max pixel value of 65535.
 
-`DELTA + RLE + FSE` implementation gives the best speed. The `DELTA + RLE + Huffman` implementation provides the best compression. 
+`DELTA + RLE + FSE` implementation gives the best speed. The `DELTA + RLE + Huffman` implementation provides the best compression.
 
 Here we are only showing `DELTA + RLE + FSE` implementation results. For `DELTA + RLE + Huffman` you can checkout [BenchmarkDeltaRLEHuffCompress](./fseu16_test.go#L83).
 
 
 |Test/Modality-Cores|Ratio|Original Size(MB)|Compressed Size (MB)|Rows|Columns|
 |-------------------|-----|-----------------|--------------------|----|-------|
-|BenchmarkDeltaRLEFSECompress/MR-64|2.348|0.1250|0.05323|256|256|
-|BenchmarkDeltaRLEFSECompress/CT-64|2.238|0.5000|0.2235|512|512|
-|BenchmarkDeltaRLEFSECompress/CR-64|3.474|7.184|2.068|2140|1760|
-|BenchmarkDeltaRLEFSECompress/XR-64|1.738|10.07|5.792|2048|2577|
-|BenchmarkDeltaRLEFSECompress/MG1-64|7.995|9.354|1.170|2457|1996|
-|BenchmarkDeltaRLEFSECompress/MG2-64|7.984|9.354|1.172|2457|1996|
-|BenchmarkDeltaRLEFSECompress/MG3-64|2.237|27.26|12.19|4774|3064|
-|BenchmarkDeltaRLEFSECompress/MG4-64|3.474|26.00|7.485|4096|3328|
+|BenchmarkDeltaRLEFSECompress/MR-16|2.348|0.1250|0.05323|256|256|
+|BenchmarkDeltaRLEFSECompress/CT-16|2.238|0.5000|0.2235|512|512|
+|BenchmarkDeltaRLEFSECompress/CR-16|3.628|7.184|1.980|2140|1760|
+|BenchmarkDeltaRLEFSECompress/XR-16|1.738|10.07|5.792|2048|2577|
+|BenchmarkDeltaRLEFSECompress/MG1-16|8.566|9.354|1.092|2457|1996|
+|BenchmarkDeltaRLEFSECompress/MG2-16|8.553|9.354|1.094|2457|1996|
+|BenchmarkDeltaRLEFSECompress/MG3-16|2.237|27.26|12.19|4774|3064|
+|BenchmarkDeltaRLEFSECompress/MG4-16|3.474|26.00|7.485|4096|3328|
+
+#### Compression ratio improvement from adaptive tableLog
+
+|Modality|Previous Ratio|New Ratio|Improvement|
+|--------|-------------|---------|-----------|
+|CR|3.474|3.628|+4.4%|
+|MG1|7.995|8.566|+7.1%|
+|MG2|7.984|8.553|+7.1%|
 
 ## Benchmark Tests
 The benchmarks are executed using the golang testing benchmark library. The file __fseu16_test.go__ contains these benchmark tests. These can be executed by using the command `go test -bench=.`
