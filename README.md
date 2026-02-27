@@ -205,10 +205,23 @@ BenchmarkDeltaRLEFSECompress/MG4-32|261.6|7132.05 MB/s|
 
 ---
 
+## Browser Decoder
+
+A browser-based decoder is available in the [`web/`](./web/) directory, providing both a **pure JavaScript** ES module (~15 KB, zero dependencies) and a **Go WASM** build for lossless decompression of `.mic` files directly in the browser.
+
+Features:
+- Drag-and-drop `.mic` file loading and pre-compressed test image buttons
+- Window/Level controls for diagnostic viewing of 16-bit dynamic range
+- Toggle between JavaScript and WASM decoders
+- Pixel-perfect verification against the Go implementation (all test images pass)
+- Decode throughput of ~10-30M pixels/s in JavaScript (V8), higher with WASM
+
+See the **[Web Decoder README](./web/README.md)** for the full API reference, integration guide, decompression pipeline walkthrough, and browser compatibility details.
+
 ## TO DO
 
 No project can be complete without a to-do list:
-- Implement browser based decoding in JS and WASM.
+- ~~Implement browser based decoding in JS and WASM.~~ — implemented; see [web decoder](./web/README.md).
 - ~~Multi resolution progressive encoding by using Wavelet Transform (5-3 integer filter)~~ — implemented and benchmarked; see [wavelet analysis](./docs/wavelet-fse-analysis.md). Wavelet+FSE does not improve over Delta+RLE+FSE for lossless; it remains a candidate for a future **lossy** or **progressive** mode.
 - Try and implement few of the suggestions provided by [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)
 
