@@ -42,7 +42,13 @@ function testMicFile(micPath, rawPath, name) {
   // Compare against raw file if available
   if (existsSync(rawPath)) {
     const rawData = readFileSync(rawPath);
-    const expected = new Uint16Array(rawData.buffer, rawData.byteOffset, width * height);
+    // Go's ReadBinaryFile reads only as many pixels as the file contains and
+    // zero-fills the remainder. Mirror that: allocate width*height uint16s (zeros),
+    // then copy in however many bytes the file actually has.
+    const expectedBytes = width * height * 2;
+    const alignedBuf = new ArrayBuffer(expectedBytes);
+    new Uint8Array(alignedBuf).set(rawData.subarray(0, Math.min(rawData.length, expectedBytes)));
+    const expected = new Uint16Array(alignedBuf);
 
     if (expected.length !== result.pixels.length) {
       console.error(`  FAIL: length mismatch: expected ${expected.length}, got ${result.pixels.length}`);
@@ -74,6 +80,9 @@ const tests = [
   { mic: 'testdata/MR.mic', raw: '../testdata/MR_256_256_image.bin', name: 'MR (256x256)' },
   { mic: 'testdata/CT.mic', raw: '../testdata/CT_512_512_image.bin', name: 'CT (512x512)' },
   { mic: 'testdata/CR.mic', raw: '../testdata/CR_1760_2140_image.bin', name: 'CR (1760x2140)' },
+  { mic: 'testdata/MG1.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 (1996x2457)' },
+  { mic: 'testdata/MG2.mic', raw: '../testdata/MG_Image_2_frame.bin', name: 'MG2 (1996x2457)' },
+  { mic: 'testdata/MG3.mic', raw: '../testdata/MG1.RAW', name: 'MG3 (3064x4774)' },
 ];
 
 let passed = 0;
