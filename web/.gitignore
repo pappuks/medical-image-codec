@@ -1,0 +1,11 @@
+# Generated WASM binary (build with: GOOS=js GOARCH=wasm go build -o web/mic-decoder.wasm ./cmd/mic-wasm/)
+mic-decoder.wasm
+
+# Go WASM runtime support (copy from: $(go env GOROOT)/lib/wasm/wasm_exec.js)
+wasm_exec.js
+
+# Generated test data (build with: go run ./cmd/mic-compress/ -testdata)
+testdata/
+
+# Node modules if any
+node_modules/
