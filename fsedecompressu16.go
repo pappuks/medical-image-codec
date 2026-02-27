@@ -167,6 +167,8 @@ func (s *ScratchU16) readNCount() error {
 }
 
 // allocDtable will allocate decoding tables if they are not big enough.
+// Sizes the symbolNext (stateTable) and temp buffer (tableSymbol) to the
+// actual symbol range when possible, improving cache efficiency for 8-bit data.
 func (s *ScratchU16) allocDtable() {
 	tableSize := 1 << s.actualTableLog
 	if cap(s.decTable) < tableSize {
@@ -174,15 +176,22 @@ func (s *ScratchU16) allocDtable() {
 	}
 	s.decTable = s.decTable[:tableSize]
 
+	// tableSymbol is used as a temporary output buffer in decompress().
+	// It needs to hold up to 65536 entries (uint16 overflow counter).
 	if cap(s.ct.tableSymbol) < 65536 {
 		s.ct.tableSymbol = make([]uint16, 65536)
 	}
 	s.ct.tableSymbol = s.ct.tableSymbol[:65536]
 
-	if cap(s.ct.stateTable) < 65536 {
-		s.ct.stateTable = make([]uint32, 65536)
+	// stateTable (used as symbolNext during build) only needs symbolLen entries.
+	symSize := int(s.symbolLen)
+	if symSize < 256 {
+		symSize = 256
 	}
-	s.ct.stateTable = s.ct.stateTable[:65536]
+	if cap(s.ct.stateTable) < symSize {
+		s.ct.stateTable = make([]uint32, symSize)
+	}
+	s.ct.stateTable = s.ct.stateTable[:symSize]
 }
 
 // buildDtable will build the decoding table.
@@ -190,7 +199,7 @@ func (s *ScratchU16) buildDtable() error {
 	tableSize := uint32(1 << s.actualTableLog)
 	highThreshold := tableSize - 1
 	s.allocDtable()
-	symbolNext := s.ct.stateTable[:65536]
+	symbolNext := s.ct.stateTable[:s.symbolLen]
 
 	// Init, lay down lowprob symbols
 	s.zeroBits = false
@@ -267,16 +276,42 @@ func (s *ScratchU16) decompress() error {
 	var tmp = s.ct.tableSymbol[:65536]
 	var off uint16
 
-	// Main part
+	// Cache the decode table slice locally for fewer indirections in the hot loop.
+	dt := s.decTable
+
+	// Main part - inline state transitions to reduce function call overhead
+	// and improve instruction-level parallelism.
 	if !s.zeroBits {
 		for br.off >= 8 {
+			// Refill bit buffer once - guaranteed to provide at least 32 fresh bits.
 			br.fillFast()
-			tmp[off+0] = s1.nextFast()
-			tmp[off+1] = s1.nextFast()
+
+			// Decode 2 symbols: inlined nextFast with local dt reference
+			n0 := dt[s1.state]
+			lowBits0 := br.getBitsFast32(n0.nbBits)
+			s1.state = n0.newState + lowBits0
+
+			n1 := dt[s1.state]
+			lowBits1 := br.getBitsFast32(n1.nbBits)
+			s1.state = n1.newState + lowBits1
+
+			// Refill again before next 2 symbols
 			br.fillFast()
-			tmp[off+2] = s1.nextFast()
-			tmp[off+3] = s1.nextFast()
+
+			n2 := dt[s1.state]
+			lowBits2 := br.getBitsFast32(n2.nbBits)
+			s1.state = n2.newState + lowBits2
+
+			n3 := dt[s1.state]
+			lowBits3 := br.getBitsFast32(n3.nbBits)
+			s1.state = n3.newState + lowBits3
+
+			tmp[off+0] = n0.symbol
+			tmp[off+1] = n1.symbol
+			tmp[off+2] = n2.symbol
+			tmp[off+3] = n3.symbol
 			off += 4
+
 			// When off is 0, we have overflowed and should write.
 			if off == 0 {
 				s.OutU16 = append(s.OutU16, tmp...)
@@ -288,11 +323,29 @@ func (s *ScratchU16) decompress() error {
 	} else {
 		for br.off >= 8 {
 			br.fillFast()
-			tmp[off+0] = s1.next()
-			tmp[off+1] = s1.next()
+
+			n0 := &dt[s1.state]
+			lowBits0 := br.getBits32(n0.nbBits)
+			s1.state = n0.newState + lowBits0
+
+			n1 := &dt[s1.state]
+			lowBits1 := br.getBits32(n1.nbBits)
+			s1.state = n1.newState + lowBits1
+
 			br.fillFast()
-			tmp[off+2] = s1.next()
-			tmp[off+3] = s1.next()
+
+			n2 := &dt[s1.state]
+			lowBits2 := br.getBits32(n2.nbBits)
+			s1.state = n2.newState + lowBits2
+
+			n3 := &dt[s1.state]
+			lowBits3 := br.getBits32(n3.nbBits)
+			s1.state = n3.newState + lowBits3
+
+			tmp[off+0] = n0.symbol
+			tmp[off+1] = n1.symbol
+			tmp[off+2] = n2.symbol
+			tmp[off+3] = n3.symbol
 			off += 4
 			if off == 0 {
 				s.OutU16 = append(s.OutU16, tmp...)
