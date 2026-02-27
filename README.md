@@ -45,6 +45,16 @@ I took the 8 bit implementation from https://github.com/klauspost/compress and t
 
 The 16 bit FSE implementation can be found in [compressor](./fsecompressu16.go) and [decompressor](./fsedecompressu16.go).
 
+### Wavelet Transform (5/3 Integer, Lossless)
+
+We implemented the [Le Gall 5/3 integer wavelet](https://en.wikipedia.org/wiki/Cohen%E2%80%93Daubechies%E2%80%93Feauveau_wavelet) — the same transform used by JPEG 2000 for lossless coding — as an alternative decorrelation stage, yielding two new pipelines: **Wavelet+FSE** and **Wavelet+RLE+FSE**.
+
+The transform is a two-tap predict/update lifting scheme applied in 2D (horizontal rows first, then vertical columns). It supports 1–4 decomposition levels and uses an overflow-safe ZigZag encoding with an escape code for coefficients that exceed the `int16` range (a requirement for full 16-bit CT images).
+
+**Result: Delta+RLE+FSE outperforms Wavelet+FSE on all tested DICOM modalities**, both in compression ratio (by 10–50%) and decompression throughput (by up to 2.5×). See the [full analysis and benchmark results →](./docs/wavelet-fse-analysis.md).
+
+The implementation lives in [`waveletu16.go`](./waveletu16.go) and [`waveletfsecompressu16.go`](./waveletfsecompressu16.go).
+
 ### Optimizations for 8-bit and 12-16 bit Images
 
 The codec dynamically adapts to image bit depth using `bits.Len16(maxValue)`. All thresholds, delimiters, and table sizes derive from the actual pixel depth rather than compile-time constants. Several targeted optimizations improve both compression ratio and decompression speed across the full 8-16 bit range:
@@ -92,6 +102,36 @@ Here we are only showing `DELTA + RLE + FSE` implementation results. For `DELTA 
 |CR|3.474|3.628|+4.4%|
 |MG1|7.995|8.566|+7.1%|
 |MG2|7.984|8.553|+7.1%|
+
+### Wavelet+FSE vs Delta+RLE+FSE
+
+The table below compares the wavelet-based pipelines against the reference Delta+RLE+FSE pipeline. All measurements on Intel Xeon Platinum 8581C @ 2.10 GHz (16 cores). See the [detailed analysis](./docs/wavelet-fse-analysis.md) for a full explanation of the results.
+
+#### Compression Ratio
+
+|Modality|Delta+RLE+FSE|Wavelet+FSE|Wavelet+RLE+FSE|
+|--------|:-----------:|:---------:|:-------------:|
+|MR (256×256)|**2.35:1**|2.09:1|2.09:1|
+|CT (512×512)|**2.24:1**|1.48:1|1.48:1|
+|CR (2140×1760)|**3.63:1**|2.59:1|2.59:1|
+|XR (2048×2577)|**1.74:1**|1.53:1|1.53:1|
+|MG1 (2457×1996)|**8.57:1**|4.91:1|7.28:1|
+|MG2 (2457×1996)|**8.55:1**|4.90:1|7.27:1|
+|MG3 (4774×3064)|**2.29:1**|1.90:1|1.93:1|
+|MG4 (4096×3328)|**3.47:1**|2.63:1|3.11:1|
+
+#### Decompression Speed (MB/s)
+
+|Modality|Delta+RLE+FSE|Wavelet+FSE|Wavelet+RLE+FSE|
+|--------|:-----------:|:---------:|:-------------:|
+|MR|116|**146**|122|
+|CT|165|**168**|142|
+|CR|**543**|418|371|
+|XR|**605**|576|486|
+|MG1|**1530**|592|680|
+|MG2|**1493**|618|644|
+|MG3|**606**|387|352|
+|MG4|**1054**|480|579|
 
 ## Benchmark Tests
 The benchmarks are executed using the golang testing benchmark library. The file __fseu16_test.go__ contains these benchmark tests. These can be executed by using the command `go test -bench=.`
@@ -169,6 +209,6 @@ BenchmarkDeltaRLEFSECompress/MG4-32|261.6|7132.05 MB/s|
 
 No project can be complete without a to-do list:
 - Implement browser based decoding in JS and WASM.
-- Multi resolution progressive encoding by using Wavelet Transform (5-3 integer filter ) https://lnkd.in/gTxRbthM
+- ~~Multi resolution progressive encoding by using Wavelet Transform (5-3 integer filter)~~ — implemented and benchmarked; see [wavelet analysis](./docs/wavelet-fse-analysis.md). Wavelet+FSE does not improve over Delta+RLE+FSE for lossless; it remains a candidate for a future **lossy** or **progressive** mode.
 - Try and implement few of the suggestions provided by [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)
 
