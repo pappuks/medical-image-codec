@@ -57,24 +57,30 @@ func (r *RleDecompressU16) DecodeNext() uint16 {
 }
 
 func (r *RleDecompressU16) DecodeNext2() uint16 {
+	// Fast path: if we are in a "same" run (0 < c < midCount),
+	// just return the recurring value without touching the input slice.
+	// Note: c == midCount means a "diff" run just exhausted and needs a new header.
+	if r.c > 0 && r.c < r.midCount {
+		r.c--
+		return r.recurringValue
+	}
+
+	// Need to read a new block header (c==0 means same-run done, c==midCount means diff-run done).
 	if r.c == 0 || r.c == r.midCount {
 		r.c = r.in[r.i]
 		r.i++
 		if r.c <= r.midCount {
 			r.recurringValue = r.in[r.i]
 			r.i++
+			r.c--
+			return r.recurringValue
 		}
 	}
-	output := uint16(0)
-	if r.c > r.midCount {
-		output = r.in[r.i]
-		r.i++
-		r.c--
-	} else {
-		output = r.recurringValue
-		r.c--
-	}
 
+	// "diff" run: each symbol is distinct
+	output := r.in[r.i]
+	r.i++
+	r.c--
 	return output
 }
 
