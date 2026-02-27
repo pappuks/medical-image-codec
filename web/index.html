@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MIC Decoder - Medical Image Codec Browser Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    background: #1a1a2e; color: #e0e0e0; padding: 20px;
+    min-height: 100vh;
+  }
+  h1 { color: #00d4ff; margin-bottom: 8px; font-size: 1.5em; }
+  .subtitle { color: #888; margin-bottom: 20px; font-size: 0.9em; }
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  /* Controls */
+  .controls {
+    display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;
+    align-items: center;
+  }
+  button {
+    background: #16213e; border: 1px solid #0f3460; color: #00d4ff;
+    padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.85em;
+  }
+  button:hover { background: #0f3460; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  select, input[type="number"] {
+    background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
+    padding: 6px 10px; border-radius: 4px; font-size: 0.85em;
+  }
+  input[type="number"] { width: 80px; }
+  label { font-size: 0.85em; color: #aaa; }
+
+  /* Drop zone */
+  .dropzone {
+    border: 2px dashed #0f3460; border-radius: 8px; padding: 40px;
+    text-align: center; margin-bottom: 20px; transition: all 0.2s;
+  }
+  .dropzone.dragover { border-color: #00d4ff; background: rgba(0, 212, 255, 0.05); }
+  .dropzone p { color: #888; }
+  .dropzone .ext { color: #00d4ff; font-weight: bold; }
+
+  /* Stats */
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .stat {
+    background: #16213e; border-radius: 6px; padding: 12px;
+    border: 1px solid #0f3460;
+  }
+  .stat .label { font-size: 0.75em; color: #888; text-transform: uppercase; }
+  .stat .value { font-size: 1.2em; color: #00d4ff; margin-top: 4px; }
+
+  /* Canvas */
+  .canvas-wrap {
+    background: #000; border-radius: 8px; overflow: hidden;
+    border: 1px solid #0f3460; position: relative;
+  }
+  canvas { display: block; max-width: 100%; height: auto; }
+  .canvas-wrap .empty {
+    padding: 80px; text-align: center; color: #555;
+  }
+
+  /* Log */
+  .log {
+    background: #0d0d1a; border: 1px solid #0f3460; border-radius: 6px;
+    padding: 12px; margin-top: 20px; max-height: 200px; overflow-y: auto;
+    font-family: 'Fira Code', 'Consolas', monospace; font-size: 0.8em;
+    line-height: 1.5;
+  }
+  .log .info { color: #888; }
+  .log .success { color: #4caf50; }
+  .log .error { color: #f44336; }
+  .log .timing { color: #ff9800; }
+
+  /* Window/Leveling controls */
+  .wl-controls {
+    display: flex; gap: 12px; align-items: center; margin: 12px 0;
+    flex-wrap: wrap;
+  }
+  .wl-controls input[type="range"] { width: 200px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>MIC Decoder</h1>
+  <p class="subtitle">Medical Image Codec - Browser-based lossless 16-bit image decoder (Delta+RLE+FSE)</p>
+
+  <!-- Drop Zone -->
+  <div class="dropzone" id="dropzone">
+    <p>Drag &amp; drop a <span class="ext">.mic</span> file here, or click to select</p>
+    <p style="margin-top: 8px; font-size: 0.85em;">
+      Or load a <span class="ext">.bin</span> raw image with dimensions specified below
+    </p>
+    <input type="file" id="fileInput" accept=".mic,.bin" style="display:none">
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button id="loadTestMR">MR (256x256)</button>
+    <button id="loadTestCT">CT (512x512)</button>
+    <button id="loadTestCR">CR (1760x2140)</button>
+    <button id="loadTestMG1">MG1 (1996x2457)</button>
+    <button id="loadTestMG2">MG2 (1996x2457)</button>
+    <button id="loadTestMG3">MG3 (3064x4774)</button>
+    <span style="color:#555">|</span>
+    <label>Decoder:
+      <select id="decoderType">
+        <option value="js" selected>JavaScript</option>
+        <option value="wasm">Go WASM</option>
+      </select>
+    </label>
+    <span id="wasmStatus" style="font-size:0.75em;color:#555"></span>
+    <span style="color:#555">|</span>
+    <label>Width: <input type="number" id="rawWidth" value="512" min="1"></label>
+    <label>Height: <input type="number" id="rawHeight" value="512" min="1"></label>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats" id="stats" style="display:none">
+    <div class="stat"><div class="label">Dimensions</div><div class="value" id="statDims">-</div></div>
+    <div class="stat"><div class="label">Compressed</div><div class="value" id="statComp">-</div></div>
+    <div class="stat"><div class="label">Original</div><div class="value" id="statOrig">-</div></div>
+    <div class="stat"><div class="label">Ratio</div><div class="value" id="statRatio">-</div></div>
+    <div class="stat"><div class="label">Decode Time</div><div class="value" id="statTime">-</div></div>
+    <div class="stat"><div class="label">Throughput</div><div class="value" id="statThroughput">-</div></div>
+  </div>
+
+  <!-- Window/Level -->
+  <div class="wl-controls" id="wlControls" style="display:none">
+    <label>Window: <input type="range" id="wlWindow" min="1" max="65535" value="65535"></label>
+    <span id="wlWindowVal" style="font-size:0.85em;color:#aaa">65535</span>
+    <label>Level: <input type="range" id="wlLevel" min="0" max="65535" value="32768"></label>
+    <span id="wlLevelVal" style="font-size:0.85em;color:#aaa">32768</span>
+    <button id="wlReset">Auto W/L</button>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-wrap">
+    <div class="empty" id="placeholder">Decoded image will appear here</div>
+    <canvas id="canvas" style="display:none"></canvas>
+  </div>
+
+  <!-- Log -->
+  <div class="log" id="log"></div>
+</div>
+
+<script type="module">
+import { MICDecoder } from './mic-decoder.js';
+import { loadMICWasm } from './mic-decoder-wasm.js';
+
+let wasmDecoder = null;
+// Eagerly load WASM in background
+loadMICWasm().then(d => {
+  wasmDecoder = d;
+  document.getElementById('wasmStatus').textContent = '(WASM ready)';
+  document.getElementById('wasmStatus').style.color = '#4caf50';
+}).catch(e => {
+  document.getElementById('wasmStatus').textContent = '(WASM unavailable)';
+  document.getElementById('wasmStatus').style.color = '#f44336';
+});
+
+function getDecoder() {
+  const type = document.getElementById('decoderType').value;
+  if (type === 'wasm' && wasmDecoder) return { impl: wasmDecoder, name: 'WASM' };
+  return { impl: MICDecoder, name: 'JavaScript' };
+}
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+let currentPixels = null;
+let currentWidth = 0;
+let currentHeight = 0;
+let currentMaxValue = 0;
+
+function log(msg, cls = 'info') {
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+// ─── Window/Level Rendering ────────────────────────────────────────
+
+function renderImage(pixels, width, height, window, level) {
+  const canvas = $('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.style.display = 'block';
+  $('placeholder').style.display = 'none';
+
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(width, height);
+  const data = imgData.data;
+
+  const low = level - window / 2;
+  const high = level + window / 2;
+  const range = high - low;
+
+  for (let i = 0; i < pixels.length; i++) {
+    const v = pixels[i];
+    let gray;
+    if (v <= low) gray = 0;
+    else if (v >= high) gray = 255;
+    else gray = ((v - low) / range * 255) | 0;
+
+    const j = i * 4;
+    data[j] = gray;
+    data[j + 1] = gray;
+    data[j + 2] = gray;
+    data[j + 3] = 255;
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function autoWindowLevel(pixels) {
+  let min = 65535, max = 0;
+  // Sample every 4th pixel for speed on large images
+  const step = pixels.length > 100000 ? 4 : 1;
+  for (let i = 0; i < pixels.length; i += step) {
+    const v = pixels[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const window = max - min || 1;
+  const level = (min + max) >>> 1;
+  return { window, level, min, max };
+}
+
+function updateDisplay() {
+  if (!currentPixels) return;
+  const w = parseInt($('wlWindow').value);
+  const l = parseInt($('wlLevel').value);
+  $('wlWindowVal').textContent = w;
+  $('wlLevelVal').textContent = l;
+  renderImage(currentPixels, currentWidth, currentHeight, w, l);
+}
+
+$('wlWindow').addEventListener('input', updateDisplay);
+$('wlLevel').addEventListener('input', updateDisplay);
+$('wlReset').addEventListener('click', () => {
+  if (!currentPixels) return;
+  const { window, level } = autoWindowLevel(currentPixels);
+  $('wlWindow').value = window;
+  $('wlLevel').value = level;
+  updateDisplay();
+});
+
+// ─── Decoding ──────────────────────────────────────────────────────
+
+function decodeMicFile(data) {
+  const { impl: decoder, name: decoderName } = getDecoder();
+  log(`Decoding .mic file (${formatBytes(data.length)}) using ${decoderName} decoder...`);
+  const t0 = performance.now();
+
+  try {
+    const result = decoder.decodeFile(new Uint8Array(data));
+    const t1 = performance.now();
+    const elapsed = t1 - t0;
+
+    currentPixels = result.pixels;
+    currentWidth = result.width;
+    currentHeight = result.height;
+
+    const origSize = result.width * result.height * 2;
+    const compSize = data.byteLength;
+
+    log(`Decoded: ${result.width}x${result.height} (${result.pixels.length} pixels)`, 'success');
+    log(`Time: ${elapsed.toFixed(2)} ms | Throughput: ${(origSize / elapsed / 1000).toFixed(1)} MB/s`, 'timing');
+
+    $('stats').style.display = 'grid';
+    $('statDims').textContent = `${result.width} x ${result.height}`;
+    $('statComp').textContent = formatBytes(compSize);
+    $('statOrig').textContent = formatBytes(origSize);
+    $('statRatio').textContent = (origSize / compSize).toFixed(2) + ':1';
+    $('statTime').textContent = elapsed.toFixed(2) + ' ms';
+    $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+
+    // Auto window/level and render
+    $('wlControls').style.display = 'flex';
+    const { window, level } = autoWindowLevel(currentPixels);
+    $('wlWindow').max = 65535;
+    $('wlLevel').max = 65535;
+    $('wlWindow').value = window;
+    $('wlLevel').value = level;
+    updateDisplay();
+
+  } catch (e) {
+    log('Decode error: ' + e.message, 'error');
+    console.error(e);
+  }
+}
+
+function decodeRawFile(data, width, height) {
+  log(`Loading raw ${width}x${height} image (${formatBytes(data.byteLength)})...`);
+
+  if (data.byteLength !== width * height * 2) {
+    log(`Error: file size ${data.byteLength} != expected ${width * height * 2}`, 'error');
+    return;
+  }
+
+  const dv = new DataView(data);
+  currentPixels = new Uint16Array(width * height);
+  for (let i = 0; i < currentPixels.length; i++) {
+    currentPixels[i] = dv.getUint16(i * 2, true);
+  }
+  currentWidth = width;
+  currentHeight = height;
+
+  $('stats').style.display = 'grid';
+  $('statDims').textContent = `${width} x ${height}`;
+  $('statComp').textContent = 'N/A (raw)';
+  $('statOrig').textContent = formatBytes(data.byteLength);
+  $('statRatio').textContent = '1:1';
+  $('statTime').textContent = 'N/A';
+  $('statThroughput').textContent = 'N/A';
+
+  $('wlControls').style.display = 'flex';
+  const { window, level } = autoWindowLevel(currentPixels);
+  $('wlWindow').value = window;
+  $('wlLevel').value = level;
+  updateDisplay();
+  log('Raw image loaded', 'success');
+}
+
+// ─── File Handling ─────────────────────────────────────────────────
+
+function handleFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (file.name.endsWith('.mic')) {
+      decodeMicFile(reader.result);
+    } else {
+      const w = parseInt($('rawWidth').value);
+      const h = parseInt($('rawHeight').value);
+      decodeRawFile(reader.result, w, h);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Drag & drop
+const dz = $('dropzone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+dz.addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', e => {
+  if (e.target.files.length) handleFile(e.target.files[0]);
+});
+
+// Test image buttons
+async function loadTestFile(name) {
+  log(`Fetching testdata/${name}.mic ...`);
+  try {
+    const resp = await fetch(`testdata/${name}.mic`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.arrayBuffer();
+    decodeMicFile(data);
+  } catch (e) {
+    log(`Error loading test file: ${e.message}`, 'error');
+    log('Make sure you are serving from the web/ directory (e.g., npx serve .)', 'info');
+  }
+}
+
+$('loadTestMR').addEventListener('click', () => loadTestFile('MR'));
+$('loadTestCT').addEventListener('click', () => loadTestFile('CT'));
+$('loadTestCR').addEventListener('click', () => loadTestFile('CR'));
+$('loadTestMG1').addEventListener('click', () => loadTestFile('MG1'));
+$('loadTestMG2').addEventListener('click', () => loadTestFile('MG2'));
+$('loadTestMG3').addEventListener('click', () => loadTestFile('MG3'));
+
+log('MIC Decoder ready. Drop a .mic file or load a test image.');
+</script>
+</body>
+</html>
