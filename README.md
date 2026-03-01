@@ -1,274 +1,353 @@
-# MIC - Medical Image Codec
-This library introduces a lossless medical image compression codec __MIC__ for 16 bit images implemented in __Go__ which provides compression ratio similar to JPEG 2000 but with much higher speed of compression and decompression.
+# MIC — Medical Image Codec
 
-|Branch |Status |
-|-------|-------|
-|main |![example workflow](https://github.com/pappuks/medical-image-codec/actions/workflows/go.yml/badge.svg)
+A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC achieves JPEG 2000–comparable compression ratios with significantly higher decompression throughput — up to **16 GB/s** on large images.
 
+| Branch | Status |
+|--------|--------|
+| main | ![CI](https://github.com/pappuks/medical-image-codec/actions/workflows/go.yml/badge.svg) |
 
-## Performance of MIC and comparison with High Throughput JPEG 2000 (HTJ2K)
+## Why MIC?
 
-![Comparison with HTJ2K](./testdata/MIC-HTJ2K-Comparison.png)
+| Property | Value |
+|----------|-------|
+| Compression ratio | 1.7× – 8.9× (lossless) |
+| Peak decompression speed | up to 16 GB/s (ARM64, 64 cores) |
+| Supported bit depths | 8–16 bit greyscale |
+| Multi-frame support | MIC2 container (random access or temporal prediction) |
+| Browser support | JavaScript + WASM decoder included |
 
-## Compression Algorithm
-The compression algorithm uses a combination of [Delta Encoding](https://en.wikipedia.org/wiki/Delta_encoding), [RLE](https://en.wikipedia.org/wiki/Run-length_encoding) and [Huffman Coding](https://en.wikipedia.org/wiki/Huffman_coding) or [Finite State Entropy (FSE)](https://github.com/Cyan4973/FiniteStateEntropy) to achieve the best compression and get best performance. By tweaking each of the algorithms to efficiently function on 16 bit greyscale medical images we have achieved good compression with very good decompression speed.
+## Table of Contents
 
-### Delta Encoding
+1. [Quick Start](#quick-start)
+2. [Compression Pipeline](#compression-pipeline)
+3. [Multi-Frame Support (MIC2)](#multi-frame-support-mic2)
+4. [Algorithm Details](#algorithm-details)
+5. [Compression Results](#compression-results)
+6. [Benchmark Results](#benchmark-results)
+7. [Browser Decoder](#browser-decoder)
+8. [CLI Reference](#cli-reference)
+9. [Comparison with HTJ2K](#comparison-with-htj2k)
+10. [Roadmap](#roadmap)
 
-The delta encoding implementation encodes the difference between current pixel and average of top and left pixel. If the difference is greater than a threshold then we encode the pixel value directly preceded by a delimiter.
+---
 
-Based on the pixel depth of an image, which is determined by the maximum pixel value, the threshold and delimiter for delta encoding are determined.
+## Quick Start
 
-### RLE
+```bash
+# Build the CLI tool
+go build -o mic-compress ./cmd/mic-compress/
 
-The RLE algorithm encodes runs of similar or different values by putting the run count followed by the values. Each run length is of minimum length of 3. This is done because it guarantees that the RLE encoded data is never longer than the original.
+# Compress a single-frame DICOM
+./mic-compress -dicom scan.dcm -output scan.mic
 
-The similar and different runs are distinguished by ensuring that the run value of similar runs is positive and the run value for dis-similar values is negative. If we don’t want the values to be negative then we can also choose a constant value, where any run value less than this constant is considered to be for similar runs and any value greater than this constant is considered for dis-similar values. In our implementation we choose this constant, called MidCount, based on the max value pixel of the image.
+# Compress a multi-frame DICOM (e.g., Breast Tomosynthesis)
+./mic-compress -dicom tomo.dcm -output tomo.mic
 
-### Huffman Encoding
+# Run all tests
+go test -v ./...
 
-Huffman encoding of the values is done by first constructing a huffman tree out of the input values. As we are encoding 16 bit alphabet it has a potential of having high number of symbols (2^16). 
+# Run benchmarks
+go test -bench=. -benchtime=10x
+```
 
-To prevent a large huffman table we restrict the number of symbols. We only consider the most highly occurring  symbols for constructing the huffman tree. 
+---
 
-We iteratively select the symbols which gives us a tree with maximum depth of 14. (Old Approach: A maximum of 500 unique symbols and only symbols whose occurrence frequency is more then 1/200 of the occurrence frequency of most frequent symbol are chosen.)
+## Compression Pipeline
 
-This ensures that the tree length is limited and speeds up the encoding and decoding process. It also saves space as we have to save the huffman tree with the encoded values. [Canonical huffman codes](https://en.wikipedia.org/wiki/Canonical_Huffman_code) are used for construction of the huffman table (codebook) which ensures that the constructed table is most compact and efficient for encoding and decoding.
+MIC chains four stages to compress 16-bit medical images:
 
-During the encoding process we add a delimiter before each symbol which is also part of the huffman table. The delimiter is chosen based on the max pixel value of the image.
+```
+Raw 16-bit Pixels
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│           Delta Encoding                 │
+│  Each pixel → value − avg(top, left)     │
+│  Large diffs stored with an escape code  │
+│  derived from the image bit depth        │
+└─────────────────┬────────────────────────┘
+                  │
+                  ▼
+┌──────────────────────────────────────────┐
+│               RLE                        │
+│  Same runs:  count + one repeated value  │
+│  Diff runs:  count + N distinct values   │
+│  Min run = 3 → output never larger       │
+└─────────────────┬────────────────────────┘
+                  │
+          ┌───────┴───────┐
+          │               │
+          ▼               ▼
+   ┌────────────┐  ┌────────────────┐
+   │    FSE     │  │  Can. Huffman  │
+   │ (ANS-based)│  │  (depth ≤ 14)  │
+   │ Best speed │  │  Best ratio    │
+   └─────┬──────┘  └───────┬────────┘
+         └────────┬────────┘
+                  │
+                  ▼
+          Compressed .mic file
+```
 
-### FSE
+> **Recommended:** Use `Delta + RLE + FSE` for production — it gives the best decompression throughput.
+> Use `Delta + RLE + Huffman` if you need the smallest possible file size.
 
-We use [Finite State Entropy](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) encoder for compression. Just like the Huffman coding implementation, the FSE algorithm has also been updated to handle 16 bit data.
+---
 
-I took the 8 bit implementation from https://github.com/klauspost/compress and the 16 bit FSE implementation from https://github.com/Cyan4973/FiniteStateEntropy. The 16 bit FSE implementation in my repository has been updated to handle max values till the range of 65535. This is a deviation from the implementation in https://github.com/Cyan4973/FiniteStateEntropy where the max supported value is 4095.
+## Multi-Frame Support (MIC2)
 
-The 16 bit FSE implementation can be found in [compressor](./fsecompressu16.go) and [decompressor](./fsedecompressu16.go).
+MIC2 is a container format for multi-frame DICOM images (e.g., Breast Tomosynthesis / DBT).
 
-### Multi-Frame Compression (MIC2)
+### MIC2 File Layout
 
-MIC supports multi-frame medical images (e.g., Breast Tomosynthesis / DBT) via the MIC2 container format. Two compression modes are available:
+```
+Byte offset   Field
+────────────  ─────────────────────────────────────────
+0  – 3        Magic: "MIC2"
+4  – 7        Image width        (uint32 LE)
+8  – 11       Image height       (uint32 LE)
+12 – 15       Frame count        (uint32 LE)
+16            Pipeline flags     bit0=spatial  bit1=temporal
+17 – 19       Reserved
+────────────  ─────────────────────────────────────────
+20 – …        Frame offset table (N × 8 bytes each)
+              └─ per entry: offset (uint32) + length (uint32)
+────────────  ─────────────────────────────────────────
+…             Frame 0 compressed data
+              Frame 1 compressed data
+              ⋮
+              Frame N-1 compressed data
+```
 
-- **Independent mode**: Each frame is compressed separately using the standard Delta+RLE+FSE pipeline. Any frame can be decoded independently (random access).
-- **Temporal mode**: Frame 0 uses spatial Delta+RLE+FSE. Subsequent frames compute inter-frame residuals using ZigZag encoding (`(diff << 1) ^ (diff >> 15)`), which are then compressed with RLE+FSE (no spatial delta, since temporal residuals lack spatial correlation).
+### Two Compression Modes
 
-The temporal residual pipeline skips spatial delta encoding because ZigZag-encoded inter-frame differences distribute differently from raw pixel values — they cluster around zero but lack the spatial structure that the delta predictor exploits.
+```
+Independent Mode                   Temporal Mode
+─────────────────────────────────  ─────────────────────────────────────────
+Frame 0  →  Delta+RLE+FSE          Frame 0  →  Delta+RLE+FSE
+Frame 1  →  Delta+RLE+FSE          Frame 1  →  ZigZag(residual)+RLE+FSE
+Frame 2  →  Delta+RLE+FSE          Frame 2  →  ZigZag(residual)+RLE+FSE
+  ⋮                                  ⋮
+Frame N  →  Delta+RLE+FSE          Frame N  →  ZigZag(residual)+RLE+FSE
 
-#### Multi-Frame Compression Results (69-frame Breast Tomosynthesis, 2457x1890, 10-bit)
+✓ Random access to any frame       residual = current frame − previous frame
+✓ Best for spatially smooth data   ZigZag maps signed diff → unsigned
+                                   ✓ Candidate for low-spatial-correlation data
+```
+
+### Multi-Frame Benchmark (69-frame Breast Tomosynthesis, 2457×1890, 10-bit)
 
 | Mode | Raw Size | Compressed | Ratio |
 |------|----------|------------|-------|
-| Independent | 614 MB | 46.1 MB | 13.33:1 |
-| Temporal | 614 MB | 47.5 MB | 12.93:1 |
+| Independent | 614 MB | 46.1 MB | **13.3×** |
+| Temporal | 614 MB | 47.5 MB | 12.9× |
 
-For this dataset, independent mode achieves slightly better compression because the spatial delta predictor is highly effective on smooth mammographic images (10-bit, large uniform detector regions). Temporal mode may outperform on datasets with less spatial correlation but high inter-frame similarity.
+For smooth mammographic images the spatial predictor outperforms inter-frame prediction. Temporal mode may win on datasets with less spatial redundancy.
 
-### Wavelet Transform (5/3 Integer, Lossless)
+---
 
-We implemented the [Le Gall 5/3 integer wavelet](https://en.wikipedia.org/wiki/Cohen%E2%80%93Daubechies%E2%80%93Feauveau_wavelet) — the same transform used by JPEG 2000 for lossless coding — as an alternative decorrelation stage, yielding two new pipelines: **Wavelet+FSE** and **Wavelet+RLE+FSE**.
+## Algorithm Details
 
-The transform is a two-tap predict/update lifting scheme applied in 2D (horizontal rows first, then vertical columns). It supports 1–4 decomposition levels and uses an overflow-safe ZigZag encoding with an escape code for coefficients that exceed the `int16` range (a requirement for full 16-bit CT images).
+### Delta Encoding
 
-**Result: Delta+RLE+FSE outperforms Wavelet+FSE on all tested DICOM modalities**, both in compression ratio (by 10–50%) and decompression throughput (by up to 2.5×). See the [full analysis and benchmark results →](./docs/wavelet-fse-analysis.md).
+Encodes each pixel as its difference from the average of its top and left neighbors, transforming spatially correlated pixels into small, zero-clustered residuals.
 
-The implementation lives in [`waveletu16.go`](./waveletu16.go) and [`waveletfsecompressu16.go`](./waveletfsecompressu16.go).
+```
+          top
+           │
+  left ──► pixel  →  delta = pixel − avg(left, top)
+```
 
-### Optimizations for 8-bit and 12-16 bit Images
+Differences that exceed the threshold are stored verbatim, preceded by an escape delimiter whose value is derived from the image bit depth.
 
-The codec dynamically adapts to image bit depth using `bits.Len16(maxValue)`. All thresholds, delimiters, and table sizes derive from the actual pixel depth rather than compile-time constants. Several targeted optimizations improve both compression ratio and decompression speed across the full 8-16 bit range:
+### RLE
 
-#### Compression Ratio Improvements
+Encodes the delta-coded stream as runs:
 
-- **Adaptive tableLog selection**: The FSE encoder automatically selects a higher tableLog (12 vs the default 11) when the data has high symbol density — more than 128 distinct symbols with at least 32 data points per symbol. This gives the frequency normalization more precision for 12-16 bit medical images after delta coding, yielding 4-7% better compression ratios on CR and MG modalities. For 8-bit images with fewer symbols, the default tableLog is retained to avoid wasting header space.
+- **Same runs** — a count followed by a single repeated value (most common after delta coding)
+- **Diff runs** — a count followed by that many distinct values
 
-- **Dual-buffer histogram counting**: Two count arrays process symbol pairs in parallel during histogram construction, reducing store-to-load forwarding stalls when consecutive pixels have similar values (common in medical images with spatial correlation).
+The minimum encoded run length is 3, guaranteeing the RLE output is never larger than the input.
 
-#### Decompression Speed Improvements
+### FSE (Finite State Entropy / ANS)
 
-- **Inlined FSE decode loop**: The inner FSE decompression loop inlines state transitions with a locally cached decode table reference, eliminating function call overhead and enabling better instruction-level parallelism. The symbols are read into local variables before being written to the output buffer, allowing the CPU to pipeline state lookups with memory writes.
+An [asymmetric numeral systems](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder. MIC extends the reference implementation to support up to 65 535 distinct symbols (vs 4 095 in the original). The encoder writes **backwards**; the decoder reads **forwards**.
 
-- **Branch-free delta decompression**: The delta decompression splits processing into corner pixel, first-row, first-column, and interior pixel loops. The interior loop — which handles the vast majority of pixels — runs with zero boundary checks, eliminating two branches per pixel.
+Key adaptive behavior: `tableLog` is automatically raised from 11 → 12 when symbol density is high (>128 distinct symbols, >32 samples each), yielding **4–7% better ratios** on CR and MG images.
 
-- **RLE decode fast-path**: The RLE decoder (`DecodeNext2`) fast-paths "same" runs, the most common case in delta-coded medical data, returning the recurring value immediately without touching the input slice. This avoids memory loads on the critical path for long runs of identical delta values.
+### Canonical Huffman
 
-- **Dynamic table sizing**: Compression and decompression tables (`symbolTT`, `stateTable`) are sized to the actual symbol range instead of always allocating for the full 65536-entry space. For 8-bit images this reduces the working set from 512KB to approximately 2KB, keeping hot tables entirely within L1 cache.
+An alternative entropy stage using [canonical Huffman codes](https://en.wikipedia.org/wiki/Canonical_Huffman_code). Symbol selection is capped iteratively so the tree depth stays ≤ 14 bits, keeping the codebook compact. Produces the smallest files but at lower decompression speed compared to FSE.
 
-## Compression Ratio
+---
 
-The tests are run for different DICOM image types MR, CT, CR, XR and MG. All the images are 16 bit with varying level for max pixel values. CT image is the only one with max pixel value of 65535.
+## Compression Results
 
-`DELTA + RLE + FSE` implementation gives the best speed. The `DELTA + RLE + Huffman` implementation provides the best compression.
+`Delta + RLE + FSE` — all images are 16-bit greyscale DICOM. CT has the widest dynamic range (max value 65 535).
 
-Here we are only showing `DELTA + RLE + FSE` implementation results. For `DELTA + RLE + Huffman` you can checkout [BenchmarkDeltaRLEHuffCompress](./fseu16_test.go#L83).
+| Modality | Dimensions | Raw Size | Compressed | Ratio |
+|----------|-----------|----------|------------|-------|
+| MR | 256×256 | 0.13 MB | 0.053 MB | **2.35×** |
+| CT | 512×512 | 0.50 MB | 0.22 MB | **2.24×** |
+| CR | 2140×1760 | 7.18 MB | 1.98 MB | **3.63×** |
+| XR | 2048×2577 | 10.1 MB | 5.79 MB | **1.74×** |
+| MG1 | 2457×1996 | 9.35 MB | 1.09 MB | **8.57×** |
+| MG2 | 2457×1996 | 9.35 MB | 1.09 MB | **8.55×** |
+| MG3 | 4774×3064 | 27.3 MB | 12.2 MB | **2.24×** |
+| MG4 | 4096×3328 | 26.0 MB | 7.49 MB | **3.47×** |
 
+### Adaptive tableLog improvement
 
-|Test/Modality-Cores|Ratio|Original Size(MB)|Compressed Size (MB)|Rows|Columns|
-|-------------------|-----|-----------------|--------------------|----|-------|
-|BenchmarkDeltaRLEFSECompress/MR-16|2.348|0.1250|0.05323|256|256|
-|BenchmarkDeltaRLEFSECompress/CT-16|2.238|0.5000|0.2235|512|512|
-|BenchmarkDeltaRLEFSECompress/CR-16|3.628|7.184|1.980|2140|1760|
-|BenchmarkDeltaRLEFSECompress/XR-16|1.738|10.07|5.792|2048|2577|
-|BenchmarkDeltaRLEFSECompress/MG1-16|8.566|9.354|1.092|2457|1996|
-|BenchmarkDeltaRLEFSECompress/MG2-16|8.553|9.354|1.094|2457|1996|
-|BenchmarkDeltaRLEFSECompress/MG3-16|2.237|27.26|12.19|4774|3064|
-|BenchmarkDeltaRLEFSECompress/MG4-16|3.474|26.00|7.485|4096|3328|
-
-#### Compression ratio improvement from adaptive tableLog
-
-|Modality|Previous Ratio|New Ratio|Improvement|
-|--------|-------------|---------|-----------|
-|CR|3.474|3.628|+4.4%|
-|MG1|7.995|8.566|+7.1%|
-|MG2|7.984|8.553|+7.1%|
+| Modality | Before | After | Gain |
+|----------|--------|-------|------|
+| CR | 3.47× | 3.63× | +4.4% |
+| MG1 | 7.99× | 8.57× | +7.1% |
+| MG2 | 7.98× | 8.55× | +7.1% |
 
 ### Wavelet+FSE vs Delta+RLE+FSE
 
-The table below compares the wavelet-based pipelines against the reference Delta+RLE+FSE pipeline. All measurements on Intel Xeon Platinum 8581C @ 2.10 GHz (16 cores). See the [detailed analysis](./docs/wavelet-fse-analysis.md) for a full explanation of the results.
+A 5/3 integer wavelet transform was evaluated as an alternative decorrelation stage. **Delta+RLE+FSE wins on all DICOM modalities**, in both compression ratio and decompression speed. Full analysis: [docs/wavelet-fse-analysis.md](./docs/wavelet-fse-analysis.md).
 
 #### Compression Ratio
 
-|Modality|Delta+RLE+FSE|Wavelet+FSE|Wavelet+RLE+FSE|
-|--------|:-----------:|:---------:|:-------------:|
-|MR (256×256)|**2.35:1**|2.09:1|2.09:1|
-|CT (512×512)|**2.24:1**|1.48:1|1.48:1|
-|CR (2140×1760)|**3.63:1**|2.59:1|2.59:1|
-|XR (2048×2577)|**1.74:1**|1.53:1|1.53:1|
-|MG1 (2457×1996)|**8.57:1**|4.91:1|7.28:1|
-|MG2 (2457×1996)|**8.55:1**|4.90:1|7.27:1|
-|MG3 (4774×3064)|**2.29:1**|1.90:1|1.93:1|
-|MG4 (4096×3328)|**3.47:1**|2.63:1|3.11:1|
+| Modality | Delta+RLE+FSE | Wavelet+FSE | Wavelet+RLE+FSE |
+|----------|:---:|:---:|:---:|
+| MR (256×256) | **2.35×** | 2.09× | 2.09× |
+| CT (512×512) | **2.24×** | 1.48× | 1.48× |
+| CR (2140×1760) | **3.63×** | 2.59× | 2.59× |
+| XR (2048×2577) | **1.74×** | 1.53× | 1.53× |
+| MG1 (2457×1996) | **8.57×** | 4.91× | 7.28× |
+| MG2 (2457×1996) | **8.55×** | 4.90× | 7.27× |
+| MG3 (4774×3064) | **2.29×** | 1.90× | 1.93× |
+| MG4 (4096×3328) | **3.47×** | 2.63× | 3.11× |
 
 #### Decompression Speed (MB/s)
 
-|Modality|Delta+RLE+FSE|Wavelet+FSE|Wavelet+RLE+FSE|
-|--------|:-----------:|:---------:|:-------------:|
-|MR|116|**146**|122|
-|CT|165|**168**|142|
-|CR|**543**|418|371|
-|XR|**605**|576|486|
-|MG1|**1530**|592|680|
-|MG2|**1493**|618|644|
-|MG3|**606**|387|352|
-|MG4|**1054**|480|579|
-
-## Benchmark Tests
-The benchmarks are executed using the golang testing benchmark library. The file __fseu16_test.go__ contains these benchmark tests. These can be executed by using the command `go test -bench=.`
-
-The benchmark test focuses on the decompression speed and compression ratio. Compression speed is not considered as we are primarily looking a use case of rendering/decoding compressed images on the fly.
-
-### Benchmarks on different CPU's
-
-Test Command: 
-`go test -benchmem -run=^$ -benchtime=200x -bench ^BenchmarkDeltaRLEFSECompress$ mic`
-
-__Observation : Faster RAM has a big impact on performance. For example any machine with DDR5 RAM gives better performance as compared to older machine, even if the older machine has higher number of cores__
-
----
-#### AWS EC2 instance type: c7g.metal | ARM64 | 64 cores
-
-|Test/Modality-Cores|FPS|Decompression Speed|
-|-------------------|---|-------------------|
-|BenchmarkDeltaRLEFSECompress/MR-64|__17411__|2282.11 MB/s|
-|BenchmarkDeltaRLEFSECompress/CT-64|__8455__|4432.93 MB/s|
-|BenchmarkDeltaRLEFSECompress/CR-64|__1132__|8526.87 MB/s|
-|BenchmarkDeltaRLEFSECompress/XR-64|__891.6__|9411.37 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG1-64|__1671__|16387.11 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG2-64|__1634__|16023.00 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG3-64|__281.4__|8043.95 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG4-64|__558.0__|15212.83 MB/s|
+| Modality | Delta+RLE+FSE | Wavelet+FSE | Wavelet+RLE+FSE |
+|----------|:---:|:---:|:---:|
+| MR | 116 | **146** | 122 |
+| CT | 165 | **168** | 142 |
+| CR | **543** | 418 | 371 |
+| XR | **605** | 576 | 486 |
+| MG1 | **1 530** | 592 | 680 |
+| MG2 | **1 493** | 618 | 644 |
+| MG3 | **606** | 387 | 352 |
+| MG4 | **1 054** | 480 | 579 |
 
 ---
 
-#### AWS EC2 Instance Type: c7i.8xlarge | AMD64 | 32 cores | cpu: Intel(R) Xeon(R) Platinum 8488C
+## Benchmark Results
 
-|Test/Modality-Cores|FPS|Decompression Speed|
-|-------------------|---|-------------------|
-|BenchmarkDeltaRLEFSECompress/MR-32|8714|1142.14 MB/s|
-|BenchmarkDeltaRLEFSECompress/CT-32|2303|1207.58 MB/s|
-|BenchmarkDeltaRLEFSECompress/CR-32|421.2|3172.45 MB/s|
-|BenchmarkDeltaRLEFSECompress/XR-32|309.7|3268.73 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG1-32|532.2|5219.59 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG2-32|522.4|5123.66 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG3-32|121.4|3468.36 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG4-32|182.1|4963.67 MB/s|
+Benchmarks measure **decompression speed** — the primary use case is real-time rendering of compressed DICOM.
 
----
+> **Note:** RAM speed has a larger impact than CPU clock speed. Machines with DDR5 RAM outperform older machines even at lower core counts.
 
-#### AWS EC2 Instance Type: c7g.8xlarge | ARM64 | 32 cores
-|Test/Modality-Cores|FPS|Decompression Speed|
-|-------------------|---|-------------------|
-|BenchmarkDeltaRLEFSECompress/MR-32|11627|1523.94 MB/s|
-BenchmarkDeltaRLEFSECompress/CT-32|4170|2186.07 MB/s|
-BenchmarkDeltaRLEFSECompress/CR-32|569.5|4290.26 MB/s|
-BenchmarkDeltaRLEFSECompress/XR-32|432.2|4562.04 MB/s|
-BenchmarkDeltaRLEFSECompress/MG1-32|907.5|8901.02 MB/s|
-BenchmarkDeltaRLEFSECompress/MG2-32|803.3|7878.92 MB/s|
-BenchmarkDeltaRLEFSECompress/MG3-32|155.9|4454.75 MB/s|
-BenchmarkDeltaRLEFSECompress/MG4-32|261.6|7132.05 MB/s|
+```bash
+# Run the benchmark
+go test -benchmem -run=^$ -benchtime=200x -bench ^BenchmarkDeltaRLEFSECompress$ mic
+```
 
----
+### AWS c7g.metal — ARM64 | 64 cores
 
-#### Mac Studio | ARM64 | 12 cores | cpu : M2 Max
+| Modality | FPS | Decompression Speed |
+|----------|-----|---------------------|
+| MR (256×256) | **17 411** | 2 282 MB/s |
+| CT (512×512) | **8 455** | 4 433 MB/s |
+| CR (2140×1760) | **1 132** | 8 527 MB/s |
+| XR (2048×2577) | **892** | 9 411 MB/s |
+| MG1 (2457×1996) | **1 671** | **16 387 MB/s** |
+| MG2 (2457×1996) | **1 634** | 16 023 MB/s |
+| MG3 (4774×3064) | **281** | 8 044 MB/s |
+| MG4 (4096×3328) | **558** | 15 213 MB/s |
 
-|Test/Modality-Cores|FPS|Decompression Speed|
-|-------------------|---|-------------------|
-|BenchmarkDeltaRLEFSECompress/MR-12|8044|1054.28 MB/s|
-|BenchmarkDeltaRLEFSECompress/CT-12|2137|1120.60 MB/s|
-|BenchmarkDeltaRLEFSECompress/CR-12|277.3|2089.00 MB/s|
-|BenchmarkDeltaRLEFSECompress/XR-12|199.1|2101.12 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG1-12|373.8|3666.23 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG2-12|373.1|3659.37 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG3-12|78.35|2239.37 MB/s|
-|BenchmarkDeltaRLEFSECompress/MG4-12|116.9|3188.20 MB/s|
+### AWS c7i.8xlarge — AMD64 | 32 cores (Intel Xeon Platinum 8488C)
+
+| Modality | FPS | Decompression Speed |
+|----------|-----|---------------------|
+| MR | 8 714 | 1 142 MB/s |
+| CT | 2 303 | 1 208 MB/s |
+| CR | 421 | 3 172 MB/s |
+| XR | 310 | 3 269 MB/s |
+| MG1 | 532 | 5 220 MB/s |
+| MG2 | 522 | 5 124 MB/s |
+| MG3 | 121 | 3 468 MB/s |
+| MG4 | 182 | 4 964 MB/s |
+
+### AWS c7g.8xlarge — ARM64 | 32 cores
+
+| Modality | FPS | Decompression Speed |
+|----------|-----|---------------------|
+| MR | 11 627 | 1 524 MB/s |
+| CT | 4 170 | 2 186 MB/s |
+| CR | 570 | 4 290 MB/s |
+| XR | 432 | 4 562 MB/s |
+| MG1 | 908 | 8 901 MB/s |
+| MG2 | 803 | 7 879 MB/s |
+| MG3 | 156 | 4 455 MB/s |
+| MG4 | 262 | 7 132 MB/s |
+
+### Mac Studio — Apple M2 Max | ARM64 | 12 cores
+
+| Modality | FPS | Decompression Speed |
+|----------|-----|---------------------|
+| MR | 8 044 | 1 054 MB/s |
+| CT | 2 137 | 1 121 MB/s |
+| CR | 277 | 2 089 MB/s |
+| XR | 199 | 2 101 MB/s |
+| MG1 | 374 | 3 666 MB/s |
+| MG2 | 373 | 3 659 MB/s |
+| MG3 | 78 | 2 239 MB/s |
+| MG4 | 117 | 3 188 MB/s |
 
 ---
 
 ## Browser Decoder
 
-A browser-based decoder is available in the [`web/`](./web/) directory, providing both a **pure JavaScript** ES module (~15 KB, zero dependencies) and a **Go WASM** build for lossless decompression of `.mic` files directly in the browser.
+A browser-based decoder lives in [`web/`](./web/):
 
-Features:
-- Drag-and-drop `.mic` file loading and pre-compressed test image buttons
-- Window/Level controls for diagnostic viewing of 16-bit dynamic range
-- Toggle between JavaScript and WASM decoders
-- Pixel-perfect verification against the Go implementation (all test images pass)
-- Decode throughput of ~10-30M pixels/s in JavaScript (V8), higher with WASM
-- **Multi-frame movie player** for MIC2 files: play/pause, prev/next frame, frame slider, configurable FPS, loop toggle, keyboard shortcuts (Space, Left/Right arrows)
+- **Pure JavaScript** ES module (~15 KB, zero dependencies)
+- **Go WASM** build for maximum throughput
+- Drag-and-drop `.mic` / `.mic2` file loading
+- Window/Level controls for 16-bit diagnostic viewing
+- **Multi-frame movie player** — play/pause, frame slider, configurable FPS, keyboard shortcuts (Space, ←/→)
+- ~10–30 M pixels/s in JavaScript (V8), higher with WASM
 
-See the **[Web Decoder README](./web/README.md)** for the full API reference, integration guide, decompression pipeline walkthrough, and browser compatibility details.
+See the **[Web Decoder README](./web/README.md)** for the full API reference and integration guide.
 
-## CLI Usage
+---
 
-### Compress single-frame images
+## CLI Reference
 
 ```bash
 go build -o mic-compress ./cmd/mic-compress/
 
-# Raw binary input
+# Compress a raw binary image
 ./mic-compress -input image.bin -width 512 -height 512 -output image.mic
 
-# DICOM input (single frame → MIC1)
+# Compress a single-frame DICOM → MIC1
 ./mic-compress -dicom scan.dcm -output scan.mic
+
+# Compress a multi-frame DICOM (independent mode, default — random frame access)
+./mic-compress -dicom tomo.dcm -output tomo.mic
+
+# Compress a multi-frame DICOM (temporal prediction mode)
+./mic-compress -dicom tomo.dcm -output tomo.mic -temporal
 
 # Generate all test .mic files (single-frame + multi-frame)
 ./mic-compress -testdata
 ```
 
-### Compress multi-frame DICOM images
+---
 
-```bash
-# Independent mode (default, allows random frame access)
-./mic-compress -dicom tomo.dcm -output tomo.mic
+## Comparison with HTJ2K
 
-# Temporal mode (inter-frame prediction)
-./mic-compress -dicom tomo.dcm -output tomo.mic -temporal
-```
+![Comparison with HTJ2K](./testdata/MIC-HTJ2K-Comparison.png)
 
-## TO DO
+---
 
-No project can be complete without a to-do list:
-- ~~Implement browser based decoding in JS and WASM.~~ — implemented; see [web decoder](./web/README.md).
-- ~~Multi resolution progressive encoding by using Wavelet Transform (5-3 integer filter)~~ — implemented and benchmarked; see [wavelet analysis](./docs/wavelet-fse-analysis.md). Wavelet+FSE does not improve over Delta+RLE+FSE for lossless; it remains a candidate for a future **lossy** or **progressive** mode.
-- ~~Multi-frame image support (e.g., Breast Tomosynthesis)~~ — implemented with MIC2 container format; independent and temporal compression modes, browser movie player.
-- Try and implement few of the suggestions provided by [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)
+## Roadmap
 
+- [x] Browser-based decoding in JS and WASM — see [web decoder](./web/README.md)
+- [x] Multi-frame image support (Breast Tomosynthesis) — MIC2 container with independent and temporal modes, browser movie player
+- [x] Wavelet (5/3 integer) decorrelation stage — benchmarked; Delta+RLE+FSE wins for lossless; wavelet remains a candidate for a future lossy/progressive mode
+- [ ] Implement suggestions from [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)
