@@ -9,7 +9,7 @@
 /**
  * Load the MIC WASM decoder.
  * @param {string} [wasmPath='mic-decoder.wasm'] Path to the .wasm file
- * @returns {Promise<{decode, decodeFile, fseDecompress, deltaDecompress, version}>}
+ * @returns {Promise<{decode, decodeFile, fseDecompress, deltaDecompress, parseMIC2Header, decodeFrame, version}>}
  */
 export async function loadMICWasm(wasmPath = 'mic-decoder.wasm') {
   // Load wasm_exec.js if not already loaded
@@ -88,6 +88,29 @@ export async function loadMICWasm(wasmPath = 'mic-decoder.wasm') {
      */
     deltaDecompress(deltaData, width, height) {
       const result = wasm.deltaDecompress(deltaData, width, height);
+      if (result instanceof Error) throw result;
+      return result;
+    },
+
+    /**
+     * Parse MIC2 header without decompressing.
+     * @param {Uint8Array} fileBytes
+     * @returns {{ width: number, height: number, frameCount: number, temporal: boolean }}
+     */
+    parseMIC2Header(fileBytes) {
+      const result = wasm.parseMIC2Header(fileBytes);
+      if (result instanceof Error) throw result;
+      return result;
+    },
+
+    /**
+     * Decode a single frame from a MIC2 multiframe file.
+     * @param {Uint8Array} fileBytes
+     * @param {number} frameIndex
+     * @returns {{ pixels: Uint16Array, width: number, height: number }}
+     */
+    decodeFrame(fileBytes, frameIndex) {
+      const result = wasm.decodeFrame(fileBytes, frameIndex);
       if (result instanceof Error) throw result;
       return result;
     },

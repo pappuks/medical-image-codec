@@ -45,6 +45,24 @@ I took the 8 bit implementation from https://github.com/klauspost/compress and t
 
 The 16 bit FSE implementation can be found in [compressor](./fsecompressu16.go) and [decompressor](./fsedecompressu16.go).
 
+### Multi-Frame Compression (MIC2)
+
+MIC supports multi-frame medical images (e.g., Breast Tomosynthesis / DBT) via the MIC2 container format. Two compression modes are available:
+
+- **Independent mode**: Each frame is compressed separately using the standard Delta+RLE+FSE pipeline. Any frame can be decoded independently (random access).
+- **Temporal mode**: Frame 0 uses spatial Delta+RLE+FSE. Subsequent frames compute inter-frame residuals using ZigZag encoding (`(diff << 1) ^ (diff >> 15)`), which are then compressed with RLE+FSE (no spatial delta, since temporal residuals lack spatial correlation).
+
+The temporal residual pipeline skips spatial delta encoding because ZigZag-encoded inter-frame differences distribute differently from raw pixel values — they cluster around zero but lack the spatial structure that the delta predictor exploits.
+
+#### Multi-Frame Compression Results (69-frame Breast Tomosynthesis, 2457x1890, 10-bit)
+
+| Mode | Raw Size | Compressed | Ratio |
+|------|----------|------------|-------|
+| Independent | 614 MB | 46.1 MB | 13.33:1 |
+| Temporal | 614 MB | 47.5 MB | 12.93:1 |
+
+For this dataset, independent mode achieves slightly better compression because the spatial delta predictor is highly effective on smooth mammographic images (10-bit, large uniform detector regions). Temporal mode may outperform on datasets with less spatial correlation but high inter-frame similarity.
+
 ### Wavelet Transform (5/3 Integer, Lossless)
 
 We implemented the [Le Gall 5/3 integer wavelet](https://en.wikipedia.org/wiki/Cohen%E2%80%93Daubechies%E2%80%93Feauveau_wavelet) — the same transform used by JPEG 2000 for lossless coding — as an alternative decorrelation stage, yielding two new pipelines: **Wavelet+FSE** and **Wavelet+RLE+FSE**.
@@ -215,13 +233,42 @@ Features:
 - Toggle between JavaScript and WASM decoders
 - Pixel-perfect verification against the Go implementation (all test images pass)
 - Decode throughput of ~10-30M pixels/s in JavaScript (V8), higher with WASM
+- **Multi-frame movie player** for MIC2 files: play/pause, prev/next frame, frame slider, configurable FPS, loop toggle, keyboard shortcuts (Space, Left/Right arrows)
 
 See the **[Web Decoder README](./web/README.md)** for the full API reference, integration guide, decompression pipeline walkthrough, and browser compatibility details.
+
+## CLI Usage
+
+### Compress single-frame images
+
+```bash
+go build -o mic-compress ./cmd/mic-compress/
+
+# Raw binary input
+./mic-compress -input image.bin -width 512 -height 512 -output image.mic
+
+# DICOM input (single frame → MIC1)
+./mic-compress -dicom scan.dcm -output scan.mic
+
+# Generate all test .mic files (single-frame + multi-frame)
+./mic-compress -testdata
+```
+
+### Compress multi-frame DICOM images
+
+```bash
+# Independent mode (default, allows random frame access)
+./mic-compress -dicom tomo.dcm -output tomo.mic
+
+# Temporal mode (inter-frame prediction)
+./mic-compress -dicom tomo.dcm -output tomo.mic -temporal
+```
 
 ## TO DO
 
 No project can be complete without a to-do list:
 - ~~Implement browser based decoding in JS and WASM.~~ — implemented; see [web decoder](./web/README.md).
 - ~~Multi resolution progressive encoding by using Wavelet Transform (5-3 integer filter)~~ — implemented and benchmarked; see [wavelet analysis](./docs/wavelet-fse-analysis.md). Wavelet+FSE does not improve over Delta+RLE+FSE for lossless; it remains a candidate for a future **lossy** or **progressive** mode.
+- ~~Multi-frame image support (e.g., Breast Tomosynthesis)~~ — implemented with MIC2 container format; independent and temporal compression modes, browser movie player.
 - Try and implement few of the suggestions provided by [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)
 

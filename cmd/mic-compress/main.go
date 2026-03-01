@@ -4,6 +4,7 @@
 // Usage:
 //
 //	mic-compress -input image.bin -width 512 -height 512 -output image.mic
+//	mic-compress -dicom study.dcm -output study.mic [-temporal]
 //	mic-compress -testdata   # compress all test images to web/testdata/
 package main
 
@@ -15,9 +16,12 @@ import (
 	"path/filepath"
 
 	"mic"
+
+	"github.com/suyashkumar/dicom"
+	"github.com/suyashkumar/dicom/pkg/tag"
 )
 
-// .mic container format:
+// .mic container format (MIC1 - single frame):
 //
 //	Bytes 0-3:   Magic "MIC1" (0x4D 0x49 0x43 0x31)
 //	Bytes 4-7:   Width  (uint32 LE)
@@ -53,19 +57,53 @@ func writeMicFile(filename string, width, height int, compressed []byte) error {
 }
 
 func compressImage(shortData []uint16, width, height int, maxValue uint16) ([]byte, error) {
-	var drc mic.DeltaRleCompressU16
-	deltaComp, err := drc.Compress(shortData, width, height, maxValue)
+	return mic.CompressSingleFrame(shortData, width, height, maxValue)
+}
+
+// readDicomMultiFrame reads all frames from a multiframe DICOM file.
+func readDicomMultiFrame(fileName string) ([][]uint16, int, int, uint16, error) {
+	dataset, err := dicom.ParseFile(fileName, nil)
 	if err != nil {
-		return nil, fmt.Errorf("delta+RLE compress: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("parse DICOM: %w", err)
 	}
 
-	var s mic.ScratchU16
-	fseComp, err := mic.FSECompressU16(deltaComp, &s)
+	pixelDataElement, err := dataset.FindElementByTag(tag.PixelData)
 	if err != nil {
-		return nil, fmt.Errorf("FSE compress: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("find pixel data: %w", err)
 	}
 
-	return fseComp, nil
+	pixelDataInfo := dicom.MustGetPixelDataInfo(pixelDataElement.Value)
+	if len(pixelDataInfo.Frames) == 0 {
+		return nil, 0, 0, 0, fmt.Errorf("no frames in DICOM file")
+	}
+
+	firstFrame, err := pixelDataInfo.Frames[0].GetNativeFrame()
+	if err != nil {
+		return nil, 0, 0, 0, fmt.Errorf("get first frame: %w", err)
+	}
+	width := firstFrame.Cols
+	height := firstFrame.Rows
+
+	var maxValue uint16
+	frames := make([][]uint16, len(pixelDataInfo.Frames))
+
+	for f, fr := range pixelDataInfo.Frames {
+		nativeFrame, err := fr.GetNativeFrame()
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("get frame %d: %w", f, err)
+		}
+		pixels := make([]uint16, width*height)
+		for j := 0; j < len(nativeFrame.Data); j++ {
+			v := uint16(nativeFrame.Data[j][0])
+			pixels[j] = v
+			if v > maxValue {
+				maxValue = v
+			}
+		}
+		frames[f] = pixels
+	}
+
+	return frames, width, height, maxValue, nil
 }
 
 type testImage struct {
@@ -84,8 +122,21 @@ var testImages = []testImage{
 	{name: "MG3", file: "testdata/MG1.RAW", cols: 3064, rows: 4774},
 }
 
+// Multiframe DICOM test images
+var dicomTestImages = []struct {
+	name string
+	file string
+}{
+	{
+		name: "MG_TOMO",
+		file: "testdata/Series 73200000 [MG - R CC Breast Tomosynthesis Image]/1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.647.0.dcm",
+	},
+}
+
 func main() {
 	inputFile := flag.String("input", "", "Input binary image file (raw uint16 LE pixels)")
+	dicomFile := flag.String("dicom", "", "Input DICOM file (reads pixel data and dimensions automatically)")
+	temporal := flag.Bool("temporal", false, "Use inter-frame temporal prediction (multiframe only)")
 	width := flag.Int("width", 0, "Image width in pixels")
 	height := flag.Int("height", 0, "Image height in pixels")
 	outputFile := flag.String("output", "", "Output .mic file")
@@ -96,6 +147,7 @@ func main() {
 		outDir := "web/testdata"
 		os.MkdirAll(outDir, 0755)
 
+		// Compress single-frame test images (MIC1)
 		for _, img := range testImages {
 			fmt.Printf("Compressing %s (%dx%d)...\n", img.name, img.cols, img.rows)
 
@@ -131,11 +183,104 @@ func main() {
 			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
 				img.name, len(byteData), len(compressed), ratio, outPath)
 		}
+
+		// Compress multiframe DICOM test images (MIC2)
+		for _, img := range dicomTestImages {
+			fmt.Printf("Compressing multiframe %s...\n", img.name)
+
+			if _, err := os.Stat(img.file); os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "  skip %s: file not found\n", img.name)
+				continue
+			}
+
+			frames, w, h, maxVal, err := readDicomMultiFrame(img.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", img.name, err)
+				continue
+			}
+
+			rawSize := len(frames) * w * h * 2
+			fmt.Printf("  %d frames, %dx%d, maxValue=%d, raw=%d bytes\n",
+				len(frames), w, h, maxVal, rawSize)
+
+			// Compress independently (MIC2)
+			compressed, err := mic.CompressMultiFrame(frames, w, h, maxVal, false)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", img.name, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, img.name+".mic")
+			if err := os.WriteFile(outPath, compressed, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			ratio := float64(rawSize) / float64(len(compressed))
+			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				img.name, rawSize, len(compressed), ratio, outPath)
+		}
 		return
 	}
 
+	// DICOM input mode
+	if *dicomFile != "" {
+		if *outputFile == "" {
+			fmt.Fprintln(os.Stderr, "Usage: mic-compress -dicom study.dcm -output out.mic [-temporal]")
+			os.Exit(1)
+		}
+
+		frames, w, h, maxVal, err := readDicomMultiFrame(*dicomFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading DICOM: %v\n", err)
+			os.Exit(1)
+		}
+
+		rawSize := len(frames) * w * h * 2
+		fmt.Printf("Read %d frames, %dx%d, maxValue=%d\n", len(frames), w, h, maxVal)
+
+		if len(frames) == 1 {
+			// Single frame: write MIC1
+			compressed, err := compressImage(frames[0], w, h, maxVal)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Compression error: %v\n", err)
+				os.Exit(1)
+			}
+			if err := writeMicFile(*outputFile, w, h, compressed); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing: %v\n", err)
+				os.Exit(1)
+			}
+			ratio := float64(rawSize) / float64(len(compressed))
+			fmt.Printf("Compressed: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				rawSize, len(compressed), ratio, *outputFile)
+		} else {
+			// Multi-frame: write MIC2
+			mode := "independent"
+			if *temporal {
+				mode = "temporal"
+			}
+			fmt.Printf("Compressing %d frames (%s mode)...\n", len(frames), mode)
+
+			compressed, err := mic.CompressMultiFrame(frames, w, h, maxVal, *temporal)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Compression error: %v\n", err)
+				os.Exit(1)
+			}
+			if err := os.WriteFile(*outputFile, compressed, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing: %v\n", err)
+				os.Exit(1)
+			}
+			ratio := float64(rawSize) / float64(len(compressed))
+			fmt.Printf("Compressed: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				rawSize, len(compressed), ratio, *outputFile)
+		}
+		return
+	}
+
+	// Raw binary input mode
 	if *inputFile == "" || *width == 0 || *height == 0 || *outputFile == "" {
 		fmt.Fprintln(os.Stderr, "Usage: mic-compress -input image.bin -width W -height H -output out.mic")
+		fmt.Fprintln(os.Stderr, "       mic-compress -dicom study.dcm -output out.mic [-temporal]")
 		fmt.Fprintln(os.Stderr, "       mic-compress -testdata")
 		flag.PrintDefaults()
 		os.Exit(1)

@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"math/bits"
 	"mic"
+	"strconv"
 	"syscall/js"
 )
 
@@ -48,9 +49,12 @@ func decodeDeltaRleFSE(_ js.Value, args []js.Value) interface{} {
 	return result
 }
 
-// decodeMicFile decodes a .mic container file.
+// decodeMicFile decodes a .mic container file (MIC1 or MIC2).
 // Args: fileBytes (Uint8Array)
 // Returns: {pixels: Uint16Array, width: number, height: number}
+//
+//	For MIC2: also includes frameCount, temporal, isMIC2 fields.
+//	Returns first frame pixels for MIC2.
 func decodeMicFile(_ js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
 		return jsError("decodeMicFile requires 1 arg: fileBytes")
@@ -61,13 +65,22 @@ func decodeMicFile(_ js.Value, args []js.Value) interface{} {
 	data := make([]byte, length)
 	js.CopyBytesToGo(data, jsBytes)
 
-	if length < 20 {
+	if length < 4 {
 		return jsError("file too small")
 	}
 
 	magic := string(data[0:4])
+
+	if magic == "MIC2" {
+		return decodeMIC2FileImpl(data)
+	}
+
 	if magic != "MIC1" {
-		return jsError("invalid .mic magic")
+		return jsError("invalid .mic magic: " + magic)
+	}
+
+	if length < 20 {
+		return jsError("MIC1 file too small")
 	}
 
 	width := int(binary.LittleEndian.Uint32(data[4:8]))
@@ -81,24 +94,90 @@ func decodeMicFile(_ js.Value, args []js.Value) interface{} {
 
 	compressed := data[20 : 20+compLen]
 
-	var s mic.ScratchU16
-	rleSymbols, err := mic.FSEDecompressU16(compressed, &s)
+	pixels, err := mic.DecompressSingleFrame(compressed, width, height)
 	if err != nil {
-		return jsError("FSE decompress: " + err.Error())
-	}
-
-	var drd mic.DeltaRleDecompressU16
-	drd.Decompress(rleSymbols, width, height)
-
-	pixels := js.Global().Get("Uint16Array").New(len(drd.Out))
-	for i, v := range drd.Out {
-		pixels.SetIndex(i, int(v))
+		return jsError("decompress: " + err.Error())
 	}
 
 	result := js.Global().Get("Object").New()
-	result.Set("pixels", pixels)
+	result.Set("pixels", uint16SliceToJS(pixels))
 	result.Set("width", width)
 	result.Set("height", height)
+	result.Set("isMIC2", false)
+	return result
+}
+
+// decodeMIC2FileImpl handles MIC2 multiframe containers.
+func decodeMIC2FileImpl(data []byte) interface{} {
+	hdr, _, _, err := mic.ReadMIC2Header(data)
+	if err != nil {
+		return jsError("MIC2 header: " + err.Error())
+	}
+
+	// Decode first frame
+	pixels, _, err := mic.DecompressFrame(data, 0)
+	if err != nil {
+		return jsError("MIC2 frame 0: " + err.Error())
+	}
+
+	result := js.Global().Get("Object").New()
+	result.Set("pixels", uint16SliceToJS(pixels))
+	result.Set("width", hdr.Width)
+	result.Set("height", hdr.Height)
+	result.Set("frameCount", hdr.FrameCount)
+	result.Set("temporal", hdr.Temporal)
+	result.Set("isMIC2", true)
+	return result
+}
+
+// parseMIC2Header parses header metadata without decompressing.
+// Args: fileBytes (Uint8Array)
+// Returns: {width, height, frameCount, temporal}
+func parseMIC2Header(_ js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return jsError("parseMIC2Header requires 1 arg: fileBytes")
+	}
+
+	jsBytes := args[0]
+	data := make([]byte, jsBytes.Length())
+	js.CopyBytesToGo(data, jsBytes)
+
+	hdr, _, _, err := mic.ReadMIC2Header(data)
+	if err != nil {
+		return jsError("MIC2 header: " + err.Error())
+	}
+
+	result := js.Global().Get("Object").New()
+	result.Set("width", hdr.Width)
+	result.Set("height", hdr.Height)
+	result.Set("frameCount", hdr.FrameCount)
+	result.Set("temporal", hdr.Temporal)
+	return result
+}
+
+// decodeMIC2Frame decodes a single frame from a MIC2 file.
+// Args: fileBytes (Uint8Array), frameIndex (number)
+// Returns: {pixels: Uint16Array, width: number, height: number}
+func decodeMIC2Frame(_ js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return jsError("decodeMIC2Frame requires 2 args: fileBytes, frameIndex")
+	}
+
+	jsBytes := args[0]
+	frameIdx := args[1].Int()
+
+	data := make([]byte, jsBytes.Length())
+	js.CopyBytesToGo(data, jsBytes)
+
+	pixels, hdr, err := mic.DecompressFrame(data, frameIdx)
+	if err != nil {
+		return jsError("MIC2 frame " + strconv.Itoa(frameIdx) + ": " + err.Error())
+	}
+
+	result := js.Global().Get("Object").New()
+	result.Set("pixels", uint16SliceToJS(pixels))
+	result.Set("width", hdr.Width)
+	result.Set("height", hdr.Height)
 	return result
 }
 
@@ -120,11 +199,7 @@ func fseDecompress(_ js.Value, args []js.Value) interface{} {
 		return jsError("FSE decompress: " + err.Error())
 	}
 
-	result := js.Global().Get("Uint16Array").New(len(symbols))
-	for i, v := range symbols {
-		result.SetIndex(i, int(v))
-	}
-	return result
+	return uint16SliceToJS(symbols)
 }
 
 // deltaDecompress performs delta decompression on uint16 data.
@@ -146,17 +221,21 @@ func deltaDecompress(_ js.Value, args []js.Value) interface{} {
 
 	output := mic.DeltaDecompressU16(input, width, height)
 
-	result := js.Global().Get("Uint16Array").New(len(output))
-	for i, v := range output {
-		result.SetIndex(i, int(v))
-	}
-	return result
+	return uint16SliceToJS(output)
 }
 
 // getVersion returns codec version info.
 func getVersion(_ js.Value, _ []js.Value) interface{} {
 	_ = bits.Len16 // ensure import
-	return "MIC WASM Decoder v1.0 (Delta+RLE+FSE, 16-bit)"
+	return "MIC WASM Decoder v2.0 (Delta+RLE+FSE, 16-bit, MIC1+MIC2 multiframe)"
+}
+
+func uint16SliceToJS(data []uint16) js.Value {
+	result := js.Global().Get("Uint16Array").New(len(data))
+	for i, v := range data {
+		result.SetIndex(i, int(v))
+	}
+	return result
 }
 
 func jsError(msg string) interface{} {
@@ -170,6 +249,8 @@ func main() {
 	micWasm.Set("decodeFile", js.FuncOf(decodeMicFile))
 	micWasm.Set("fseDecompress", js.FuncOf(fseDecompress))
 	micWasm.Set("deltaDecompress", js.FuncOf(deltaDecompress))
+	micWasm.Set("parseMIC2Header", js.FuncOf(parseMIC2Header))
+	micWasm.Set("decodeFrame", js.FuncOf(decodeMIC2Frame))
 	micWasm.Set("version", js.FuncOf(getVersion))
 	js.Global().Set("MICWasm", micWasm)
 
