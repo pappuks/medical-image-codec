@@ -2,7 +2,7 @@
 
 Browser-based lossless decoder for 16-bit medical images (DICOM) compressed with the Delta+RLE+FSE pipeline. Part of the [MIC (Medical Image Codec)](../) project.
 
-Provides two decoder implementations — a pure JavaScript ES module and a Go WebAssembly build — both producing pixel-identical output to the native Go codec.
+Provides two decoder implementations — a pure JavaScript ES module and a Go WebAssembly build — both producing pixel-identical output to the native Go codec. Supports both single-frame (MIC1) and multi-frame (MIC2) files, with a built-in movie player for multi-frame image playback.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Provides two decoder implementations — a pure JavaScript ES module and a Go We
 go run ./cmd/mic-compress/ -testdata
 ```
 
-This compresses the test images (MR, CT, CR, MG1-3) into `.mic` files under `web/testdata/`.
+This compresses the test images (MR, CT, CR, MG1-3) into single-frame `.mic` files and multi-frame DICOM images (MG_TOMO) into MIC2 `.mic` files under `web/testdata/`.
 
 ### 2. Build the WASM decoder (optional)
 
@@ -48,10 +48,11 @@ npx serve .
 ```
 
 Open `http://localhost:3000` in your browser. The demo page lets you:
-- Click test image buttons (MR, CT, CR, MG1-3) to load pre-compressed samples
-- Drag & drop any `.mic` file onto the page
+- Click test image buttons (MR, CT, CR, MG1-3, MG Tomo) to load pre-compressed samples
+- Drag & drop any `.mic` file (MIC1 or MIC2) onto the page
 - Switch between JavaScript and Go WASM decoders via dropdown
 - Adjust Window/Level sliders for diagnostic viewing of 16-bit dynamic range
+- **Multi-frame playback**: When a MIC2 file is loaded, movie controls appear — play/pause, prev/next frame, frame slider, FPS control, loop toggle. Keyboard shortcuts: Space (play/pause), Left/Right arrows (prev/next frame)
 
 ### 4. Run the pixel-perfect verification tests
 
@@ -146,6 +147,43 @@ const pixels = MICDecoder.decode(compressedBytes, 512, 512);
 // pixels: Uint16Array of 262144 elements
 ```
 
+#### `MICDecoder.decodeFile(fileBytes)` — multi-frame
+
+When the file is MIC2, `decodeFile` returns additional metadata and decodes the first frame:
+
+```js
+const result = MICDecoder.decodeFile(fileBytes);
+if (result.isMIC2) {
+  // result.pixels:     Uint16Array (first frame)
+  // result.width:      number
+  // result.height:     number
+  // result.isMIC2:     true
+  // result.frameCount: number
+  // result.temporal:   boolean
+}
+```
+
+#### `MICDecoder.parseMIC2Header(fileBytes)`
+
+Parse MIC2 header without decompressing any frames:
+
+```js
+const hdr = MICDecoder.parseMIC2Header(fileBytes);
+// hdr.width, hdr.height, hdr.frameCount, hdr.temporal, hdr.entries
+```
+
+#### `MICDecoder.decodeMIC2Frame(fileBytes, frameIndex, prevPixels, hdr)`
+
+Decode a single frame from a MIC2 file:
+
+```js
+// Independent mode: prevPixels can be null
+const pixels = MICDecoder.decodeMIC2Frame(fileBytes, 0, null, hdr);
+
+// Temporal mode (frame > 0): pass previous frame's pixels
+const frame1 = MICDecoder.decodeMIC2Frame(fileBytes, 1, frame0Pixels, hdr);
+```
+
 #### Individual pipeline stages
 
 For debugging, testing, or building alternative pipelines, each decompression stage is exposed separately:
@@ -185,7 +223,11 @@ const pixels = decoder.deltaDecompress(deltaData, width, height);
 
 // Version string
 console.log(decoder.version());
-// "MIC WASM Decoder v1.0 (Delta+RLE+FSE, 16-bit)"
+// "MIC WASM Decoder v2.0 (Delta+RLE+FSE, 16-bit, MIC1+MIC2)"
+
+// Multi-frame support
+const hdr = decoder.parseMIC2Header(fileBytes);
+const frame0 = decoder.decodeFrame(fileBytes, 0);
 ```
 
 The WASM loader eagerly loads `wasm_exec.js` via a `<script>` tag injection and fires a `mic-wasm-ready` CustomEvent on `document` when the Go runtime has initialized.
@@ -304,7 +346,9 @@ worker.onmessage = (e) => {
 };
 ```
 
-## .mic Container Format
+## .mic Container Formats
+
+### MIC1 — Single Frame
 
 A minimal container that wraps FSE-compressed data with image dimensions.
 
@@ -322,6 +366,29 @@ Offset  Size  Field                Description
 Total header size: 20 bytes. Maximum image size: 2^32 x 2^32 pixels. Maximum compressed payload: ~4 GB.
 
 The pipeline type field is reserved for future expansion (e.g., 2 = Delta+RLE+Huffman, 3 = Delta+ZigZag+RLE+FSE).
+
+### MIC2 — Multi-Frame
+
+Container for multi-frame images (e.g., Breast Tomosynthesis). Supports independent and temporal compression modes.
+
+```
+Offset    Size    Field                Description
+────────  ──────  ───────────────────  ──────────────────────────────────────────
+0         4       Magic                "MIC2" (0x4D 0x49 0x43 0x32, little-endian)
+4         4       Width                Frame width in pixels (uint32 LE)
+8         4       Height               Frame height in pixels (uint32 LE)
+12        4       Frame count          Number of frames (uint32 LE)
+16        1       Pipeline flags       bit0=spatial (0x01, always set)
+                                       bit1=temporal (0x02)
+17        3       Reserved             Zero
+20        N*8     Frame offset table   N × {offset_u32, length_u32}
+                                       Offsets relative to data section start
+20+N*8    ...     Compressed frames    Concatenated compressed frame blobs
+```
+
+**Independent mode** (flags=0x01): Each frame blob is a self-contained Delta+RLE+FSE payload (same as MIC1 payload). Any frame can be decoded independently.
+
+**Temporal mode** (flags=0x03): Frame 0 uses spatial Delta+RLE+FSE. Frames 1+ contain ZigZag-encoded inter-frame residuals compressed with RLE+FSE only. Decoding frame N requires sequentially decoding frames 0 through N.
 
 ### Parsing in JavaScript
 
@@ -354,14 +421,20 @@ compressed := data[20 : 20+compLen]
 # Build
 go build -o mic-compress ./cmd/mic-compress/
 
-# Compress a single image
+# Compress a single raw image (MIC1)
 ./mic-compress -input image.bin -width 512 -height 512 -output image.mic
 
-# Generate all test .mic files at once
+# Compress a DICOM file (single frame → MIC1, multi-frame → MIC2)
+./mic-compress -dicom scan.dcm -output scan.mic
+
+# Compress with temporal inter-frame prediction (multi-frame only)
+./mic-compress -dicom tomo.dcm -output tomo.mic -temporal
+
+# Generate all test .mic files at once (MIC1 + MIC2)
 ./mic-compress -testdata
 ```
 
-Input files must be raw little-endian uint16 pixel data with no headers. Expected file size: `width * height * 2` bytes.
+Raw input files must be little-endian uint16 pixel data with no headers. Expected file size: `width * height * 2` bytes. DICOM input is parsed automatically using the `suyashkumar/dicom` library.
 
 ### Compressing programmatically in Go
 
@@ -534,7 +607,7 @@ The FSE bitstream was consumed before all symbols were decoded. This indicates d
 
 ### "Invalid .mic file (bad magic: 0x...)"
 
-The file does not start with the "MIC1" header. Ensure you're loading a `.mic` file and not a raw `.bin` or `.dcm`.
+The file does not start with a "MIC1" or "MIC2" header. Ensure you're loading a `.mic` file and not a raw `.bin` or `.dcm`.
 
 ### WASM decoder shows "(WASM unavailable)"
 
@@ -556,23 +629,24 @@ Run `go run ./cmd/mic-compress/ -testdata` from the repository root to generate 
 
 ```
 web/
-├── mic-decoder.js         # Pure JS decoder (ES module, zero dependencies)
+├── mic-decoder.js         # Pure JS decoder (ES module, MIC1 + MIC2 support)
 ├── mic-decoder-wasm.js    # WASM loader wrapper (same API as JS decoder)
-├── index.html             # Demo page: drag-and-drop, W/L controls, JS/WASM toggle
+├── index.html             # Demo: drag-and-drop, W/L controls, movie player
 ├── test-decoder.mjs       # Node.js pixel-perfect verification test
 ├── README.md              # This file
 ├── .gitignore             # Ignores generated files below
 ├── mic-decoder.wasm       # [generated] Go WASM binary (~2.5 MB)
 ├── wasm_exec.js           # [generated] Go WASM runtime glue (~17 KB)
 └── testdata/              # [generated] compressed test images
-    ├── MR.mic             #   MR brain MRI, 256x256
-    ├── CT.mic             #   CT scan, 512x512
-    ├── CR.mic             #   Computed radiography, 1760x2140
-    ├── MG1.mic            #   Mammogram, 1996x2457
-    ├── MG2.mic            #   Mammogram, 1996x2457
-    └── MG3.mic            #   Mammogram, 3064x4774
+    ├── MR.mic             #   MR brain MRI, 256x256 (MIC1)
+    ├── CT.mic             #   CT scan, 512x512 (MIC1)
+    ├── CR.mic             #   Computed radiography, 1760x2140 (MIC1)
+    ├── MG1.mic            #   Mammogram, 1996x2457 (MIC1)
+    ├── MG2.mic            #   Mammogram, 1996x2457 (MIC1)
+    ├── MG3.mic            #   Mammogram, 3064x4774 (MIC1)
+    └── MG_TOMO.mic        #   Breast Tomosynthesis, 2457x1890, 69 frames (MIC2)
 
 cmd/
-├── mic-compress/main.go   # CLI tool: compress raw images to .mic format
+├── mic-compress/main.go   # CLI: compress raw/DICOM images to .mic (MIC1/MIC2)
 └── mic-wasm/main.go       # Go WASM entry point (syscall/js bindings)
 ```

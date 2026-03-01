@@ -15,6 +15,9 @@ go test -run TestDeltaRleFSECompress -v    # Delta+RLE+FSE pipeline
 go test -run TestDeltaRleHuffCompress -v   # Delta+RLE+Huffman pipeline
 go test -run TestFSECompress -v            # FSE only
 go test -run TestHuffCompress -v           # Huffman only
+go test -run TestTemporalDelta -v          # Temporal delta encode/decode
+go test -run TestMultiFrame -v             # Multi-frame roundtrip (both modes)
+go test -run TestMultiFrameTomo -v         # Real DICOM 69-frame tomo test
 
 # Run benchmarks (decompression speed + compression ratio)
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
@@ -54,7 +57,32 @@ Raw 16-bit pixels
 | `bitwriter.go` / `bitreader.go` | Bit-level I/O for FSE (reverse direction) |
 | `bitwriterhuff.go` / `bitreaderhuff.go` | Bit-level I/O for Huffman (forward direction) |
 | `wordreader.go` / `bytereader.go` | Word/byte-level readers |
-| `fseu16_test.go` | All tests and benchmarks |
+| `temporaldelta.go` | Inter-frame temporal delta encode/decode using ZigZag mapping |
+| `multiframe.go` | MIC2 container format: header, frame offset table, read/write |
+| `multiframecompress.go` | Multi-frame compress/decompress orchestration (single + multi) |
+| `multiframe_test.go` | Multi-frame roundtrip tests (independent + temporal + real DICOM) |
+| `fseu16_test.go` | All single-frame tests and benchmarks |
+
+### Multi-Frame / MIC2 Format
+
+The codec supports multi-frame images (e.g., Breast Tomosynthesis) via the MIC2 container format with two compression modes:
+
+- **Independent mode**: Each frame compressed separately with spatial Delta+RLE+FSE. Allows random access to any frame.
+- **Temporal mode**: Frame 0 uses spatial Delta+RLE+FSE; subsequent frames use inter-frame ZigZag-encoded residuals compressed with RLE+FSE only (no spatial delta, since temporal residuals lack spatial correlation).
+
+```
+MIC2 format:
+  Bytes 0-3:    Magic "MIC2"
+  Bytes 4-7:    Width (uint32 LE)
+  Bytes 8-11:   Height (uint32 LE)
+  Bytes 12-15:  Frame count (uint32 LE)
+  Byte 16:      Pipeline flags (bit0=spatial, bit1=temporal)
+  Bytes 17-19:  Reserved
+  Bytes 20+:    Frame offset table (N × 8 bytes: offset_u32 + length_u32)
+  After table:  Concatenated compressed frame blobs
+```
+
+Key functions: `CompressMultiFrame`, `DecompressMultiFrame`, `DecompressFrame` (single frame access), `TemporalDeltaEncode`/`TemporalDeltaDecode` (ZigZag inter-frame residuals).
 
 ### Bit-Depth Handling
 
@@ -118,3 +146,4 @@ Test images in `testdata/`:
 - CR (2140x1760) — Computed radiography
 - XR (2048x2577) — X-ray
 - MG1-MG4 (various large sizes) — Mammography, best compression ratios
+- MG_TOMO (2457x1890, 69 frames) — Breast Tomosynthesis multiframe DICOM, 10-bit depth

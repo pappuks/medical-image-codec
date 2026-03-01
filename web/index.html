@@ -26,6 +26,7 @@
   }
   button:hover { background: #0f3460; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.active { background: #0f3460; border-color: #00d4ff; }
   select, input[type="number"] {
     background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;
     padding: 6px 10px; border-radius: 4px; font-size: 0.85em;
@@ -82,6 +83,31 @@
     flex-wrap: wrap;
   }
   .wl-controls input[type="range"] { width: 200px; }
+
+  /* Movie controls */
+  .movie-controls {
+    display: flex; gap: 8px; align-items: center; margin: 12px 0;
+    flex-wrap: wrap; background: #16213e; border: 1px solid #0f3460;
+    border-radius: 6px; padding: 10px 14px;
+  }
+  .movie-controls button { padding: 6px 12px; font-size: 0.9em; }
+  .movie-controls input[type="range"] {
+    flex: 1; min-width: 150px;
+    accent-color: #00d4ff;
+  }
+  .movie-controls .frame-info {
+    font-size: 0.85em; color: #aaa; min-width: 110px; text-align: center;
+  }
+  .movie-controls input[type="number"] { width: 55px; }
+
+  /* Progress bar */
+  .progress-bar {
+    width: 100%; height: 4px; background: #0f3460; border-radius: 2px;
+    margin: 8px 0; overflow: hidden;
+  }
+  .progress-bar .fill {
+    height: 100%; background: #00d4ff; transition: width 0.1s;
+  }
 </style>
 </head>
 <body>
@@ -106,6 +132,7 @@
     <button id="loadTestMG1">MG1 (1996x2457)</button>
     <button id="loadTestMG2">MG2 (1996x2457)</button>
     <button id="loadTestMG3">MG3 (3064x4774)</button>
+    <button id="loadTestTOMO">MG Tomo (69 frames)</button>
     <span style="color:#555">|</span>
     <label>Decoder:
       <select id="decoderType">
@@ -127,6 +154,23 @@
     <div class="stat"><div class="label">Ratio</div><div class="value" id="statRatio">-</div></div>
     <div class="stat"><div class="label">Decode Time</div><div class="value" id="statTime">-</div></div>
     <div class="stat"><div class="label">Throughput</div><div class="value" id="statThroughput">-</div></div>
+  </div>
+
+  <!-- Movie Controls (shown for multiframe) -->
+  <div class="movie-controls" id="movieControls" style="display:none">
+    <button id="prevFrame" title="Previous frame (Left arrow)">|&lt;</button>
+    <button id="playPause" title="Play/Pause (Space)">&#9654; Play</button>
+    <button id="nextFrame" title="Next frame (Right arrow)">&gt;|</button>
+    <input type="range" id="frameSlider" min="0" max="0" value="0">
+    <span class="frame-info" id="frameCounter">Frame 1/1</span>
+    <label>FPS: <input type="number" id="fpsInput" value="10" min="1" max="60"></label>
+    <button id="loopToggle" class="active">Loop</button>
+  </div>
+
+  <!-- Decode progress (for multiframe preload) -->
+  <div id="decodeProgress" style="display:none">
+    <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
+    <span style="font-size:0.8em;color:#888" id="progressText">Loading frames...</span>
   </div>
 
   <!-- Window/Level -->
@@ -174,7 +218,15 @@ const logEl = $('log');
 let currentPixels = null;
 let currentWidth = 0;
 let currentHeight = 0;
-let currentMaxValue = 0;
+
+// ─── Multiframe State ─────────────────────────────────────────────
+let multiframeData = null;    // raw MIC2 file bytes (Uint8Array)
+let multiframeMeta = null;    // parsed MIC2 header
+let decodedFrameCache = [];   // decoded Uint16Array per frame
+let currentFrameIndex = 0;
+let isPlaying = false;
+let playTimer = null;
+let loopEnabled = true;
 
 function log(msg, cls = 'info') {
   const line = document.createElement('div');
@@ -226,7 +278,6 @@ function renderImage(pixels, width, height, window, level) {
 
 function autoWindowLevel(pixels) {
   let min = 65535, max = 0;
-  // Sample every 4th pixel for speed on large images
   const step = pixels.length > 100000 ? 4 : 1;
   for (let i = 0; i < pixels.length; i += step) {
     const v = pixels[i];
@@ -257,15 +308,180 @@ $('wlReset').addEventListener('click', () => {
   updateDisplay();
 });
 
+// ─── Multiframe Movie Player ──────────────────────────────────────
+
+function showFrame(index) {
+  if (!multiframeData || index < 0 || index >= multiframeMeta.frameCount) return;
+  currentFrameIndex = index;
+
+  // Decode on demand if not cached
+  if (!decodedFrameCache[index]) {
+    decodeFrameAt(index);
+  }
+
+  currentPixels = decodedFrameCache[index];
+  $('frameSlider').value = index;
+  $('frameCounter').textContent = `Frame ${index + 1}/${multiframeMeta.frameCount}`;
+  updateDisplay();
+}
+
+function decodeFrameAt(index) {
+  const decoder = getDecoder();
+
+  if (decoder.name === 'WASM') {
+    // WASM decoder handles temporal internally
+    const result = decoder.impl.decodeFrame(multiframeData, index);
+    decodedFrameCache[index] = result.pixels;
+    return;
+  }
+
+  // JS decoder: handle temporal dependency
+  if (multiframeMeta.temporal && index > 0) {
+    // Must decode from closest cached frame
+    let startFrom = index;
+    while (startFrom > 0 && !decodedFrameCache[startFrom - 1]) startFrom--;
+    // Decode any missing preceding frames
+    for (let i = startFrom; i < index; i++) {
+      if (!decodedFrameCache[i]) {
+        const prev = i > 0 ? decodedFrameCache[i - 1] : null;
+        decodedFrameCache[i] = MICDecoder.decodeMIC2Frame(multiframeData, i, prev, multiframeMeta);
+      }
+    }
+    const prevPixels = decodedFrameCache[index - 1];
+    decodedFrameCache[index] = MICDecoder.decodeMIC2Frame(multiframeData, index, prevPixels, multiframeMeta);
+  } else {
+    decodedFrameCache[index] = MICDecoder.decodeMIC2Frame(multiframeData, index, null, multiframeMeta);
+  }
+}
+
+async function preloadAllFrames() {
+  if (!multiframeData) return;
+  const total = multiframeMeta.frameCount;
+
+  $('decodeProgress').style.display = 'block';
+
+  for (let i = 0; i < total; i++) {
+    if (!decodedFrameCache[i]) {
+      decodeFrameAt(i);
+    }
+    const pct = ((i + 1) / total * 100).toFixed(0);
+    $('progressFill').style.width = pct + '%';
+    $('progressText').textContent = `Decoding frame ${i + 1}/${total}...`;
+
+    // Yield to UI every 5 frames
+    if (i % 5 === 0) {
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  $('decodeProgress').style.display = 'none';
+  log(`All ${total} frames decoded and cached`, 'success');
+}
+
+function togglePlay() {
+  if (isPlaying) {
+    stopPlayback();
+  } else {
+    startPlayback();
+  }
+}
+
+function startPlayback() {
+  if (isPlaying) return;
+  isPlaying = true;
+  $('playPause').innerHTML = '&#9646;&#9646; Pause';
+  $('playPause').classList.add('active');
+
+  const fps = Math.max(1, Math.min(60, parseInt($('fpsInput').value) || 10));
+  playTimer = setInterval(() => {
+    let next = currentFrameIndex + 1;
+    if (next >= multiframeMeta.frameCount) {
+      if (loopEnabled) {
+        next = 0;
+      } else {
+        stopPlayback();
+        return;
+      }
+    }
+    showFrame(next);
+  }, 1000 / fps);
+}
+
+function stopPlayback() {
+  if (!isPlaying) return;
+  isPlaying = false;
+  clearInterval(playTimer);
+  playTimer = null;
+  $('playPause').innerHTML = '&#9654; Play';
+  $('playPause').classList.remove('active');
+}
+
+// Movie control events
+$('playPause').addEventListener('click', togglePlay);
+$('prevFrame').addEventListener('click', () => {
+  stopPlayback();
+  showFrame(Math.max(0, currentFrameIndex - 1));
+});
+$('nextFrame').addEventListener('click', () => {
+  stopPlayback();
+  if (multiframeMeta) showFrame(Math.min(multiframeMeta.frameCount - 1, currentFrameIndex + 1));
+});
+$('frameSlider').addEventListener('input', () => {
+  stopPlayback();
+  showFrame(parseInt($('frameSlider').value));
+});
+$('fpsInput').addEventListener('change', () => {
+  if (isPlaying) {
+    stopPlayback();
+    startPlayback();
+  }
+});
+$('loopToggle').addEventListener('click', () => {
+  loopEnabled = !loopEnabled;
+  $('loopToggle').classList.toggle('active', loopEnabled);
+  $('loopToggle').textContent = loopEnabled ? 'Loop' : 'No Loop';
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (!multiframeMeta) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+  if (e.code === 'Space') {
+    e.preventDefault();
+    togglePlay();
+  } else if (e.code === 'ArrowLeft') {
+    e.preventDefault();
+    stopPlayback();
+    showFrame(Math.max(0, currentFrameIndex - 1));
+  } else if (e.code === 'ArrowRight') {
+    e.preventDefault();
+    stopPlayback();
+    if (multiframeMeta) showFrame(Math.min(multiframeMeta.frameCount - 1, currentFrameIndex + 1));
+  }
+});
+
 // ─── Decoding ──────────────────────────────────────────────────────
 
-function decodeMicFile(data) {
+function resetMultiframe() {
+  stopPlayback();
+  multiframeData = null;
+  multiframeMeta = null;
+  decodedFrameCache = [];
+  currentFrameIndex = 0;
+  $('movieControls').style.display = 'none';
+  $('decodeProgress').style.display = 'none';
+}
+
+async function decodeMicFile(data) {
+  resetMultiframe();
+  const fileBytes = new Uint8Array(data);
   const { impl: decoder, name: decoderName } = getDecoder();
-  log(`Decoding .mic file (${formatBytes(data.length)}) using ${decoderName} decoder...`);
-  const t0 = performance.now();
+  log(`Decoding .mic file (${formatBytes(data.byteLength)}) using ${decoderName} decoder...`);
 
   try {
-    const result = decoder.decodeFile(new Uint8Array(data));
+    const t0 = performance.now();
+    const result = decoder.decodeFile(fileBytes);
     const t1 = performance.now();
     const elapsed = t1 - t0;
 
@@ -276,16 +492,49 @@ function decodeMicFile(data) {
     const origSize = result.width * result.height * 2;
     const compSize = data.byteLength;
 
-    log(`Decoded: ${result.width}x${result.height} (${result.pixels.length} pixels)`, 'success');
-    log(`Time: ${elapsed.toFixed(2)} ms | Throughput: ${(origSize / elapsed / 1000).toFixed(1)} MB/s`, 'timing');
+    if (result.isMIC2) {
+      // Multiframe file
+      multiframeData = fileBytes;
+      multiframeMeta = MICDecoder.parseMIC2Header(fileBytes);
+      decodedFrameCache = new Array(multiframeMeta.frameCount).fill(null);
+      decodedFrameCache[0] = result.pixels;
+      currentFrameIndex = 0;
 
-    $('stats').style.display = 'grid';
-    $('statDims').textContent = `${result.width} x ${result.height}`;
-    $('statComp').textContent = formatBytes(compSize);
-    $('statOrig').textContent = formatBytes(origSize);
-    $('statRatio').textContent = (origSize / compSize).toFixed(2) + ':1';
-    $('statTime').textContent = elapsed.toFixed(2) + ' ms';
-    $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+      const totalOrigSize = result.width * result.height * 2 * multiframeMeta.frameCount;
+
+      log(`MIC2: ${multiframeMeta.frameCount} frames, ${result.width}x${result.height}, temporal=${multiframeMeta.temporal}`, 'success');
+      log(`Frame 0 decoded in ${elapsed.toFixed(2)} ms`, 'timing');
+
+      $('stats').style.display = 'grid';
+      $('statDims').textContent = `${result.width} x ${result.height} x ${multiframeMeta.frameCount}`;
+      $('statComp').textContent = formatBytes(compSize);
+      $('statOrig').textContent = formatBytes(totalOrigSize);
+      $('statRatio').textContent = (totalOrigSize / compSize).toFixed(2) + ':1';
+      $('statTime').textContent = elapsed.toFixed(2) + ' ms (frame 0)';
+      $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+
+      // Show movie controls
+      $('movieControls').style.display = 'flex';
+      $('frameSlider').max = multiframeMeta.frameCount - 1;
+      $('frameSlider').value = 0;
+      $('frameCounter').textContent = `Frame 1/${multiframeMeta.frameCount}`;
+
+      // Preload all frames in background
+      preloadAllFrames();
+
+    } else {
+      // Single-frame MIC1
+      log(`Decoded: ${result.width}x${result.height} (${result.pixels.length} pixels)`, 'success');
+      log(`Time: ${elapsed.toFixed(2)} ms | Throughput: ${(origSize / elapsed / 1000).toFixed(1)} MB/s`, 'timing');
+
+      $('stats').style.display = 'grid';
+      $('statDims').textContent = `${result.width} x ${result.height}`;
+      $('statComp').textContent = formatBytes(compSize);
+      $('statOrig').textContent = formatBytes(origSize);
+      $('statRatio').textContent = (origSize / compSize).toFixed(2) + ':1';
+      $('statTime').textContent = elapsed.toFixed(2) + ' ms';
+      $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+    }
 
     // Auto window/level and render
     $('wlControls').style.display = 'flex';
@@ -303,6 +552,7 @@ function decodeMicFile(data) {
 }
 
 function decodeRawFile(data, width, height) {
+  resetMultiframe();
   log(`Loading raw ${width}x${height} image (${formatBytes(data.byteLength)})...`);
 
   if (data.byteLength !== width * height * 2) {
@@ -384,6 +634,7 @@ $('loadTestCR').addEventListener('click', () => loadTestFile('CR'));
 $('loadTestMG1').addEventListener('click', () => loadTestFile('MG1'));
 $('loadTestMG2').addEventListener('click', () => loadTestFile('MG2'));
 $('loadTestMG3').addEventListener('click', () => loadTestFile('MG3'));
+$('loadTestTOMO').addEventListener('click', () => loadTestFile('MG_TOMO'));
 
 log('MIC Decoder ready. Drop a .mic file or load a test image.');
 </script>

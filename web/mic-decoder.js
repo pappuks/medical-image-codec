@@ -697,6 +697,75 @@ function rleDecompress(input) {
 //   Bytes 20+:   FSE compressed data
 
 const MIC_MAGIC = 0x3143494D; // "MIC1" in LE
+const MIC2_MAGIC = 0x3243494D; // "MIC2" in LE
+const MIC2_HEADER_SIZE = 20;
+const MIC2_ENTRY_SIZE = 8;
+const PIPELINE_TEMPORAL = 0x02;
+
+// ─── MIC2 Multiframe Support ────────────────────────────────────────────────
+
+/**
+ * Parse a MIC2 multiframe header without decompressing frame data.
+ * @param {Uint8Array} fileBytes
+ * @returns {{ width: number, height: number, frameCount: number, temporal: boolean, frameTable: Array<{offset: number, length: number}>, dataOffset: number }}
+ */
+function parseMIC2Header(fileBytes) {
+  const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
+  if (fileBytes.length < MIC2_HEADER_SIZE) throw new Error('MIC2: file too small');
+
+  const magic = dv.getUint32(0, true);
+  if (magic !== MIC2_MAGIC) throw new Error('MIC2: invalid magic');
+
+  const width = dv.getUint32(4, true);
+  const height = dv.getUint32(8, true);
+  const frameCount = dv.getUint32(12, true);
+  const flags = fileBytes[16];
+  const temporal = (flags & PIPELINE_TEMPORAL) !== 0;
+
+  const tableSize = frameCount * MIC2_ENTRY_SIZE;
+  const dataOffset = MIC2_HEADER_SIZE + tableSize;
+  if (fileBytes.length < dataOffset) throw new Error('MIC2: file truncated in frame table');
+
+  const frameTable = [];
+  for (let i = 0; i < frameCount; i++) {
+    const base = MIC2_HEADER_SIZE + i * MIC2_ENTRY_SIZE;
+    frameTable.push({
+      offset: dv.getUint32(base, true),
+      length: dv.getUint32(base + 4, true),
+    });
+  }
+
+  return { width, height, frameCount, temporal, frameTable, dataOffset };
+}
+
+/**
+ * Decode temporal delta residuals back to pixels: current = prev + unzigzag(residual).
+ * @param {Uint16Array} residual - ZigZag-encoded temporal residuals
+ * @param {Uint16Array} prev - Previous frame pixels
+ * @returns {Uint16Array}
+ */
+function temporalDeltaDecode(residual, prev) {
+  const out = new Uint16Array(residual.length);
+  for (let i = 0; i < residual.length; i++) {
+    // UnZigZag: (ux >> 1) ^ -(ux & 1)
+    const ux = residual[i];
+    const diff = (ux >>> 1) ^ (-(ux & 1));
+    out[i] = (prev[i] + diff) & 0xFFFF;
+  }
+  return out;
+}
+
+/**
+ * Decompress a temporal residual frame (RLE+FSE, no spatial delta).
+ * @param {Uint8Array} compressed - FSE compressed bytes
+ * @returns {Uint16Array} - ZigZag-encoded residuals
+ */
+function decompressResidualFrame(compressed) {
+  const fse = new FSEDecompressor();
+  const rleData = fse.decompress(compressed);
+  // RLE format: rleData[0] = maxValue, then length (2 words), then RLE-encoded data
+  return rleDecompress(rleData);
+}
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -719,15 +788,25 @@ export const MICDecoder = {
   },
 
   /**
-   * Decode a .mic container file.
+   * Decode a .mic container file (MIC1 single-frame or MIC2 multiframe).
+   * For MIC2, returns the first frame and metadata.
    *
    * @param {Uint8Array} fileBytes - Complete .mic file contents
-   * @returns {{ pixels: Uint16Array, width: number, height: number }}
+   * @returns {{ pixels: Uint16Array, width: number, height: number, isMIC2?: boolean, frameCount?: number, temporal?: boolean }}
    */
   decodeFile(fileBytes) {
     const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
-
     const magic = dv.getUint32(0, true);
+
+    if (magic === MIC2_MAGIC) {
+      const hdr = parseMIC2Header(fileBytes);
+      const pixels = this.decodeMIC2Frame(fileBytes, 0, null, hdr);
+      return {
+        pixels, width: hdr.width, height: hdr.height,
+        isMIC2: true, frameCount: hdr.frameCount, temporal: hdr.temporal,
+      };
+    }
+
     if (magic !== MIC_MAGIC) {
       throw new Error(`Invalid .mic file (bad magic: 0x${magic.toString(16)})`);
     }
@@ -744,7 +823,44 @@ export const MICDecoder = {
     const compressedBytes = fileBytes.subarray(20, 20 + compLen);
     const pixels = this.decode(compressedBytes, width, height);
 
-    return { pixels, width, height };
+    return { pixels, width, height, isMIC2: false };
+  },
+
+  /**
+   * Parse MIC2 header without decompressing.
+   * @param {Uint8Array} fileBytes
+   * @returns {{ width: number, height: number, frameCount: number, temporal: boolean, frameTable: Array, dataOffset: number }}
+   */
+  parseMIC2Header(fileBytes) {
+    return parseMIC2Header(fileBytes);
+  },
+
+  /**
+   * Decode a single frame from a MIC2 multiframe file.
+   * @param {Uint8Array} fileBytes - Complete MIC2 file
+   * @param {number} frameIndex - Frame to decode
+   * @param {Uint16Array|null} prevPixels - Previous decoded frame (required for temporal mode, frame > 0)
+   * @param {object} [hdr] - Pre-parsed header (optional, will parse if not provided)
+   * @returns {Uint16Array}
+   */
+  decodeMIC2Frame(fileBytes, frameIndex, prevPixels, hdr) {
+    if (!hdr) hdr = parseMIC2Header(fileBytes);
+
+    const entry = hdr.frameTable[frameIndex];
+    const start = hdr.dataOffset + entry.offset;
+    const compressed = fileBytes.subarray(start, start + entry.length);
+
+    if (hdr.temporal && frameIndex > 0) {
+      // Temporal: decompress residuals (RLE+FSE), then apply temporal delta decode
+      const residuals = decompressResidualFrame(compressed);
+      if (!prevPixels) {
+        throw new Error(`MIC2 temporal: prevPixels required for frame ${frameIndex}`);
+      }
+      return temporalDeltaDecode(residuals, prevPixels);
+    }
+
+    // Independent mode or frame 0: full spatial Delta+RLE+FSE
+    return this.decode(compressed, hdr.width, hdr.height);
   },
 
   /**
