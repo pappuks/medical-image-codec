@@ -71,6 +71,10 @@ func decodeMicFile(_ js.Value, args []js.Value) interface{} {
 
 	magic := string(data[0:4])
 
+	if magic == "MIC3" {
+		return decodeMIC3FileImpl(data)
+	}
+
 	if magic == "MIC2" {
 		return decodeMIC2FileImpl(data)
 	}
@@ -224,10 +228,89 @@ func deltaDecompress(_ js.Value, args []js.Value) interface{} {
 	return uint16SliceToJS(output)
 }
 
+// decodeMIC3FileImpl handles MIC3 WSI containers.
+func decodeMIC3FileImpl(data []byte) interface{} {
+	hdr, err := mic.ReadWSIHeader(data)
+	if err != nil {
+		return jsError("MIC3 header: " + err.Error())
+	}
+
+	// Decompress full level 0
+	lv := hdr.Levels[0]
+	rgb, err := mic.DecompressWSIRegion(data, 0, 0, 0, lv.Width, lv.Height)
+	if err != nil {
+		return jsError("MIC3 level 0: " + err.Error())
+	}
+
+	result := js.Global().Get("Object").New()
+	jsRGB := js.Global().Get("Uint8Array").New(len(rgb))
+	js.CopyBytesToJS(jsRGB, rgb)
+	result.Set("rgb", jsRGB)
+	result.Set("width", lv.Width)
+	result.Set("height", lv.Height)
+	result.Set("channels", hdr.Channels)
+	result.Set("isMIC3", true)
+
+	// Level info
+	levelsArr := js.Global().Get("Array").New(len(hdr.Levels))
+	for i, l := range hdr.Levels {
+		lvObj := js.Global().Get("Object").New()
+		lvObj.Set("width", l.Width)
+		lvObj.Set("height", l.Height)
+		lvObj.Set("tilesX", l.TilesX)
+		lvObj.Set("tilesY", l.TilesY)
+		levelsArr.SetIndex(i, lvObj)
+	}
+	result.Set("levels", levelsArr)
+	result.Set("tileWidth", hdr.TileWidth)
+	result.Set("tileHeight", hdr.TileHeight)
+	result.Set("levelCount", len(hdr.Levels))
+
+	return result
+}
+
+// decodeWSILevel decodes all tiles at a specific pyramid level.
+// Args: fileBytes (Uint8Array), levelIndex (number)
+// Returns: {rgb: Uint8Array, width: number, height: number}
+func decodeWSILevel(_ js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return jsError("decodeWSILevel requires 2 args: fileBytes, levelIndex")
+	}
+
+	jsBytes := args[0]
+	levelIdx := args[1].Int()
+
+	data := make([]byte, jsBytes.Length())
+	js.CopyBytesToGo(data, jsBytes)
+
+	hdr, err := mic.ReadWSIHeader(data)
+	if err != nil {
+		return jsError("MIC3 header: " + err.Error())
+	}
+
+	if levelIdx < 0 || levelIdx >= len(hdr.Levels) {
+		return jsError("MIC3: level " + strconv.Itoa(levelIdx) + " out of range")
+	}
+
+	lv := hdr.Levels[levelIdx]
+	rgb, err := mic.DecompressWSIRegion(data, levelIdx, 0, 0, lv.Width, lv.Height)
+	if err != nil {
+		return jsError("MIC3 level " + strconv.Itoa(levelIdx) + ": " + err.Error())
+	}
+
+	result := js.Global().Get("Object").New()
+	jsRGB := js.Global().Get("Uint8Array").New(len(rgb))
+	js.CopyBytesToJS(jsRGB, rgb)
+	result.Set("rgb", jsRGB)
+	result.Set("width", lv.Width)
+	result.Set("height", lv.Height)
+	return result
+}
+
 // getVersion returns codec version info.
 func getVersion(_ js.Value, _ []js.Value) interface{} {
 	_ = bits.Len16 // ensure import
-	return "MIC WASM Decoder v2.0 (Delta+RLE+FSE, 16-bit, MIC1+MIC2 multiframe)"
+	return "MIC WASM Decoder v3.0 (Delta+RLE+FSE, 16-bit, MIC1+MIC2+MIC3 WSI)"
 }
 
 func uint16SliceToJS(data []uint16) js.Value {
@@ -251,6 +334,7 @@ func main() {
 	micWasm.Set("deltaDecompress", js.FuncOf(deltaDecompress))
 	micWasm.Set("parseMIC2Header", js.FuncOf(parseMIC2Header))
 	micWasm.Set("decodeFrame", js.FuncOf(decodeMIC2Frame))
+	micWasm.Set("decodeWSILevel", js.FuncOf(decodeWSILevel))
 	micWasm.Set("version", js.FuncOf(getVersion))
 	js.Global().Set("MICWasm", micWasm)
 

@@ -113,7 +113,7 @@
 <body>
 <div class="container">
   <h1>MIC Decoder</h1>
-  <p class="subtitle">Medical Image Codec - Browser-based lossless 16-bit image decoder (Delta+RLE+FSE)</p>
+  <p class="subtitle">Medical Image Codec - Browser-based lossless image decoder (16-bit greyscale + RGB WSI)</p>
 
   <!-- Drop Zone -->
   <div class="dropzone" id="dropzone">
@@ -134,6 +134,8 @@
     <button id="loadTestMG3">MG3 (3064x4774)</button>
     <button id="loadTestTOMO">MG Tomo (69 frames)</button>
     <button id="loadTestCTMulti">CT Multi (203 frames)</button>
+    <span style="color:#555">|</span>
+    <button id="loadTestWSI" style="border-color:#4caf50;color:#4caf50">WSI Tissue (512x384)</button>
     <span style="color:#555">|</span>
     <label>Decoder:
       <select id="decoderType">
@@ -166,6 +168,14 @@
     <span class="frame-info" id="frameCounter">Frame 1/1</span>
     <label>FPS: <input type="number" id="fpsInput" value="10" min="1" max="60"></label>
     <button id="loopToggle" class="active">Loop</button>
+  </div>
+
+  <!-- WSI Controls (shown for MIC3) -->
+  <div class="movie-controls" id="wsiControls" style="display:none">
+    <label style="color:#4caf50">Pyramid Level:
+      <select id="wsiLevelSelect" style="min-width:200px"></select>
+    </label>
+    <span class="frame-info" id="wsiTileInfo" style="color:#4caf50">-</span>
   </div>
 
   <!-- Decode progress (for multiframe preload) -->
@@ -229,6 +239,12 @@ let isPlaying = false;
 let playTimer = null;
 let loopEnabled = true;
 
+// ─── WSI State ────────────────────────────────────────────────────
+let wsiFileData = null;       // raw MIC3 file bytes (Uint8Array)
+let wsiHeader = null;         // parsed MIC3 header
+let currentRGB = null;        // current level's RGB Uint8Array
+let isWSI = false;
+
 function log(msg, cls = 'info') {
   const line = document.createElement('div');
   line.className = cls;
@@ -274,6 +290,26 @@ function renderImage(pixels, width, height, window, level) {
     data[j + 3] = 255;
   }
 
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function renderRGBImage(rgb, width, height) {
+  const canvas = $('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.style.display = 'block';
+  $('placeholder').style.display = 'none';
+
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(width, height);
+  const data = imgData.data;
+
+  for (let i = 0; i < width * height; i++) {
+    data[i * 4] = rgb[i * 3];
+    data[i * 4 + 1] = rgb[i * 3 + 1];
+    data[i * 4 + 2] = rgb[i * 3 + 2];
+    data[i * 4 + 3] = 255;
+  }
   ctx.putImageData(imgData, 0, 0);
 }
 
@@ -472,6 +508,12 @@ function resetMultiframe() {
   currentFrameIndex = 0;
   $('movieControls').style.display = 'none';
   $('decodeProgress').style.display = 'none';
+  // Reset WSI state
+  wsiFileData = null;
+  wsiHeader = null;
+  currentRGB = null;
+  isWSI = false;
+  $('wsiControls').style.display = 'none';
 }
 
 async function decodeMicFile(data) {
@@ -485,6 +527,63 @@ async function decodeMicFile(data) {
     const result = decoder.decodeFile(fileBytes);
     const t1 = performance.now();
     const elapsed = t1 - t0;
+
+    // ─── MIC3 WSI Path ──────────────────────────────────────────
+    if (result.isMIC3) {
+      isWSI = true;
+      wsiFileData = fileBytes;
+      currentRGB = result.rgb;
+      currentWidth = result.width;
+      currentHeight = result.height;
+
+      // Get header info (JS decoder provides mic3Header, WASM provides levels array)
+      let levels, tileW, tileH;
+      if (result.mic3Header) {
+        wsiHeader = result.mic3Header;
+        levels = wsiHeader.levels;
+        tileW = wsiHeader.tileWidth;
+        tileH = wsiHeader.tileHeight;
+      } else {
+        levels = [];
+        const lvArr = result.levels;
+        for (let i = 0; i < (result.levelCount || lvArr.length); i++) {
+          levels.push(lvArr[i]);
+        }
+        tileW = result.tileWidth || 256;
+        tileH = result.tileHeight || 256;
+      }
+
+      const origSize = result.width * result.height * (result.channels || 3);
+      const compSize = data.byteLength;
+
+      log(`MIC3 WSI: ${result.width}x${result.height}, ${levels.length} levels, ${result.channels || 3}ch`, 'success');
+      log(`Time: ${elapsed.toFixed(2)} ms | Throughput: ${(origSize / elapsed / 1000).toFixed(1)} MB/s`, 'timing');
+
+      $('stats').style.display = 'grid';
+      $('statDims').textContent = `${result.width} x ${result.height} (RGB)`;
+      $('statComp').textContent = formatBytes(compSize);
+      $('statOrig').textContent = formatBytes(origSize);
+      $('statRatio').textContent = (origSize / compSize).toFixed(2) + ':1';
+      $('statTime').textContent = elapsed.toFixed(2) + ' ms';
+      $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+
+      // Populate level selector
+      const sel = $('wsiLevelSelect');
+      sel.innerHTML = '';
+      for (let i = 0; i < levels.length; i++) {
+        const lv = levels[i];
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `Level ${i}: ${lv.width}x${lv.height} (${lv.tilesX}x${lv.tilesY} tiles)`;
+        sel.appendChild(opt);
+      }
+      $('wsiTileInfo').textContent = `${tileW}x${tileH} tiles`;
+      $('wsiControls').style.display = 'flex';
+      $('wlControls').style.display = 'none';
+
+      renderRGBImage(currentRGB, currentWidth, currentHeight);
+      return;
+    }
 
     currentPixels = result.pixels;
     currentWidth = result.width;
@@ -637,6 +736,43 @@ $('loadTestMG2').addEventListener('click', () => loadTestFile('MG2'));
 $('loadTestMG3').addEventListener('click', () => loadTestFile('MG3'));
 $('loadTestTOMO').addEventListener('click', () => loadTestFile('MG_TOMO'));
 $('loadTestCTMulti').addEventListener('click', () => loadTestFile('CT_MULTI'));
+$('loadTestWSI').addEventListener('click', () => loadTestFile('WSI_TISSUE'));
+
+// WSI level selector
+$('wsiLevelSelect').addEventListener('change', () => {
+  if (!wsiFileData) return;
+  const levelIdx = parseInt($('wsiLevelSelect').value);
+  const { impl: decoder, name: decoderName } = getDecoder();
+  log(`Decoding WSI level ${levelIdx} using ${decoderName}...`);
+
+  try {
+    const t0 = performance.now();
+    let result;
+    if (decoderName === 'WASM') {
+      result = decoder.decodeMIC3Level(wsiFileData, levelIdx);
+    } else {
+      result = MICDecoder.decodeMIC3Level(wsiFileData, levelIdx);
+    }
+    const t1 = performance.now();
+    const elapsed = t1 - t0;
+
+    currentRGB = result.rgb;
+    currentWidth = result.width;
+    currentHeight = result.height;
+
+    const origSize = result.width * result.height * 3;
+    log(`Level ${levelIdx}: ${result.width}x${result.height} decoded in ${elapsed.toFixed(2)} ms`, 'timing');
+
+    $('statDims').textContent = `${result.width} x ${result.height} (RGB)`;
+    $('statTime').textContent = elapsed.toFixed(2) + ' ms';
+    $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+
+    renderRGBImage(currentRGB, currentWidth, currentHeight);
+  } catch (e) {
+    log('WSI level decode error: ' + e.message, 'error');
+    console.error(e);
+  }
+});
 
 log('MIC Decoder ready. Drop a .mic file or load a test image.');
 </script>

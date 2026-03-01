@@ -10,24 +10,26 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 
 | Property | Value |
 |----------|-------|
-| Compression ratio | 1.7× – 8.9× (lossless) |
+| Compression ratio | 1.7× – 8.9× greyscale, 3–5× RGB tissue (lossless) |
 | Peak decompression speed | up to 16 GB/s (ARM64, 64 cores) |
-| Supported bit depths | 8–16 bit greyscale |
+| Supported formats | 8–16 bit greyscale, 8-bit RGB (WSI/pathology) |
 | Multi-frame support | MIC2 container (random access or temporal prediction) |
-| Browser support | JavaScript + WASM decoder included |
+| WSI support | MIC3 tiled container with pyramid levels, parallel encode/decode |
+| Browser support | JavaScript + WASM decoder (greyscale + RGB WSI) |
 
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
 2. [Compression Pipeline](#compression-pipeline)
 3. [Multi-Frame Support (MIC2)](#multi-frame-support-mic2)
-4. [Algorithm Details](#algorithm-details)
-5. [Compression Results](#compression-results)
-6. [Benchmark Results](#benchmark-results)
-7. [Browser Decoder](#browser-decoder)
-8. [CLI Reference](#cli-reference)
-9. [Comparison with HTJ2K](#comparison-with-htj2k)
-10. [Roadmap](#roadmap)
+4. [Whole Slide Imaging (MIC3)](#whole-slide-imaging-mic3)
+5. [Algorithm Details](#algorithm-details)
+6. [Compression Results](#compression-results)
+7. [Benchmark Results](#benchmark-results)
+8. [Browser Decoder](#browser-decoder)
+9. [CLI Reference](#cli-reference)
+10. [Comparison with HTJ2K](#comparison-with-htj2k)
+11. [Roadmap](#roadmap)
 
 ---
 
@@ -42,6 +44,9 @@ go build -o mic-compress ./cmd/mic-compress/
 
 # Compress a multi-frame DICOM (e.g., Breast Tomosynthesis)
 ./mic-compress -dicom tomo.dcm -output tomo.mic
+
+# Compress an RGB WSI image (Go API)
+mic.CompressWSI(rgbPixels, width, height, 3, 8, mic.WSIOptions{})
 
 # Run all tests
 go test -v ./...
@@ -143,6 +148,107 @@ Frame N  →  Delta+RLE+FSE          Frame N  →  ZigZag(residual)+RLE+FSE
 | Temporal | 614 MB | 47.5 MB | 12.9× |
 
 For smooth mammographic images the spatial predictor outperforms inter-frame prediction. Temporal mode may win on datasets with less spatial redundancy.
+
+---
+
+## Whole Slide Imaging (MIC3)
+
+MIC3 is a tiled container format for whole slide images (WSI) used in digital pathology. It extends the existing compression pipeline to handle RGB images via a reversible color transform, with tiled random access and multi-resolution pyramid levels.
+
+### WSI Pipeline
+
+```
+RGB Pixels (8-bit per channel)
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│         YCoCg-R Color Transform          │
+│  Reversible, bit-exact decorrelation     │
+│  Y: luminance [0,255]                   │
+│  Co/Cg: chrominance (ZigZag → [0,510])  │
+└─────────────────┬────────────────────────┘
+                  │
+    ┌─────────────┼─────────────┐
+    ▼             ▼             ▼
+  Y plane      Co plane      Cg plane
+    │             │             │
+    ▼             ▼             ▼
+  Delta+RLE+FSE  Delta+RLE+FSE  Delta+RLE+FSE
+    │             │             │
+    └─────────────┼─────────────┘
+                  │
+                  ▼
+          Compressed tile blob
+```
+
+### Key Features
+
+- **Tiled architecture**: Images divided into tiles (default 256×256) for O(1) random access to any tile
+- **Pyramid levels**: Multi-resolution levels (each ½ the previous) generated via 2×2 box filter downsampling
+- **Parallel compression**: Tiles are independent — goroutine worker pool for parallel encode/decode
+- **Constant-plane optimization**: Background tiles (all white/black) compress to 15–17 bytes total
+- **Full RGB losslessness**: YCoCg-R transform is perfectly reversible for integer inputs
+
+### MIC3 File Layout
+
+```
+Byte offset   Field
+────────────  ─────────────────────────────────────────
+0  – 3        Magic: "MIC3"
+4  – 7        Version (1)
+8  – 15       Width × Height (uint32 LE each)
+16 – 23       Tile width × height (uint32 LE each)
+24 – 25       Channels: 1=grey, 3=RGB
+26            Bits per sample: 8 or 16
+27            Flags: bit0=spatial, bit1=color_transform
+28 – 29       Pyramid level count
+32 – 39       Total tile count (uint64 LE)
+────────────  ─────────────────────────────────────────
+48 – …        Level descriptors (N × 20 bytes each)
+              └─ width, height, tilesX, tilesY, firstTileIdx
+────────────  ─────────────────────────────────────────
+…             Tile offset table (M × 16 bytes each)
+              └─ per tile: offset (uint64) + length (uint64)
+────────────  ─────────────────────────────────────────
+…             Concatenated compressed tile blobs
+```
+
+### WSI Compression Results
+
+| Tile Type | Ratio | Notes |
+|-----------|-------|-------|
+| White background | **1946×** | Near-zero entropy after color transform |
+| Dense tissue (H&E) | **4.4×** | Smooth staining gradients, good delta prediction |
+| Gradient | **5.4×** | Excellent spatial correlation |
+| Mixed slide (typical) | **4–8×** | Weighted average across background + tissue tiles |
+
+### WSI API
+
+```go
+// Compress a full-resolution RGB image into MIC3
+compressed, err := mic.CompressWSI(pixels, width, height, 3, 8, mic.WSIOptions{
+    TileWidth:  256,
+    TileHeight: 256,
+    Workers:    8,  // parallel goroutines
+})
+
+// Read header without decompressing
+hdr, err := mic.ReadWSIHeader(compressed)
+
+// Decompress a single tile (O(1) random access)
+tile, err := mic.DecompressWSITile(compressed, level, tileX, tileY)
+
+// Decompress an arbitrary region across tiles
+region, err := mic.DecompressWSIRegion(compressed, level, x, y, w, h)
+```
+
+### DICOM WSI Integration
+
+MIC3 is designed to work with DICOM Supplement 145 (VL Whole Slide Microscopy Image):
+- Each MIC3 tile maps to a DICOM frame
+- Tile grid matches DICOM's Dimension Organization
+- Pyramid levels can map to DICOM concatenation or separate instances
+- Sample WSI test images for validation: [jcupitt/dicom-wsi-sample](https://github.com/jcupitt/dicom-wsi-sample)
 
 ---
 
@@ -305,10 +411,11 @@ go test -benchmem -run=^$ -benchtime=200x -bench ^BenchmarkDeltaRLEFSECompress$ 
 
 A browser-based decoder lives in [`web/`](./web/):
 
-- **Pure JavaScript** ES module (~15 KB, zero dependencies)
+- **Pure JavaScript** ES module (~20 KB, zero dependencies)
 - **Go WASM** build for maximum throughput
-- Drag-and-drop `.mic` / `.mic2` file loading
-- Window/Level controls for 16-bit diagnostic viewing
+- Drag-and-drop `.mic` file loading (MIC1, MIC2, MIC3)
+- **16-bit greyscale**: Window/Level controls for diagnostic viewing
+- **RGB WSI**: Full-color tile rendering with pyramid level selector
 - **Multi-frame movie player** — play/pause, frame slider, configurable FPS, keyboard shortcuts (Space, ←/→)
 - ~10–30 M pixels/s in JavaScript (V8), higher with WASM
 
@@ -350,4 +457,6 @@ go build -o mic-compress ./cmd/mic-compress/
 - [x] Browser-based decoding in JS and WASM — see [web decoder](./web/README.md)
 - [x] Multi-frame image support (Breast Tomosynthesis) — MIC2 container with independent and temporal modes, browser movie player
 - [x] Wavelet (5/3 integer) decorrelation stage — benchmarked; Delta+RLE+FSE wins for lossless; wavelet remains a candidate for a future lossy/progressive mode
+- [x] Whole Slide Imaging (WSI) — MIC3 tiled container with YCoCg-R color transform, pyramid levels, parallel tile compression, browser RGB viewer with level selector
+- [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [ ] Implement suggestions from [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)

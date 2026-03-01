@@ -229,6 +229,17 @@ var dicomSeriesImages = []struct {
 	},
 }
 
+// WSI test images (raw RGB files)
+var wsiTestImages = []struct {
+	name     string
+	file     string
+	width    int
+	height   int
+	channels int
+}{
+	{name: "WSI_TISSUE", file: "testdata/wsi_tissue_512x384.rgb", width: 512, height: 384, channels: 3},
+}
+
 func main() {
 	inputFile := flag.String("input", "", "Input binary image file (raw uint16 LE pixels)")
 	dicomFile := flag.String("dicom", "", "Input DICOM file (reads pixel data and dimensions automatically)")
@@ -351,6 +362,33 @@ func main() {
 			ratio := float64(rawSize) / float64(len(compressed))
 			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
 				img.name, rawSize, len(compressed), ratio, outPath)
+		}
+
+		// Compress WSI test images (MIC3)
+		for _, img := range wsiTestImages {
+			fmt.Printf("Compressing WSI %s (%dx%d)...\n", img.name, img.width, img.height)
+
+			byteData, err := os.ReadFile(img.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  skip %s: %v\n", img.name, err)
+				continue
+			}
+
+			compressed, err := mic.CompressWSI(byteData, img.width, img.height, img.channels, 8, mic.WSIOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", img.name, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, img.name+".mic")
+			if err := os.WriteFile(outPath, compressed, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			ratio := float64(len(byteData)) / float64(len(compressed))
+			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				img.name, len(byteData), len(compressed), ratio, outPath)
 		}
 		return
 	}
