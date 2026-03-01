@@ -133,6 +133,7 @@
     <button id="loadTestMG2">MG2 (1996x2457)</button>
     <button id="loadTestMG3">MG3 (3064x4774)</button>
     <button id="loadTestTOMO">MG Tomo (69 frames)</button>
+    <button id="loadTestCTMulti">CT Multi (203 frames)</button>
     <span style="color:#555">|</span>
     <label>Decoder:
       <select id="decoderType">
@@ -635,6 +636,7 @@ $('loadTestMG1').addEventListener('click', () => loadTestFile('MG1'));
 $('loadTestMG2').addEventListener('click', () => loadTestFile('MG2'));
 $('loadTestMG3').addEventListener('click', () => loadTestFile('MG3'));
 $('loadTestTOMO').addEventListener('click', () => loadTestFile('MG_TOMO'));
+$('loadTestCTMulti').addEventListener('click', () => loadTestFile('CT_MULTI'));
 
 log('MIC Decoder ready. Drop a .mic file or load a test image.');
 </script>

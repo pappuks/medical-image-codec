@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 
 	"mic"
 
@@ -106,6 +108,89 @@ func readDicomMultiFrame(fileName string) ([][]uint16, int, int, uint16, error) 
 	return frames, width, height, maxValue, nil
 }
 
+// readDicomSeries reads all single-frame DICOM files from a directory,
+// orders them by InstanceNumber, and returns the assembled frames.
+func readDicomSeries(seriesDir string) ([][]uint16, int, int, uint16, error) {
+	entries, err := os.ReadDir(seriesDir)
+	if err != nil {
+		return nil, 0, 0, 0, fmt.Errorf("read directory: %w", err)
+	}
+
+	type dicomEntry struct {
+		path           string
+		instanceNumber int
+	}
+	var dcmFiles []dicomEntry
+
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".dcm" {
+			continue
+		}
+		fpath := filepath.Join(seriesDir, e.Name())
+		dataset, err := dicom.ParseFile(fpath, nil)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("parse %s: %w", e.Name(), err)
+		}
+		el, err := dataset.FindElementByTag(tag.InstanceNumber)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("no InstanceNumber in %s: %w", e.Name(), err)
+		}
+		instNum, err := strconv.Atoi(fmt.Sprintf("%v", el.Value.GetValue().([]string)[0]))
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("parse InstanceNumber in %s: %w", e.Name(), err)
+		}
+		dcmFiles = append(dcmFiles, dicomEntry{path: fpath, instanceNumber: instNum})
+	}
+
+	if len(dcmFiles) == 0 {
+		return nil, 0, 0, 0, fmt.Errorf("no .dcm files in %s", seriesDir)
+	}
+
+	sort.Slice(dcmFiles, func(i, j int) bool {
+		return dcmFiles[i].instanceNumber < dcmFiles[j].instanceNumber
+	})
+
+	var width, height int
+	var maxValue uint16
+	frames := make([][]uint16, len(dcmFiles))
+
+	for f, de := range dcmFiles {
+		dataset, err := dicom.ParseFile(de.path, nil)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("parse frame %d: %w", f, err)
+		}
+		pixelDataElement, err := dataset.FindElementByTag(tag.PixelData)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("no pixel data in frame %d: %w", f, err)
+		}
+		pixelDataInfo := dicom.MustGetPixelDataInfo(pixelDataElement.Value)
+		nativeFrame, err := pixelDataInfo.Frames[0].GetNativeFrame()
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("get native frame %d: %w", f, err)
+		}
+
+		if f == 0 {
+			width = nativeFrame.Cols
+			height = nativeFrame.Rows
+		} else if nativeFrame.Cols != width || nativeFrame.Rows != height {
+			return nil, 0, 0, 0, fmt.Errorf("frame %d dimension mismatch: %dx%d vs %dx%d",
+				f, nativeFrame.Cols, nativeFrame.Rows, width, height)
+		}
+
+		pixels := make([]uint16, width*height)
+		for j := 0; j < len(nativeFrame.Data); j++ {
+			v := uint16(nativeFrame.Data[j][0])
+			pixels[j] = v
+			if v > maxValue {
+				maxValue = v
+			}
+		}
+		frames[f] = pixels
+	}
+
+	return frames, width, height, maxValue, nil
+}
+
 type testImage struct {
 	name string
 	file string
@@ -122,7 +207,7 @@ var testImages = []testImage{
 	{name: "MG3", file: "testdata/MG1.RAW", cols: 3064, rows: 4774},
 }
 
-// Multiframe DICOM test images
+// Multiframe DICOM test images (single multiframe DICOM file)
 var dicomTestImages = []struct {
 	name string
 	file string
@@ -130,6 +215,17 @@ var dicomTestImages = []struct {
 	{
 		name: "MG_TOMO",
 		file: "testdata/Series 73200000 [MG - R CC Breast Tomosynthesis Image]/1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.647.0.dcm",
+	},
+}
+
+// Multiframe DICOM series (directory of individual DICOM files)
+var dicomSeriesImages = []struct {
+	name string
+	dir  string
+}{
+	{
+		name: "CT_MULTI",
+		dir:  "testdata/0acbebb8d463b4b9ca88cf38431aac69",
 	},
 }
 
@@ -204,6 +300,42 @@ func main() {
 				len(frames), w, h, maxVal, rawSize)
 
 			// Compress independently (MIC2)
+			compressed, err := mic.CompressMultiFrame(frames, w, h, maxVal, false)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", img.name, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, img.name+".mic")
+			if err := os.WriteFile(outPath, compressed, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			ratio := float64(rawSize) / float64(len(compressed))
+			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				img.name, rawSize, len(compressed), ratio, outPath)
+		}
+
+		// Compress multiframe DICOM series (directory of individual files, MIC2)
+		for _, img := range dicomSeriesImages {
+			fmt.Printf("Compressing series %s...\n", img.name)
+
+			if _, err := os.Stat(img.dir); os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "  skip %s: directory not found\n", img.name)
+				continue
+			}
+
+			frames, w, h, maxVal, err := readDicomSeries(img.dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", img.name, err)
+				continue
+			}
+
+			rawSize := len(frames) * w * h * 2
+			fmt.Printf("  %d frames, %dx%d, maxValue=%d, raw=%d bytes\n",
+				len(frames), w, h, maxVal, rawSize)
+
 			compressed, err := mic.CompressMultiFrame(frames, w, h, maxVal, false)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", img.name, err)
