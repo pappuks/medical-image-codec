@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/suyashkumar/dicom"
@@ -293,6 +296,150 @@ func TestMultiFrameTomoCompress(t *testing.T) {
 	}
 
 	frames, width, height, maxValue, err := ReadDicomMultiFrame(fileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("Loaded %d frames, %dx%d, maxValue=%d", len(frames), width, height, maxValue)
+
+	rawSize := len(frames) * width * height * 2
+
+	// Compress independently
+	indepComp, err := CompressMultiFrame(frames, width, height, maxValue, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Independent: %d bytes (%.2f:1)", len(indepComp), float64(rawSize)/float64(len(indepComp)))
+
+	// Verify independent roundtrip (spot check first, middle, last frame)
+	for _, idx := range []int{0, len(frames) / 2, len(frames) - 1} {
+		decoded, _, err := DecompressFrame(indepComp, idx)
+		if err != nil {
+			t.Fatalf("decompress frame %d: %v", idx, err)
+		}
+		for i := range frames[idx] {
+			if decoded[i] != frames[idx][i] {
+				t.Fatalf("independent frame %d pixel %d mismatch: got %d, want %d", idx, i, decoded[i], frames[idx][i])
+			}
+		}
+	}
+
+	// Compress with temporal prediction
+	tempComp, err := CompressMultiFrame(frames, width, height, maxValue, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Temporal: %d bytes (%.2f:1)", len(tempComp), float64(rawSize)/float64(len(tempComp)))
+
+	// Verify temporal roundtrip
+	decodedAll, _, err := DecompressMultiFrame(tempComp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for f := range frames {
+		for i := range frames[f] {
+			if decodedAll[f][i] != frames[f][i] {
+				t.Fatalf("temporal frame %d pixel %d mismatch: got %d, want %d", f, i, decodedAll[f][i], frames[f][i])
+			}
+		}
+	}
+
+	t.Logf("Temporal improvement: %.1f%%", (1.0-float64(len(tempComp))/float64(len(indepComp)))*100)
+}
+
+// ReadDicomSeries reads all single-frame DICOM files from a directory,
+// orders them by InstanceNumber, and returns the assembled frames.
+func ReadDicomSeries(seriesDir string) ([][]uint16, int, int, uint16, error) {
+	entries, err := os.ReadDir(seriesDir)
+	if err != nil {
+		return nil, 0, 0, 0, fmt.Errorf("read directory: %w", err)
+	}
+
+	// Collect .dcm files
+	type dicomEntry struct {
+		path           string
+		instanceNumber int
+	}
+	var dcmFiles []dicomEntry
+
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".dcm" {
+			continue
+		}
+		fpath := filepath.Join(seriesDir, e.Name())
+		dataset, err := dicom.ParseFile(fpath, nil)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("parse %s: %w", e.Name(), err)
+		}
+		el, err := dataset.FindElementByTag(tag.InstanceNumber)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("no InstanceNumber in %s: %w", e.Name(), err)
+		}
+		instNum, err := strconv.Atoi(fmt.Sprintf("%v", el.Value.GetValue().([]string)[0]))
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("parse InstanceNumber in %s: %w", e.Name(), err)
+		}
+		dcmFiles = append(dcmFiles, dicomEntry{path: fpath, instanceNumber: instNum})
+	}
+
+	if len(dcmFiles) == 0 {
+		return nil, 0, 0, 0, fmt.Errorf("no .dcm files in %s", seriesDir)
+	}
+
+	// Sort by InstanceNumber
+	sort.Slice(dcmFiles, func(i, j int) bool {
+		return dcmFiles[i].instanceNumber < dcmFiles[j].instanceNumber
+	})
+
+	// Read all frames
+	var width, height int
+	var maxValue uint16
+	frames := make([][]uint16, len(dcmFiles))
+
+	for f, de := range dcmFiles {
+		dataset, err := dicom.ParseFile(de.path, nil)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("parse frame %d: %w", f, err)
+		}
+		pixelDataElement, err := dataset.FindElementByTag(tag.PixelData)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("no pixel data in frame %d: %w", f, err)
+		}
+		pixelDataInfo := dicom.MustGetPixelDataInfo(pixelDataElement.Value)
+		nativeFrame, err := pixelDataInfo.Frames[0].GetNativeFrame()
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("get native frame %d: %w", f, err)
+		}
+
+		if f == 0 {
+			width = nativeFrame.Cols
+			height = nativeFrame.Rows
+		} else if nativeFrame.Cols != width || nativeFrame.Rows != height {
+			return nil, 0, 0, 0, fmt.Errorf("frame %d dimension mismatch: %dx%d vs %dx%d",
+				f, nativeFrame.Cols, nativeFrame.Rows, width, height)
+		}
+
+		pixels := make([]uint16, width*height)
+		for j := 0; j < len(nativeFrame.Data); j++ {
+			v := uint16(nativeFrame.Data[j][0])
+			pixels[j] = v
+			if v > maxValue {
+				maxValue = v
+			}
+		}
+		frames[f] = pixels
+	}
+
+	return frames, width, height, maxValue, nil
+}
+
+func TestMultiFrameCTCompress(t *testing.T) {
+	seriesDir := "testdata/0acbebb8d463b4b9ca88cf38431aac69"
+	if _, err := os.Stat(seriesDir); errors.Is(err, os.ErrNotExist) {
+		t.Skip("Skipping: CT series test data not present")
+	}
+
+	frames, width, height, maxValue, err := ReadDicomSeries(seriesDir)
 	if err != nil {
 		t.Fatal(err)
 	}
