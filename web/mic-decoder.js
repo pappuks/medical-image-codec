@@ -698,9 +698,19 @@ function rleDecompress(input) {
 
 const MIC_MAGIC = 0x3143494D; // "MIC1" in LE
 const MIC2_MAGIC = 0x3243494D; // "MIC2" in LE
+const MIC3_MAGIC = 0x3343494D; // "MIC3" in LE
 const MIC2_HEADER_SIZE = 20;
 const MIC2_ENTRY_SIZE = 8;
 const PIPELINE_TEMPORAL = 0x02;
+
+// MIC3 WSI constants
+const MIC3_HEADER_SIZE = 48;
+const MIC3_LEVEL_SIZE = 20;
+const MIC3_TILE_ENTRY_SIZE = 16;
+const PLANE_CONSTANT_ZERO = 0;
+const PLANE_CONSTANT = 1;
+const PLANE_COMPRESSED = 2;
+const PLANE_RAW = 3;
 
 // ─── MIC2 Multiframe Support ────────────────────────────────────────────────
 
@@ -767,6 +777,217 @@ function decompressResidualFrame(compressed) {
   return rleDecompress(rleData);
 }
 
+// ─── MIC3 WSI Support ────────────────────────────────────────────────────────
+
+/**
+ * Parse a MIC3 WSI header.
+ * @param {Uint8Array} fileBytes
+ * @returns {{ width, height, tileWidth, tileHeight, channels, bitsPerSample, colorTransform, levels, tileTable, dataOffset, totalTiles, isMIC3 }}
+ */
+function parseMIC3Header(fileBytes) {
+  const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
+  if (fileBytes.length < MIC3_HEADER_SIZE) throw new Error('MIC3: file too small');
+
+  const magic = dv.getUint32(0, true);
+  if (magic !== MIC3_MAGIC) throw new Error('MIC3: invalid magic');
+  const version = dv.getUint32(4, true);
+  if (version !== 1) throw new Error(`MIC3: unsupported version ${version}`);
+
+  const width = dv.getUint32(8, true);
+  const height = dv.getUint32(12, true);
+  const tileWidth = dv.getUint32(16, true);
+  const tileHeight = dv.getUint32(20, true);
+  const channels = dv.getUint16(24, true);
+  const bitsPerSample = fileBytes[26];
+  const flags = fileBytes[27];
+  const colorTransform = (flags & 0x02) !== 0;
+  const levelCount = dv.getUint16(28, true);
+  const totalTiles = dv.getUint32(32, true); // low 32 bits of uint64
+
+  let off = MIC3_HEADER_SIZE;
+  const levels = [];
+  for (let i = 0; i < levelCount; i++) {
+    levels.push({
+      width: dv.getUint32(off, true),
+      height: dv.getUint32(off + 4, true),
+      tilesX: dv.getUint32(off + 8, true),
+      tilesY: dv.getUint32(off + 12, true),
+      firstTileIdx: dv.getUint32(off + 16, true),
+    });
+    off += MIC3_LEVEL_SIZE;
+  }
+
+  const tileTable = [];
+  for (let i = 0; i < totalTiles; i++) {
+    tileTable.push({
+      offset: dv.getUint32(off, true),       // low 32 of uint64
+      length: dv.getUint32(off + 8, true),    // low 32 of uint64
+    });
+    off += MIC3_TILE_ENTRY_SIZE;
+  }
+
+  return {
+    width, height, tileWidth, tileHeight, channels, bitsPerSample,
+    colorTransform, levels, tileTable, dataOffset: off, totalTiles, isMIC3: true,
+  };
+}
+
+/**
+ * YCoCg-R inverse color transform.
+ * @param {Uint16Array} y  - luminance plane
+ * @param {Uint16Array} co - ZigZag-encoded orange chrominance
+ * @param {Uint16Array} cg - ZigZag-encoded green chrominance
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array} interleaved RGB bytes
+ */
+function yCoCgRInverse(y, co, cg, width, height) {
+  const n = width * height;
+  const rgb = new Uint8Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const yVal = y[i];
+    // UnZigZag: signed = (unsigned >>> 1) ^ -(unsigned & 1)
+    const coVal = (co[i] >>> 1) ^ (-(co[i] & 1));
+    const cgVal = (cg[i] >>> 1) ^ (-(cg[i] & 1));
+    const t = yVal - (cgVal >> 1);
+    const g = cgVal + t;
+    const b = t - (coVal >> 1);
+    const r = coVal + b;
+    rgb[i * 3] = r & 0xFF;
+    rgb[i * 3 + 1] = g & 0xFF;
+    rgb[i * 3 + 2] = b & 0xFF;
+  }
+  return rgb;
+}
+
+/**
+ * Decompress a single WSI plane from its encoded blob.
+ * @param {Uint8Array} data - plane blob (mode byte + payload)
+ * @param {number} tileWidth
+ * @param {number} tileHeight
+ * @returns {Uint16Array}
+ */
+function decompressWSIPlane(data, tileWidth, tileHeight) {
+  if (data.length === 0) throw new Error('empty plane data');
+  const mode = data[0];
+  const n = tileWidth * tileHeight;
+
+  switch (mode) {
+    case PLANE_CONSTANT_ZERO:
+      return new Uint16Array(n);
+
+    case PLANE_CONSTANT: {
+      if (data.length < 3) throw new Error('constant plane truncated');
+      const val = data[1] | (data[2] << 8);
+      const out = new Uint16Array(n);
+      out.fill(val);
+      return out;
+    }
+
+    case PLANE_COMPRESSED: {
+      const compressed = data.subarray(1);
+      const fse = new FSEDecompressor();
+      const rleSymbols = fse.decompress(compressed);
+      return deltaRleDecompress(rleSymbols, tileWidth, tileHeight);
+    }
+
+    case PLANE_RAW: {
+      if (data.length < 1 + n * 2) throw new Error('raw plane truncated');
+      const out = new Uint16Array(n);
+      for (let i = 0; i < n; i++) {
+        out[i] = data[1 + i * 2] | (data[2 + i * 2] << 8);
+      }
+      return out;
+    }
+
+    default:
+      throw new Error(`unknown plane mode ${mode}`);
+  }
+}
+
+/**
+ * Decompress an RGB tile blob (3 planes with length headers).
+ * @param {Uint8Array} blob
+ * @param {number} tileWidth
+ * @param {number} tileHeight
+ * @param {boolean} colorTransform
+ * @returns {Uint8Array} interleaved RGB bytes
+ */
+function decompressRGBTileBlob(blob, tileWidth, tileHeight, colorTransform) {
+  if (blob.length < 12) throw new Error('MIC3: RGB tile blob too small');
+  const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+  const yLen = dv.getUint32(0, true);
+  const coLen = dv.getUint32(4, true);
+  const cgLen = dv.getUint32(8, true);
+  let off = 12;
+
+  const yPlane = decompressWSIPlane(blob.subarray(off, off + yLen), tileWidth, tileHeight);
+  off += yLen;
+  const coPlane = decompressWSIPlane(blob.subarray(off, off + coLen), tileWidth, tileHeight);
+  off += coLen;
+  const cgPlane = decompressWSIPlane(blob.subarray(off, off + cgLen), tileWidth, tileHeight);
+
+  if (colorTransform) {
+    return yCoCgRInverse(yPlane, coPlane, cgPlane, tileWidth, tileHeight);
+  }
+
+  // No color transform: interleave planes as RGB
+  const n = tileWidth * tileHeight;
+  const rgb = new Uint8Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    rgb[i * 3] = yPlane[i] & 0xFF;
+    rgb[i * 3 + 1] = coPlane[i] & 0xFF;
+    rgb[i * 3 + 2] = cgPlane[i] & 0xFF;
+  }
+  return rgb;
+}
+
+/**
+ * Decompress all tiles at a given pyramid level and compose into a full image.
+ * @param {Uint8Array} fileBytes - complete MIC3 file
+ * @param {object} hdr - parsed MIC3 header
+ * @param {number} levelIdx - pyramid level index
+ * @returns {Uint8Array} interleaved RGB bytes for the full level
+ */
+function decompressMIC3Level(fileBytes, hdr, levelIdx) {
+  const level = hdr.levels[levelIdx];
+  const { tileWidth, tileHeight, channels, bitsPerSample, colorTransform } = hdr;
+  const bytesPerPixel = channels;
+
+  const result = new Uint8Array(level.width * level.height * bytesPerPixel);
+
+  for (let ty = 0; ty < level.tilesY; ty++) {
+    for (let tx = 0; tx < level.tilesX; tx++) {
+      const globalIdx = level.firstTileIdx + ty * level.tilesX + tx;
+      const entry = hdr.tileTable[globalIdx];
+      const start = hdr.dataOffset + entry.offset;
+      const blob = fileBytes.subarray(start, start + entry.length);
+
+      let tileRGB;
+      if (channels === 3 && bitsPerSample === 8) {
+        tileRGB = decompressRGBTileBlob(blob, tileWidth, tileHeight, colorTransform);
+      } else {
+        throw new Error('MIC3: only 8-bit RGB supported in browser decoder');
+      }
+
+      // Copy tile into result, handling edge tiles
+      const startX = tx * tileWidth;
+      const startY = ty * tileHeight;
+      const copyW = Math.min(tileWidth, level.width - startX);
+      const copyH = Math.min(tileHeight, level.height - startY);
+
+      for (let y = 0; y < copyH; y++) {
+        const srcOff = y * tileWidth * bytesPerPixel;
+        const dstOff = ((startY + y) * level.width + startX) * bytesPerPixel;
+        const len = copyW * bytesPerPixel;
+        result.set(tileRGB.subarray(srcOff, srcOff + len), dstOff);
+      }
+    }
+  }
+
+  return result;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export const MICDecoder = {
@@ -797,6 +1018,15 @@ export const MICDecoder = {
   decodeFile(fileBytes) {
     const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
     const magic = dv.getUint32(0, true);
+
+    if (magic === MIC3_MAGIC) {
+      const hdr = parseMIC3Header(fileBytes);
+      const rgb = decompressMIC3Level(fileBytes, hdr, 0);
+      return {
+        rgb, width: hdr.levels[0].width, height: hdr.levels[0].height,
+        channels: hdr.channels, isMIC3: true, mic3Header: hdr,
+      };
+    }
 
     if (magic === MIC2_MAGIC) {
       const hdr = parseMIC2Header(fileBytes);
@@ -902,6 +1132,30 @@ export const MICDecoder = {
    */
   deltaRleDecompress(rleSymbols, width, height) {
     return deltaRleDecompress(rleSymbols, width, height);
+  },
+
+  /**
+   * Parse MIC3 WSI header without decompressing tiles.
+   * @param {Uint8Array} fileBytes
+   * @returns {object} header with levels, tileTable, etc.
+   */
+  parseMIC3Header(fileBytes) {
+    return parseMIC3Header(fileBytes);
+  },
+
+  /**
+   * Decode all tiles at a specific pyramid level of a MIC3 file.
+   * @param {Uint8Array} fileBytes - Complete MIC3 file
+   * @param {number} levelIdx - Pyramid level (0 = full resolution)
+   * @returns {{ rgb: Uint8Array, width: number, height: number }}
+   */
+  decodeMIC3Level(fileBytes, levelIdx) {
+    const hdr = parseMIC3Header(fileBytes);
+    if (levelIdx < 0 || levelIdx >= hdr.levels.length) {
+      throw new Error(`MIC3: level ${levelIdx} out of range [0, ${hdr.levels.length})`);
+    }
+    const rgb = decompressMIC3Level(fileBytes, hdr, levelIdx);
+    return { rgb, width: hdr.levels[levelIdx].width, height: hdr.levels[levelIdx].height };
   },
 };
 

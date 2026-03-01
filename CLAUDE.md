@@ -18,10 +18,19 @@ go test -run TestHuffCompress -v           # Huffman only
 go test -run TestTemporalDelta -v          # Temporal delta encode/decode
 go test -run TestMultiFrame -v             # Multi-frame roundtrip (both modes)
 go test -run TestMultiFrameTomo -v         # Real DICOM 69-frame tomo test
+go test -run TestYCoCgR -v                # YCoCg-R color transform roundtrip
+go test -run TestWSITileCompress -v       # WSI tile compression (white, tissue, gradient)
+go test -run TestWSICompress -v           # Full WSI compress/decompress roundtrip
+go test -run TestWSIPyramidLevels -v      # Pyramid level generation
+go test -run TestWSIRegion -v             # Cross-tile region decompression
 
 # Run benchmarks (decompression speed + compression ratio)
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEHuffCompress$ mic
+
+# WSI benchmarks
+go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkWSITileCompressTissue$ mic
+go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkWSICompress mic
 
 # Run all benchmarks
 go test -bench=. -benchtime=10x
@@ -138,6 +147,55 @@ The codec handles all bit depths (8-16 bit) dynamically using `bits.Len16(maxVal
 - The `cumul` array in `buildCTable` has size `maxSymbolValue + 2` (65537 entries) due to the sentinel
 - RLE midCount protocol: same runs count DOWN from midCount, diff runs count DOWN from above midCount. `c == midCount` is the sentinel for diff-run completion
 
+### WSI / MIC3 Format (Whole Slide Imaging)
+
+The codec supports RGB whole slide images for digital pathology via the MIC3 tiled container format with pyramid levels:
+
+- **RGB support**: YCoCg-R reversible color transform decorrelates RGB into Y (luminance) + Co/Cg (chrominance). Each plane is compressed independently through the existing Delta+RLE+FSE pipeline.
+- **Tiled architecture**: Images divided into tiles (default 256×256) for O(1) random access
+- **Pyramid levels**: Multi-resolution levels (each ½ the previous dimension) generated via 2×2 box filter downsampling
+- **Parallel compression**: Tiles are independent — goroutine worker pool for parallel encode/decode
+- **Constant-plane optimization**: Background tiles (all white/black) compress to 15-17 bytes total
+
+```
+WSI Pipeline:
+  RGB pixels → YCoCg-R transform
+    → Y plane:  Delta+RLE+FSE (maxValue ≤ 255)
+    → Co plane: Delta+RLE+FSE (ZigZag, maxValue ≤ 510)
+    → Cg plane: Delta+RLE+FSE (ZigZag, maxValue ≤ 510)
+    → Tile blob: [Y_len][Co_len][Cg_len][Y_data][Co_data][Cg_data]
+```
+
+```
+MIC3 format:
+  Bytes 0-3:    Magic "MIC3"
+  Bytes 4-7:    Version (uint32 LE)
+  Bytes 8-15:   Width × Height (uint32 LE each)
+  Bytes 16-23:  TileWidth × TileHeight (uint32 LE each)
+  Bytes 24-25:  Channels (uint16 LE: 1=grey, 3=RGB)
+  Byte 26:      Bits per sample (8 or 16)
+  Byte 27:      Flags (bit0=spatial, bit1=color_transform)
+  Bytes 28-29:  Pyramid level count
+  Bytes 32-39:  Total tile count (uint64 LE)
+  After header: Level descriptors (N × 20 bytes)
+  After levels: Tile offset table (M × 16 bytes: offset_u64 + length_u64)
+  After table:  Concatenated compressed tile blobs
+```
+
+Key files:
+
+| File | Purpose |
+|------|---------|
+| `ycocgr.go` | YCoCg-R forward/inverse color transform (reversible, bit-exact) |
+| `wsiformat.go` | MIC3 container: header, level descriptors, tile offset table I/O |
+| `wsicompress.go` | Tile compression, full WSI compress/decompress, parallel support |
+| `wsipyramid.go` | Pyramid generation via 2×2 box filter downsampling |
+| `wsi_test.go` | WSI tests: color transform, tiles, full roundtrip, benchmarks |
+
+Key functions: `CompressWSI`, `DecompressWSITile`, `DecompressWSIRegion`, `ReadWSIHeader`, `YCoCgRForward`/`YCoCgRInverse`.
+
+Per-plane encoding modes: `planeConstantZero` (1 byte), `planeConstant` (3 bytes: mode + uint16), `planeCompressed` (CompressSingleFrame), `planeRaw` (fallback for incompressible data).
+
 ## Test Data
 
 Test images in `testdata/`:
@@ -147,3 +205,5 @@ Test images in `testdata/`:
 - XR (2048x2577) — X-ray
 - MG1-MG4 (various large sizes) — Mammography, best compression ratios
 - MG_TOMO (2457x1890, 69 frames) — Breast Tomosynthesis multiframe DICOM, 10-bit depth
+- wsi_tissue_512x384.rgb — Synthetic H&E-stained tissue (RGB, 8-bit)
+- wsi_background_256x256.rgb — White background tile (RGB, 8-bit)
