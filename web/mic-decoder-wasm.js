@@ -115,6 +115,18 @@ export async function loadMICWasm(wasmPath = 'mic-decoder.wasm') {
       return result;
     },
 
+    /**
+     * Decode all tiles at a specific WSI pyramid level.
+     * @param {Uint8Array} fileBytes - Complete MIC3 file
+     * @param {number} levelIdx - Pyramid level (0 = full resolution)
+     * @returns {{ rgb: Uint8Array, width: number, height: number }}
+     */
+    decodeMIC3Level(fileBytes, levelIdx) {
+      const result = wasm.decodeWSILevel(fileBytes, levelIdx);
+      if (result instanceof Error) throw result;
+      return result;
+    },
+
     /** @returns {string} */
     version() {
       return wasm.version();
