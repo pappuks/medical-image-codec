@@ -459,4 +459,7 @@ go build -o mic-compress ./cmd/mic-compress/
 - [x] Wavelet (5/3 integer) decorrelation stage — benchmarked; Delta+RLE+FSE wins for lossless; wavelet remains a candidate for a future lossy/progressive mode
 - [x] Whole Slide Imaging (WSI) — MIC3 tiled container with YCoCg-R color transform, pyramid levels, parallel tile compression, browser RGB viewer with level selector
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
-- [ ] Implement suggestions from [Klaus Post](https://github.com/pappuks/medical-image-codec/issues/1)
+- [x] Left+Up average predictor — implemented from [Klaus Post's feedback](https://github.com/pappuks/medical-image-codec/issues/1); avg(left, top) replaces pure-left prediction in the main Delta+RLE+FSE pipeline
+- [ ] Gap removal for sparse value distributions (XR images) — bitmap to collapse unused symbols before FSE; estimated 15–20% size reduction for XR modality
+- [ ] Dynamic prediction switching (every 32 pixels) — adaptive selection between left, top, avg predictors; ~5% CT improvement in Klaus's experiments
+- [ ] Paeth filtering — PNG-style predictor; marginal gain (~1–3%) over current avg predictor, low priority
