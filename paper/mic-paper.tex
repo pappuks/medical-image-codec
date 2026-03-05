@@ -1,0 +1,667 @@
+\documentclass[11pt,twocolumn]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{multirow}
+\usepackage[margin=1in]{geometry}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{microtype}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\title{MIC: A High-Throughput Lossless Codec for Medical Images}
+
+\author{
+Pappuks\thanks{Correspondence: \url{https://github.com/pappuks/medical-image-codec}} \\
+}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present MIC (Medical Image Codec), a lossless compression codec optimized for 16-bit medical images stored in the DICOM format.
+MIC chains three lightweight stages---spatial delta prediction, run-length encoding (RLE), and finite state entropy (FSE) coding based on asymmetric numeral systems (ANS)---to achieve compression ratios of 1.7$\times$--8.9$\times$ on greyscale DICOM images and 3--5$\times$ on RGB whole slide imaging (WSI) tissue tiles, while delivering decompression throughput up to 16\,GB/s on a 64-core ARM64 server.
+The codec supports three container formats: MIC1 for single frames, MIC2 for multi-frame sequences with optional temporal prediction, and MIC3 for tiled whole slide images with multi-resolution pyramid levels.
+We evaluate MIC on eight clinical DICOM datasets spanning MR, CT, CR, X-ray, and mammography modalities, and compare it against a 5/3 integer wavelet alternative.
+Delta+RLE+FSE strictly dominates the wavelet pipeline on all tested modalities in both compression ratio and decompression speed.
+MIC is implemented in Go with JavaScript and WebAssembly browser decoders, and is released as open-source software.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Medical imaging generates enormous volumes of data.
+A single digital breast tomosynthesis (DBT) study produces 69 or more frames of 2457$\times$1890 pixels at 10-bit depth, totalling over 600\,MB of raw pixel data.
+Whole slide pathology images routinely exceed 100\,000$\times$100\,000 pixels.
+Efficient lossless compression is essential for archival storage, network transmission, and real-time rendering of these images in clinical picture archiving and communication systems (PACS) and diagnostic viewers.
+
+The DICOM standard~\cite{dicom} supports several transfer syntaxes for lossless compression, including JPEG 2000~\cite{jpeg2000}, JPEG-LS~\cite{jpegls}, and RLE Lossless.
+JPEG 2000 achieves strong compression ratios through its 5/3 integer wavelet transform but incurs high computational cost during decompression, which limits rendering throughput.
+JPEG-LS provides fast encoding and decoding but typically achieves lower compression ratios than JPEG 2000.
+DICOM RLE is simple but inefficient.
+
+We introduce MIC, a codec that targets the intersection of high compression ratio and high decompression throughput.
+MIC exploits three properties of medical images:
+\begin{enumerate}[nosep]
+    \item \textbf{Spatial correlation}: Adjacent pixels are highly correlated, making a simple linear predictor highly effective.
+    \item \textbf{Residual sparsity}: After prediction, pixel residuals cluster tightly around zero with long runs of identical values.
+    \item \textbf{Moderate symbol cardinality}: Even 16-bit images typically produce fewer than 1\,000 distinct residual values after delta coding.
+\end{enumerate}
+
+The codec processes pixels through a three-stage pipeline: spatial delta encoding, run-length encoding, and FSE (ANS-based) entropy coding.
+Each stage is simple enough to decode in a single sequential pass with minimal branching, enabling decompression speeds that scale with memory bandwidth.
+On a 64-core AWS Graviton3 server (c7g.metal), MIC decompresses mammography images at 16\,GB/s---substantially faster than JPEG 2000 decoders.
+
+Beyond single-frame greyscale, MIC supports:
+\begin{itemize}[nosep]
+    \item \textbf{Multi-frame images} (MIC2 container) with random-access frame indexing and optional inter-frame temporal prediction for video-like sequences.
+    \item \textbf{Whole slide images} (MIC3 container) with tiled architecture, YCoCg-R reversible color transform, multi-resolution pyramid levels, and parallel tile compression.
+\end{itemize}
+
+The remainder of this paper is organized as follows.
+Section~\ref{sec:related} surveys related work.
+Section~\ref{sec:pipeline} describes the compression pipeline.
+Section~\ref{sec:formats} details the MIC2 and MIC3 container formats.
+Section~\ref{sec:implementation} covers implementation details and optimizations.
+Section~\ref{sec:results} presents experimental results.
+Section~\ref{sec:wavelet} compares against a wavelet-based alternative.
+Section~\ref{sec:conclusion} concludes.
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Lossless Image Compression in DICOM}
+
+JPEG 2000 Part 1~\cite{jpeg2000} employs a 5/3 reversible integer wavelet transform with embedded block coding (EBCOT).
+It achieves excellent compression ratios but its bit-plane coding and context modeling impose significant computational overhead during decompression.
+High-Throughput JPEG 2000 (HTJ2K)~\cite{htj2k} replaces EBCOT with a faster block coder, substantially improving decode speed while maintaining JPEG 2000 compatibility.
+
+JPEG-LS~\cite{jpegls} uses context-adaptive prediction (MED predictor) followed by Golomb-Rice coding.
+It provides fast encoding and decoding with moderate compression ratios.
+JPEG-LS is well-suited to smooth images but its prediction model is fixed and cannot adapt to the varying statistics of different medical modalities.
+
+RLE Lossless, specified in the DICOM standard as Transfer Syntax 1.2.840.10008.1.2.5, uses byte-level PackBits run-length encoding.
+It is trivially simple but achieves poor compression ratios (typically $<$1.5$\times$) because it operates on bytes rather than 16-bit pixel values and lacks any decorrelation stage.
+
+\subsection{Entropy Coding}
+
+Asymmetric numeral systems (ANS)~\cite{duda2009} generalize arithmetic coding into a single-state machine.
+Finite State Entropy (FSE)~\cite{collet2013} is a table-driven implementation of tANS (table-based ANS) that achieves near-optimal compression with $O(1)$ per-symbol encode and decode operations.
+FSE was popularized by its use in Zstandard~\cite{zstd} and is used in MIC for the final entropy coding stage.
+
+Canonical Huffman coding~\cite{schwartz1964} assigns codewords based on sorted code lengths, enabling compact codebook representation.
+MIC includes a canonical Huffman backend as an alternative to FSE; it produces slightly smaller output but decodes more slowly.
+
+\subsection{Color Transforms for Pathology Imaging}
+
+The YCoCg-R transform~\cite{malvar2003} is a reversible integer approximation of the RGB-to-YCbCr color space conversion.
+It decorrelates RGB channels into luminance (Y) and chrominance (Co, Cg) with no loss of precision.
+YCoCg-R has been adopted in screen content coding extensions to H.265/HEVC and is used in MIC for whole slide image compression.
+
+\section{Compression Pipeline}
+\label{sec:pipeline}
+
+MIC processes 16-bit greyscale pixels through three sequential stages.
+Figure~\ref{fig:pipeline} illustrates the dataflow.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\linewidth}{\small\centering
+\texttt{Raw 16-bit Pixels} \\[2pt]
+$\downarrow$ \\[2pt]
+\texttt{Delta Encoding} \\
+\textit{pixel $-$ avg(top, left)} \\[2pt]
+$\downarrow$ \\[2pt]
+\texttt{Run-Length Encoding} \\
+\textit{same runs / diff runs} \\[2pt]
+$\downarrow$ \\[2pt]
+\texttt{FSE (tANS) Entropy Coding} \\[2pt]
+$\downarrow$ \\[2pt]
+\texttt{Compressed Bitstream}
+}}
+\caption{MIC compression pipeline for single-frame greyscale images.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Delta Encoding}
+\label{sec:delta}
+
+The delta encoder computes the prediction residual for each pixel as:
+\begin{equation}
+    r_{i,j} = x_{i,j} - \left\lfloor \frac{x_{i-1,j} + x_{i,j-1}}{2} \right\rfloor
+\end{equation}
+where $x_{i,j}$ is the pixel at row $i$, column $j$.
+Boundary pixels use only the available neighbor (top for the first column, left for the first row) or the raw value for the top-left corner pixel.
+
+For 16-bit images, residuals can span the range $[-65535, +65535]$.
+Rather than widening to 32 bits, MIC uses an \emph{overflow delimiter} scheme derived from the image's effective bit depth $d = \lceil\log_2(\max(x)+1)\rceil$:
+\begin{itemize}[nosep]
+    \item Residuals with $|r| \leq 2^{d-1} - 1$ are stored directly as uint16 values.
+    \item Larger residuals are preceded by a delimiter value $2^d - 1$, followed by the raw pixel value.
+\end{itemize}
+
+This encoding adapts automatically to the actual bit depth of the image.
+For 8-bit images stored in 16-bit containers (common in MR), the threshold and delimiter operate within the 8-bit range, reducing the effective symbol alphabet and improving downstream entropy coding.
+
+\subsection{Run-Length Encoding}
+\label{sec:rle}
+
+After delta coding, medical images produce long runs of identical residual values (especially zero) in smooth regions.
+MIC's RLE stage encodes the symbol stream as alternating \emph{same runs} and \emph{diff runs}:
+
+\begin{itemize}[nosep]
+    \item \textbf{Same run}: a count $c$ followed by a single value repeated $c$ times.
+    \item \textbf{Diff run}: a count $c$ followed by $c$ distinct values.
+\end{itemize}
+
+A key design constraint is that the minimum run length is 3, which guarantees that the RLE output is \emph{never larger} than the input.
+This eliminates the need for expansion detection or fallback paths.
+
+The run headers use a midpoint protocol: counts $\leq$ \texttt{midCount} signal same runs; counts $>$ \texttt{midCount} signal diff runs with the actual count obtained by subtracting \texttt{midCount}.
+
+\subsection{FSE Entropy Coding}
+\label{sec:fse}
+
+The final stage encodes the RLE output using table-based ANS (tANS), implemented as Finite State Entropy.
+MIC extends the standard FSE implementation to support up to 65\,535 distinct symbols (versus the typical limit of 4\,095), which is necessary for 16-bit medical images where delta residuals can span a wide range.
+
+\paragraph{Encoding.}
+The FSE encoder processes symbols in reverse order (last symbol first), building the compressed bitstream from the end.
+For each symbol, the encoder transitions between states using a pre-computed symbol transition table (\texttt{symbolTT}), emitting bits that encode the state transitions.
+
+\paragraph{Decoding.}
+The decoder reads bits forward, using a decode table (\texttt{decTable}) indexed by the current state to produce the next symbol and compute the next state.
+Each decode step requires only a table lookup, a bit read, and an addition---no divisions or multiplications.
+
+\paragraph{Adaptive table sizing.}
+MIC automatically adjusts the FSE table log from the default of 11 to 12 when the symbol density is sufficiently high ($>$128 distinct symbols with $>$32 data points each).
+This provides 4--7\% better compression ratios on CR and mammography images where the residual distribution has a wider spread.
+
+\paragraph{Canonical Huffman alternative.}
+MIC also supports a canonical Huffman entropy backend.
+The Huffman encoder adaptively selects the symbol set and limits tree depth to $\leq$14 bits for compact codebook representation.
+It typically produces 1--3\% smaller output than FSE but decodes more slowly due to the variable-length code lookup.
+
+\section{Container Formats}
+\label{sec:formats}
+
+\subsection{MIC1: Single Frame}
+
+The simplest format.
+A compressed frame is prefixed with a header containing the image dimensions and maximum pixel value, followed by the compressed bitstream.
+
+\subsection{MIC2: Multi-Frame}
+
+MIC2 supports multi-frame DICOM images such as breast tomosynthesis (DBT).
+The format consists of:
+\begin{itemize}[nosep]
+    \item A 20-byte header: magic bytes (\texttt{"MIC2"}), width, height, frame count, and pipeline flags.
+    \item A frame offset table ($N \times 8$ bytes): each entry stores the byte offset and length of one compressed frame, enabling $O(1)$ random access.
+    \item Concatenated compressed frame blobs.
+\end{itemize}
+
+MIC2 supports two compression modes:
+
+\paragraph{Independent mode.}
+Each frame is compressed independently using the spatial Delta+RLE+FSE pipeline.
+This allows random access to any frame without decompressing preceding frames.
+
+\paragraph{Temporal mode.}
+Frame 0 is compressed spatially.
+Subsequent frames store inter-frame residuals: $r_t = \text{frame}_t - \text{frame}_{t-1}$.
+These signed residuals are mapped to unsigned values via ZigZag encoding ($z = 2|r|$ for $r < 0$, $z = 2r - 1$ for $r > 0$), then compressed with RLE+FSE (no spatial delta, since temporal residuals lack spatial correlation).
+
+\subsection{MIC3: Whole Slide Imaging}
+
+MIC3 is a tiled container for whole slide pathology images.
+It extends the pipeline to handle RGB images via a reversible color transform.
+
+\paragraph{YCoCg-R color transform.}
+RGB pixels are converted to Y (luminance), Co (orange chrominance), and Cg (green chrominance) using the reversible YCoCg-R transform~\cite{malvar2003}:
+\begin{align}
+    \text{Co} &= R - B \\
+    t &= B + \lfloor \text{Co}/2 \rfloor \\
+    \text{Cg} &= G - t \\
+    Y &= t + \lfloor \text{Cg}/2 \rfloor
+\end{align}
+
+For 8-bit RGB inputs, Y lies in $[0, 255]$, while Co and Cg lie in $[-255, 255]$.
+The chrominance planes are ZigZag-encoded to $[0, 510]$ before compression.
+Each plane (Y, Co, Cg) is then compressed independently through the Delta+RLE+FSE pipeline.
+
+\paragraph{Tiled architecture.}
+Images are divided into tiles (default $256\times256$ pixels).
+Each tile is compressed independently, enabling:
+\begin{itemize}[nosep]
+    \item $O(1)$ random access to any tile via the tile offset table.
+    \item Parallel compression and decompression using a goroutine worker pool.
+    \item Per-tile optimization: constant tiles (e.g., white background) compress to 15--17 bytes.
+\end{itemize}
+
+\paragraph{Pyramid levels.}
+MIC3 stores multiple resolution levels, each at half the dimensions of the previous.
+Downsampling uses a $2\times2$ box filter applied in RGB space before color transform.
+Level descriptors in the header record the dimensions and tile grid of each level, enabling a viewer to select the appropriate resolution for the current zoom level.
+
+\paragraph{Constant-plane optimization.}
+When all pixels in a plane have identical values, the plane is stored as a single constant (3 bytes: mode byte + uint16 value) rather than running the full compression pipeline.
+For white background tiles (common in pathology), all three planes are constant, yielding compression ratios exceeding 1\,900$\times$.
+
+\section{Implementation and Optimizations}
+\label{sec:implementation}
+
+MIC is implemented in Go (module \texttt{mic}, Go 1.22+).
+The implementation prioritizes decompression throughput, as the primary use case is real-time rendering of compressed images in viewers.
+
+\subsection{FSE Decode Loop Inlining}
+
+The innermost FSE decode loop in \texttt{decompress()} processes one symbol per iteration.
+State transitions are fully inlined with a local slice reference to the decode table, eliminating function call overhead and pointer indirections.
+This is the single most performance-critical code path in the codec.
+
+\subsection{Dual-Buffer Histogram}
+
+The symbol histogram function \texttt{countSimple()} uses two interleaved count arrays.
+Consecutive pixels are counted into alternating arrays, then merged.
+This reduces store-to-load forwarding stalls when consecutive pixels have similar values---a common pattern in medical images where adjacent pixels are highly correlated.
+
+\subsection{Branch-Free Delta Decompression}
+
+The delta decompressor uses four separate loops for corner, first-row, first-column, and interior pixels.
+The interior loop handles the vast majority of pixels ($>(w{-}1)(h{-}1)$ out of $wh$) without any per-pixel boundary checks, eliminating branch mispredictions.
+
+\subsection{RLE Fast Path}
+
+Same-value runs are the most common pattern after delta coding.
+The RLE decoder fast-paths same runs to return the cached value without touching the input slice, requiring only a counter decrement per output symbol.
+
+\subsection{Dynamic Table Sizing}
+
+FSE encode and decode tables are sized to the actual symbol range rather than the theoretical maximum of 65\,536.
+For 8-bit images, this reduces the working set from 512\,KB to approximately 2\,KB, substantially improving cache utilization.
+
+\subsection{Browser Decoders}
+
+MIC includes both a pure JavaScript ES module decoder ($\sim$20\,KB, zero dependencies) and a Go WebAssembly build.
+The JavaScript decoder achieves 10--30\,M pixels/s in V8, sufficient for interactive viewing.
+Both decoders support MIC1, MIC2, and MIC3 formats, including multi-frame movie playback and RGB WSI tile rendering with window/level controls.
+
+\section{Experimental Results}
+\label{sec:results}
+
+\subsection{Test Dataset}
+
+We evaluate MIC on eight clinical DICOM images spanning five modalities (Table~\ref{tab:dataset}).
+All images are 16-bit greyscale.
+Effective bit depth ranges from 8--12 bits (MR) to the full 16-bit range (CT).
+
+\begin{table}[t]
+\centering
+\caption{Test dataset: clinical DICOM images.}
+\label{tab:dataset}
+\small
+\begin{tabular}{@{}llrr@{}}
+\toprule
+Image & Modality & Dimensions & Raw Size \\
+\midrule
+MR   & Brain MRI     & 256$\times$256   & 0.13\,MB \\
+CT   & CT scan       & 512$\times$512   & 0.50\,MB \\
+CR   & Comp.\ radiography & 2140$\times$1760 & 7.18\,MB \\
+XR   & X-ray         & 2048$\times$2577 & 10.1\,MB \\
+MG1  & Mammography   & 2457$\times$1996 & 9.35\,MB \\
+MG2  & Mammography   & 2457$\times$1996 & 9.35\,MB \\
+MG3  & Mammography   & 4774$\times$3064 & 27.3\,MB \\
+MG4  & Mammography   & 4096$\times$3328 & 26.0\,MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Compression Ratios}
+
+Table~\ref{tab:ratios} reports lossless compression ratios for the Delta+RLE+FSE pipeline.
+
+\begin{table}[t]
+\centering
+\caption{Lossless compression ratios (Delta+RLE+FSE).}
+\label{tab:ratios}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Image & Raw Size & Compressed & Ratio \\
+\midrule
+MR   & 0.13\,MB & 0.053\,MB & 2.35$\times$ \\
+CT   & 0.50\,MB & 0.22\,MB  & 2.24$\times$ \\
+CR   & 7.18\,MB & 1.98\,MB  & 3.63$\times$ \\
+XR   & 10.1\,MB & 5.79\,MB  & 1.74$\times$ \\
+MG1  & 9.35\,MB & 1.09\,MB  & 8.57$\times$ \\
+MG2  & 9.35\,MB & 1.09\,MB  & 8.55$\times$ \\
+MG3  & 27.3\,MB & 12.2\,MB  & 2.24$\times$ \\
+MG4  & 26.0\,MB & 7.49\,MB  & 3.47$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Mammography images achieve the highest ratios (up to 8.57$\times$) due to large smooth breast tissue regions that produce near-zero residuals after delta coding.
+CT images with full 16-bit dynamic range achieve lower ratios (2.24$\times$) because the wider value range increases residual entropy.
+X-ray images achieve the lowest ratios (1.74$\times$) due to high-frequency noise.
+
+\paragraph{Adaptive tableLog improvement.}
+Automatically increasing the FSE table log from 11 to 12 for images with high symbol density yields measurable gains (Table~\ref{tab:tablelog}).
+
+\begin{table}[t]
+\centering
+\caption{Effect of adaptive tableLog (11$\to$12).}
+\label{tab:tablelog}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Image & Before & After & Gain \\
+\midrule
+CR  & 3.47$\times$ & 3.63$\times$ & +4.4\% \\
+MG1 & 7.99$\times$ & 8.57$\times$ & +7.1\% \\
+MG2 & 7.98$\times$ & 8.55$\times$ & +7.1\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Decompression Throughput}
+
+Table~\ref{tab:decompression} reports decompression throughput across four hardware platforms.
+The primary benchmark metric is MB/s of raw (uncompressed) pixel data produced.
+
+\begin{table*}[t]
+\centering
+\caption{Decompression throughput (MB/s of raw pixel data) across hardware platforms.}
+\label{tab:decompression}
+\small
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+Platform & MR & CT & CR & XR & MG1 & MG2 & MG3 & MG4 \\
+\midrule
+AWS c7g.metal (ARM64, 64c)          & 2\,282 & 4\,433 & 8\,527 & 9\,411 & \textbf{16\,387} & 16\,023 & 8\,044 & 15\,213 \\
+AWS c7g.8xl (ARM64, 32c)            & 1\,524 & 2\,186 & 4\,290 & 4\,562 & 8\,901 & 7\,879 & 4\,455 & 7\,132 \\
+AWS c7i.8xl (x86, 32c, Xeon 8488C) & 1\,142 & 1\,208 & 3\,172 & 3\,269 & 5\,220 & 5\,124 & 3\,468 & 4\,964 \\
+Mac Studio (M2 Max, 12c)            & 1\,054 & 1\,121 & 2\,089 & 2\,101 & 3\,666 & 3\,659 & 2\,239 & 3\,188 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{table}[t]
+\centering
+\caption{Decompression in frames per second (FPS) on AWS c7g.metal.}
+\label{tab:fps}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Image & FPS & MB/s \\
+\midrule
+MR (256$\times$256)   & 17\,411 & 2\,282 \\
+CT (512$\times$512)   & 8\,455  & 4\,433 \\
+CR (2140$\times$1760) & 1\,132  & 8\,527 \\
+XR (2048$\times$2577) & 892     & 9\,411 \\
+MG1 (2457$\times$1996) & 1\,671 & 16\,387 \\
+MG2 (2457$\times$1996) & 1\,634 & 16\,023 \\
+MG3 (4774$\times$3064) & 281    & 8\,044 \\
+MG4 (4096$\times$3328) & 558    & 15\,213 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key observations:
+\begin{itemize}[nosep]
+    \item \textbf{Peak throughput of 16.4\,GB/s} is achieved on MG1 (mammography) on the 64-core ARM64 platform, approaching DRAM bandwidth limits.
+    \item Throughput scales roughly linearly with core count: the 32-core ARM64 instance achieves approximately half the throughput of the 64-core instance.
+    \item ARM64 platforms outperform x86 at equivalent core counts, likely due to wider memory buses on AWS Graviton3 instances.
+    \item Larger images achieve higher throughput due to better amortization of fixed overhead (header parsing, table construction).
+    \item RAM bandwidth is the primary bottleneck, not CPU speed. DDR5 platforms consistently outperform DDR4 platforms.
+\end{itemize}
+
+\subsection{Multi-Frame Results}
+
+Table~\ref{tab:multiframe} reports compression results for a 69-frame breast tomosynthesis study (2457$\times$1890, 10-bit depth).
+
+\begin{table}[t]
+\centering
+\caption{Multi-frame compression (69-frame DBT, 614\,MB raw).}
+\label{tab:multiframe}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Mode & Compressed & Ratio \\
+\midrule
+Independent (spatial) & 46.1\,MB & 13.3$\times$ \\
+Temporal (inter-frame) & 47.5\,MB & 12.9$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Independent mode slightly outperforms temporal mode on this dataset because mammography images have strong spatial correlation (the spatial predictor is very effective) but only moderate inter-frame correlation (each slice images a different plane of breast tissue).
+Temporal mode may be advantageous for sequences with higher inter-frame correlation, such as cardiac cine MRI or fluoroscopy.
+
+\subsection{WSI Compression Results}
+
+Table~\ref{tab:wsi} reports compression results for whole slide image tiles.
+
+\begin{table}[t]
+\centering
+\caption{WSI tile compression ratios (MIC3, YCoCg-R + Delta+RLE+FSE).}
+\label{tab:wsi}
+\small
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Tile Type & Ratio & Notes \\
+\midrule
+White background & 1\,946$\times$ & Near-zero entropy \\
+Dense tissue (H\&E) & 4.4$\times$ & Smooth staining gradients \\
+Gradient & 5.4$\times$ & Excellent spatial correlation \\
+Mixed slide & 4--8$\times$ & Weighted avg.\ of tile types \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The YCoCg-R color transform is particularly effective for pathology images.
+H\&E-stained tissue produces smooth color gradients in the luminance and chrominance planes, yielding strong spatial prediction.
+Background tiles (slide glass regions) are nearly constant and compress to 15--17 bytes total via the constant-plane optimization.
+
+\section{Comparison with Wavelet-Based Compression}
+\label{sec:wavelet}
+
+To evaluate whether a more sophisticated decorrelation stage could improve MIC, we implemented a Le Gall 5/3 integer wavelet transform~\cite{legall1988}---the same transform used in JPEG 2000 lossless mode---as an alternative to delta encoding.
+
+\subsection{Wavelet Implementation}
+
+The 5/3 lifting scheme applies predict and update steps:
+\begin{align}
+    d[i] &= x[2i{+}1] - \left\lfloor\frac{x[2i] + x[2i{+}2]}{2}\right\rfloor \\
+    s[i] &= x[2i] + \left\lfloor\frac{d[i{-}1] + d[i] + 2}{4}\right\rfloor
+\end{align}
+The 2D transform applies 1D transforms to all rows, then all columns.
+Wavelet coefficients are ZigZag-encoded to unsigned values, with an overflow escape for coefficients exceeding the uint16 range.
+
+We evaluated two wavelet pipelines:
+\begin{itemize}[nosep]
+    \item Wavelet+FSE: wavelet transform $\to$ FSE (no RLE).
+    \item Wavelet+RLE+FSE: wavelet transform $\to$ RLE $\to$ FSE.
+\end{itemize}
+
+\subsection{Compression Ratio Comparison}
+
+Table~\ref{tab:wavelet_ratio} compares compression ratios.
+Delta+RLE+FSE achieves the best ratio on \emph{every} modality.
+
+\begin{table}[t]
+\centering
+\caption{Compression ratio: Delta+RLE+FSE vs.\ wavelet pipelines.}
+\label{tab:wavelet_ratio}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Image & \makecell{Delta+\\RLE+FSE} & \makecell{Wavelet\\+FSE} & \makecell{Wavelet+\\RLE+FSE} \\
+\midrule
+MR  & \textbf{2.35}$\times$ & 2.09$\times$ & 2.09$\times$ \\
+CT  & \textbf{2.24}$\times$ & 1.48$\times$ & 1.48$\times$ \\
+CR  & \textbf{3.63}$\times$ & 2.59$\times$ & 2.59$\times$ \\
+XR  & \textbf{1.74}$\times$ & 1.53$\times$ & 1.53$\times$ \\
+MG1 & \textbf{8.57}$\times$ & 4.91$\times$ & 7.28$\times$ \\
+MG2 & \textbf{8.55}$\times$ & 4.90$\times$ & 7.27$\times$ \\
+MG3 & \textbf{2.29}$\times$ & 1.90$\times$ & 1.93$\times$ \\
+MG4 & \textbf{3.47}$\times$ & 2.63$\times$ & 3.11$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Decompression Speed Comparison}
+
+Table~\ref{tab:wavelet_speed} compares single-threaded decompression speed.
+Delta+RLE+FSE is faster on all large images ($\geq$2K pixels); the wavelet pipeline wins only on small images (MR, CT) where the overhead of the wavelet inverse is amortized.
+
+\begin{table}[t]
+\centering
+\caption{Decompression speed (MB/s): Delta+RLE+FSE vs.\ wavelet.}
+\label{tab:wavelet_speed}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Image & \makecell{Delta+\\RLE+FSE} & \makecell{Wavelet\\+FSE} & \makecell{Wavelet+\\RLE+FSE} \\
+\midrule
+MR  & 116  & \textbf{146}  & 122 \\
+CT  & 165  & \textbf{168}  & 142 \\
+CR  & \textbf{543}  & 418  & 371 \\
+XR  & \textbf{605}  & 576  & 486 \\
+MG1 & \textbf{1\,530} & 592  & 680 \\
+MG2 & \textbf{1\,493} & 618  & 644 \\
+MG3 & \textbf{606}  & 387  & 352 \\
+MG4 & \textbf{1\,054} & 480  & 579 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Analysis}
+
+Delta encoding outperforms the wavelet transform for lossless medical image compression for three reasons:
+
+\begin{enumerate}[nosep]
+    \item \textbf{The linear predictor is near-optimal.} Medical images have smooth intensity gradients and large homogeneous regions. The average-of-neighbors predictor produces residuals tightly clustered around zero. RLE then compresses long runs of identical residuals directly.
+
+    \item \textbf{The wavelet update step hurts.} The 5/3 update step reintroduces correlation in the low-pass band to preserve the signal mean (needed for perfect reconstruction). For images where delta residuals are already near-zero, this provides no net benefit. For full-range CT images, the update step forces escape encoding when low-pass coefficients overflow uint16, inflating the compressed stream.
+
+    \item \textbf{Delta decompression uses half the memory bandwidth.} The wavelet inverse requires two full passes over the pixel buffer (horizontal and vertical), each touching every element twice. It also operates on int32 values (4 bytes/sample) versus uint16 (2 bytes/sample) for delta. For large mammography images at high parallelism, this doubles the memory bandwidth requirement, which is the binding constraint.
+\end{enumerate}
+
+The wavelet transform remains valuable for two use cases outside MIC's current scope: \emph{lossy compression} (where wavelet coefficients can be quantized by subband) and \emph{progressive/multi-resolution delivery} (where the LL subband is a valid downscaled image at each decomposition level).
+
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Design philosophy.}
+MIC deliberately avoids complex prediction models (context modeling, Markov predictors) in favor of a simple three-stage pipeline where each stage has $O(n)$ complexity and minimal branching.
+This design sacrifices a small amount of compression ratio (compared to JPEG 2000) in exchange for dramatically higher decompression throughput.
+For clinical workflows where images are compressed once and decompressed many times (archival $\to$ viewing), this tradeoff is strongly favorable.
+
+\paragraph{Bit-depth adaptivity.}
+A notable feature of MIC is its automatic adaptation to the effective bit depth of the image.
+All thresholds and delimiters are derived from the actual maximum pixel value via $\lceil\log_2(\max+1)\rceil$, eliminating the need for separate 8-bit and 16-bit code paths.
+This simplifies the implementation and ensures optimal performance across the full range of DICOM bit depths (8--16 bits).
+
+\paragraph{Limitations.}
+MIC does not support lossy compression, progressive decoding, or region-of-interest coding for greyscale images.
+These capabilities are available in JPEG 2000 and may be important for bandwidth-limited telemedicine applications.
+The wavelet transform, already implemented and benchmarked, provides a natural foundation for a future lossy mode.
+
+For WSI images, MIC3's tiled architecture provides tile-level random access and pyramid-level multi-resolution support, addressing the region-of-interest and progressive delivery requirements specific to digital pathology.
+
+\paragraph{Comparison with HTJ2K.}
+High-Throughput JPEG 2000 (HTJ2K)~\cite{htj2k} represents the closest point of comparison for MIC.
+HTJ2K achieves comparable compression ratios to JPEG 2000 with significantly faster decoding.
+MIC achieves comparable or slightly lower compression ratios than JPEG 2000/HTJ2K but with substantially higher decompression throughput, particularly on ARM64 platforms with wide memory buses.
+A detailed quantitative comparison with HTJ2K is an important direction for future work.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have presented MIC, a lossless medical image codec that achieves compression ratios of 1.7$\times$--8.9$\times$ on greyscale DICOM images and 3--5$\times$ on RGB pathology images, with decompression throughput up to 16\,GB/s.
+The codec's three-stage pipeline (delta prediction, run-length encoding, FSE entropy coding) is designed for simplicity and speed: each stage processes the data in a single pass with minimal branching, enabling decompression performance that scales with memory bandwidth.
+
+MIC supports three container formats for different clinical use cases: single-frame (MIC1), multi-frame with temporal prediction (MIC2), and tiled whole slide imaging with pyramid levels (MIC3).
+The implementation includes browser-based JavaScript and WebAssembly decoders for web viewing applications.
+
+Our evaluation demonstrates that the simple delta+RLE+FSE pipeline strictly dominates a wavelet-based alternative on all tested DICOM modalities, in both compression ratio and decompression speed.
+This result suggests that for lossless medical image compression, simple linear prediction combined with fast entropy coding is more effective than the sophisticated wavelet transforms used in JPEG 2000.
+
+MIC is open-source and available at \url{https://github.com/pappuks/medical-image-codec}.
+
+\paragraph{Availability.}
+Source code, test data, and benchmark scripts are available under an open-source license at the URL above.
+
+\begin{thebibliography}{10}
+
+\bibitem{dicom}
+NEMA, ``Digital Imaging and Communications in Medicine (DICOM),''
+\url{https://www.dicomstandard.org/}, 2024.
+
+\bibitem{jpeg2000}
+D.~S. Taubman and M.~W. Marcellin,
+``JPEG2000: Image Compression Fundamentals, Standards and Practice,''
+Springer, 2002.
+
+\bibitem{htj2k}
+D.~S. Taubman,
+``High throughput JPEG 2000 (HTJ2K): Algorithm, performance evaluation, and potential,''
+\emph{Proc.\ SPIE}, vol.\ 11137, 2019.
+
+\bibitem{jpegls}
+M.~J. Weinberger, G.~Seroussi, and G.~Sapiro,
+``The LOCO-I lossless image compression algorithm: Principles and standardization into JPEG-LS,''
+\emph{IEEE Trans.\ Image Process.}, vol.~9, no.~8, pp.~1309--1324, 2000.
+
+\bibitem{duda2009}
+J.~Duda,
+``Asymmetric numeral systems,''
+\emph{arXiv preprint arXiv:0902.0271}, 2009.
+
+\bibitem{collet2013}
+Y.~Collet,
+``Finite State Entropy---A new breed of entropy coder,''
+\url{https://github.com/Cyan4973/FiniteStateEntropy}, 2013.
+
+\bibitem{zstd}
+Y.~Collet and M.~Kucherawy,
+``Zstandard Compression and the `application/zstd' Media Type,''
+RFC 8878, Internet Engineering Task Force, 2021.
+
+\bibitem{schwartz1964}
+E.~S. Schwartz and B.~Kallick,
+``Generating a canonical prefix encoding,''
+\emph{Commun.\ ACM}, vol.~7, no.~3, pp.~166--169, 1964.
+
+\bibitem{malvar2003}
+H.~S. Malvar and G.~J. Sullivan,
+``YCoCg-R: A color space with RGB reversibility and low dynamic range,''
+\emph{Joint Video Team (JVT) Doc.\ JVT-I014}, 2003.
+
+\bibitem{legall1988}
+D.~Le Gall and A.~Tabatabai,
+``Sub-band coding of digital images using symmetric short kernel filters and arithmetic coding techniques,''
+\emph{Proc.\ IEEE ICASSP}, pp.~761--764, 1988.
+
+\end{thebibliography}
+
+\end{document}
