@@ -1,3 +1,4 @@
+\pdfoutput=1
 \documentclass[11pt,twocolumn]{article}
 
 % --- Packages ---
@@ -6,16 +7,16 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
-\usepackage{hyperref}
 \usepackage{xcolor}
-\usepackage{algorithm}
-\usepackage{algpseudocode}
+\usepackage{makecell}
 \usepackage{multirow}
 \usepackage[margin=1in]{geometry}
 \usepackage{caption}
 \usepackage{subcaption}
 \usepackage{enumitem}
 \usepackage{microtype}
+% hyperref must be loaded last
+\usepackage{hyperref}
 
 \hypersetup{
     colorlinks=true,
@@ -26,8 +27,10 @@
 
 \title{MIC: A High-Throughput Lossless Codec for Medical Images}
 
-\author{
-Pappuks\thanks{Correspondence: \url{https://github.com/pappuks/medical-image-codec}} \\
+\author{Kuldeep Singh%
+  \thanks{Innovaccer Inc.
+    Email: \texttt{kuldeep.singh@innovaccer.com}.
+    Code: \url{https://github.com/pappuks/medical-image-codec}.}
 }
 
 \date{}
@@ -38,7 +41,7 @@ Pappuks\thanks{Correspondence: \url{https://github.com/pappuks/medical-image-cod
 
 \begin{abstract}
 We present MIC (Medical Image Codec), a lossless compression codec optimized for 16-bit medical images stored in the DICOM format.
-MIC chains three lightweight stages---spatial delta prediction, run-length encoding (RLE), and finite state entropy (FSE) coding based on asymmetric numeral systems (ANS)---to achieve compression ratios of 1.7$\times$--8.9$\times$ on greyscale DICOM images and 3--5$\times$ on RGB whole slide imaging (WSI) tissue tiles, while delivering decompression throughput up to 16\,GB/s on a 64-core ARM64 server.
+MIC chains three lightweight stages---spatial delta prediction, run-length encoding (RLE), and finite state entropy (FSE) coding based on asymmetric numeral systems (ANS)---to achieve compression ratios of 1.7$\times$--8.6$\times$ on greyscale DICOM images and 3--5$\times$ on RGB whole slide imaging (WSI) tissue tiles, while delivering decompression throughput up to 16\,GB/s on a 64-core ARM64 server.
 The codec supports three container formats: MIC1 for single frames, MIC2 for multi-frame sequences with optional temporal prediction, and MIC3 for tiled whole slide images with multi-resolution pyramid levels.
 We evaluate MIC on eight clinical DICOM datasets spanning MR, CT, CR, X-ray, and mammography modalities, and compare it against a 5/3 integer wavelet alternative.
 Delta+RLE+FSE strictly dominates the wavelet pipeline on all tested modalities in both compression ratio and decompression speed.
@@ -83,6 +86,7 @@ Section~\ref{sec:formats} details the MIC2 and MIC3 container formats.
 Section~\ref{sec:implementation} covers implementation details and optimizations.
 Section~\ref{sec:results} presents experimental results.
 Section~\ref{sec:wavelet} compares against a wavelet-based alternative.
+Section~\ref{sec:discussion} discusses design tradeoffs and limitations.
 Section~\ref{sec:conclusion} concludes.
 
 \section{Related Work}
@@ -229,7 +233,7 @@ This allows random access to any frame without decompressing preceding frames.
 \paragraph{Temporal mode.}
 Frame 0 is compressed spatially.
 Subsequent frames store inter-frame residuals: $r_t = \text{frame}_t - \text{frame}_{t-1}$.
-These signed residuals are mapped to unsigned values via ZigZag encoding ($z = 2|r|$ for $r < 0$, $z = 2r - 1$ for $r > 0$), then compressed with RLE+FSE (no spatial delta, since temporal residuals lack spatial correlation).
+These signed residuals are mapped to unsigned values via ZigZag encoding ($z = 0$ for $r = 0$; $z = 2r - 1$ for $r > 0$; $z = 2|r|$ for $r < 0$), then compressed with RLE+FSE (no spatial delta, since temporal residuals lack spatial correlation).
 
 \subsection{MIC3: Whole Slide Imaging}
 
@@ -388,6 +392,7 @@ MG2 & 7.98$\times$ & 8.55$\times$ & +7.1\% \\
 
 Table~\ref{tab:decompression} reports decompression throughput across four hardware platforms.
 The primary benchmark metric is MB/s of raw (uncompressed) pixel data produced.
+Table~\ref{tab:fps} expresses the same results as frames per second (FPS) on the AWS c7g.metal platform.
 
 \begin{table*}[t]
 \centering
@@ -445,7 +450,7 @@ Table~\ref{tab:multiframe} reports compression results for a 69-frame breast tom
 \caption{Multi-frame compression (69-frame DBT, 614\,MB raw).}
 \label{tab:multiframe}
 \small
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}lrr@{}}
 \toprule
 Mode & Compressed & Ratio \\
 \midrule
@@ -524,7 +529,7 @@ CR  & \textbf{3.63}$\times$ & 2.59$\times$ & 2.59$\times$ \\
 XR  & \textbf{1.74}$\times$ & 1.53$\times$ & 1.53$\times$ \\
 MG1 & \textbf{8.57}$\times$ & 4.91$\times$ & 7.28$\times$ \\
 MG2 & \textbf{8.55}$\times$ & 4.90$\times$ & 7.27$\times$ \\
-MG3 & \textbf{2.29}$\times$ & 1.90$\times$ & 1.93$\times$ \\
+MG3 & \textbf{2.24}$\times$ & 1.90$\times$ & 1.93$\times$ \\
 MG4 & \textbf{3.47}$\times$ & 2.63$\times$ & 3.11$\times$ \\
 \bottomrule
 \end{tabular}
@@ -599,7 +604,7 @@ A detailed quantitative comparison with HTJ2K is an important direction for futu
 \section{Conclusion}
 \label{sec:conclusion}
 
-We have presented MIC, a lossless medical image codec that achieves compression ratios of 1.7$\times$--8.9$\times$ on greyscale DICOM images and 3--5$\times$ on RGB pathology images, with decompression throughput up to 16\,GB/s.
+We have presented MIC, a lossless medical image codec that achieves compression ratios of 1.7$\times$--8.6$\times$ on greyscale DICOM images and 3--5$\times$ on RGB pathology images, with decompression throughput up to 16\,GB/s.
 The codec's three-stage pipeline (delta prediction, run-length encoding, FSE entropy coding) is designed for simplicity and speed: each stage processes the data in a single pass with minimal branching, enabling decompression performance that scales with memory bandwidth.
 
 MIC supports three container formats for different clinical use cases: single-frame (MIC1), multi-frame with temporal prediction (MIC2), and tiled whole slide imaging with pyramid levels (MIC3).
