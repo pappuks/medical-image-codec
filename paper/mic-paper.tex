@@ -103,8 +103,10 @@ It is trivially simple but achieves poor compression ratios (typically $<$1.5$\t
 
 \subsection{Entropy Coding}
 
-Asymmetric numeral systems (ANS)~\cite{duda2009} generalize arithmetic coding into a single-state machine.
-Finite State Entropy (FSE)~\cite{collet2013} is a table-driven implementation of tANS (table-based ANS) that achieves near-optimal compression with $O(1)$ per-symbol encode and decode operations.
+Traditional arithmetic coding achieves near-optimal compression but is inherently sequential: the data dependencies between encoder and decoder states resist parallelization.
+Mahapatra and Singh~\cite{mahapatra2007} addressed this with a parallel-pipelined FPGA implementation of multi-alphabet arithmetic coding, demonstrating that hardware acceleration can overcome the throughput limitations of sequential arithmetic coders.
+Asymmetric numeral systems (ANS)~\cite{duda2009} take a different approach, generalizing arithmetic coding into a single-state machine that replaces the interval subdivision of arithmetic coding with integer state transitions.
+Finite State Entropy (FSE)~\cite{collet2013} is a table-driven implementation of tANS (table-based ANS) that achieves near-optimal compression with $O(1)$ per-symbol encode and decode operations, without requiring the specialized hardware of~\cite{mahapatra2007}.
 FSE was popularized by its use in Zstandard~\cite{zstd} and is used in MIC for the final entropy coding stage.
 
 Canonical Huffman coding~\cite{schwartz1964} assigns codewords based on sorted code lengths, enabling compact codebook representation.
@@ -631,6 +633,11 @@ D.~S. Taubman,
 M.~J. Weinberger, G.~Seroussi, and G.~Sapiro,
 ``The LOCO-I lossless image compression algorithm: Principles and standardization into JPEG-LS,''
 \emph{IEEE Trans.\ Image Process.}, vol.~9, no.~8, pp.~1309--1324, 2000.
+
+\bibitem{mahapatra2007}
+S.~Mahapatra and K.~Singh,
+``An FPGA-based implementation of multi-alphabet arithmetic coding,''
+\emph{IEEE Trans.\ Circuits Syst.\ I, Reg.\ Papers}, vol.~54, no.~8, pp.~1678--1686, Aug.\ 2007.
 
 \bibitem{duda2009}
 J.~Duda,
