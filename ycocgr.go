@@ -21,22 +21,7 @@ func YCoCgRForward(rgb []byte, width, height int) (y, co, cg []uint16) {
 	y = make([]uint16, n)
 	co = make([]uint16, n)
 	cg = make([]uint16, n)
-
-	for i := 0; i < n; i++ {
-		r := int(rgb[i*3])
-		g := int(rgb[i*3+1])
-		b := int(rgb[i*3+2])
-
-		coVal := r - b
-		t := b + (coVal >> 1) // arithmetic right shift preserves sign
-		cgVal := g - t
-		yVal := t + (cgVal >> 1)
-
-		y[i] = uint16(yVal)
-		co[i] = ZigZag(int16(coVal))
-		cg[i] = ZigZag(int16(cgVal))
-	}
-
+	ycocgRForwardNative(rgb, n, y, co, cg)
 	return
 }
 
@@ -45,21 +30,6 @@ func YCoCgRForward(rgb []byte, width, height int) (y, co, cg []uint16) {
 func YCoCgRInverse(y, co, cg []uint16, width, height int) []byte {
 	n := width * height
 	rgb := make([]byte, n*3)
-
-	for i := 0; i < n; i++ {
-		yVal := int(y[i])
-		coVal := int(UnZigZag(co[i]))
-		cgVal := int(UnZigZag(cg[i]))
-
-		t := yVal - (cgVal >> 1)
-		g := cgVal + t
-		b := t - (coVal >> 1)
-		r := coVal + b
-
-		rgb[i*3] = byte(r)
-		rgb[i*3+1] = byte(g)
-		rgb[i*3+2] = byte(b)
-	}
-
+	ycocgRInverseNative(y, co, cg, n, rgb)
 	return rgb
 }

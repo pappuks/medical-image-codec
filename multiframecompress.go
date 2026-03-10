@@ -11,6 +11,7 @@ import (
 
 // CompressSingleFrame compresses a single frame of 16-bit pixel data
 // using the Delta+RLE+FSE pipeline. Returns the FSE-compressed bytes.
+// Attempts two-state FSE first (better ILP); falls back to single-state.
 func CompressSingleFrame(pixels []uint16, width, height int, maxValue uint16) ([]byte, error) {
 	var drc DeltaRleCompressU16
 	deltaComp, err := drc.Compress(pixels, width, height, maxValue)
@@ -19,18 +20,24 @@ func CompressSingleFrame(pixels []uint16, width, height int, maxValue uint16) ([
 	}
 
 	var s ScratchU16
-	fseComp, err := FSECompressU16(deltaComp, &s)
+	fseComp, err := FSECompressU16TwoState(deltaComp, &s)
 	if err != nil {
-		return nil, fmt.Errorf("FSE compress: %w", err)
+		// Fall back to single-state FSE (e.g. ErrIncompressible, ErrUseRLE)
+		s2 := ScratchU16{}
+		fseComp, err = FSECompressU16(deltaComp, &s2)
+		if err != nil {
+			return nil, fmt.Errorf("FSE compress: %w", err)
+		}
 	}
 
 	return fseComp, nil
 }
 
 // DecompressSingleFrame decompresses FSE-compressed bytes back to 16-bit pixels.
+// Auto-detects two-state vs single-state FSE stream format.
 func DecompressSingleFrame(compressed []byte, width, height int) ([]uint16, error) {
 	var s ScratchU16
-	rleSymbols, err := FSEDecompressU16(compressed, &s)
+	rleSymbols, err := FSEDecompressU16Auto(compressed, &s)
 	if err != nil {
 		return nil, fmt.Errorf("FSE decompress: %w", err)
 	}
@@ -48,9 +55,13 @@ func compressResidualFrame(residuals []uint16, maxValue uint16) ([]byte, error) 
 	rleOut := rle.Compress(residuals)
 
 	var s ScratchU16
-	fseComp, err := FSECompressU16(rleOut, &s)
+	fseComp, err := FSECompressU16TwoState(rleOut, &s)
 	if err != nil {
-		return nil, fmt.Errorf("FSE compress: %w", err)
+		s2 := ScratchU16{}
+		fseComp, err = FSECompressU16(rleOut, &s2)
+		if err != nil {
+			return nil, fmt.Errorf("FSE compress: %w", err)
+		}
 	}
 
 	return fseComp, nil
@@ -59,7 +70,7 @@ func compressResidualFrame(residuals []uint16, maxValue uint16) ([]byte, error) 
 // decompressResidualFrame decompresses RLE+FSE compressed temporal residual data.
 func decompressResidualFrame(compressed []byte) ([]uint16, error) {
 	var s ScratchU16
-	rleData, err := FSEDecompressU16(compressed, &s)
+	rleData, err := FSEDecompressU16Auto(compressed, &s)
 	if err != nil {
 		return nil, fmt.Errorf("FSE decompress: %w", err)
 	}
