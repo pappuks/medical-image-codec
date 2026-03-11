@@ -433,49 +433,28 @@ func (s *ScratchU16) buildCTable() error {
 // countSimple will create a simple histogram in s.count.
 // Returns the biggest count.
 // Does not update s.clearCount.
-// Uses multi-pass counting to reduce store-to-load dependencies on hot cache lines.
+// Dispatches to a native (assembly on amd64) two-buffer implementation that
+// reduces store-to-load forwarding stalls by interleaving two count arrays.
 func (s *ScratchU16) countSimple(in []uint16) (max int) {
-	// Use a secondary count buffer so two consecutive identical symbols
-	// do not compete for the same cache line. This halves the probability
-	// of store-to-load forwarding stalls on real image data where
-	// neighbouring pixels often share similar values.
 	var count2 [maxSymbolValue + 1]uint32
 
-	n := len(in)
+	// Native path fills s.count (even-indexed) and count2 (odd-indexed).
+	countSimpleNative(in, &s.count, &count2)
+
+	// Scan from the top to find symLen (highest non-zero symbol + 1) and max.
+	// Merge count2 into s.count in the same pass.
 	symLen := uint32(0)
-
-	// Process pairs: distribute work across two count tables to reduce
-	// cache-line contention from consecutive identical / nearby symbols.
-	i := 0
-	limit := n - 1
-	for i < limit {
-		v0 := uint32(in[i])
-		v1 := uint32(in[i+1])
-		s.count[v0]++
-		count2[v1]++
-		if v0 >= symLen {
-			symLen = v0 + 1
-		}
-		if v1 >= symLen {
-			symLen = v1 + 1
-		}
-		i += 2
-	}
-	// Handle odd element
-	if i < n {
-		v := uint32(in[i])
-		s.count[v]++
-		if v >= symLen {
-			symLen = v + 1
-		}
-	}
-
-	// Merge count2 into s.count and find max
 	m := uint32(0)
-	for j := uint32(0); j < symLen; j++ {
-		s.count[j] += count2[j]
-		if s.count[j] > m {
-			m = s.count[j]
+	for j := uint32(maxSymbolValue + 1); j > 0; j-- {
+		merged := s.count[j-1] + count2[j-1]
+		s.count[j-1] = merged
+		if merged != 0 {
+			if symLen == 0 {
+				symLen = j
+			}
+			if merged > m {
+				m = merged
+			}
 		}
 	}
 	s.symbolLen = symLen
