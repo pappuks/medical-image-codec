@@ -4,7 +4,7 @@
 
 // HTJ2K Comparison Framework
 //
-// Compares MIC (Delta+RLE+FSE) against HTJ2K (lossless) using OpenJPH.
+// Compares MIC (Delta+RLE+FSE two-state) against HTJ2K (lossless) using OpenJPH.
 // Requires ojph_compress and ojph_expand in PATH with DYLD_LIBRARY_PATH set.
 //
 // Run with:
@@ -145,7 +145,7 @@ func benchHTJ2K(pixels []uint16, width, height int, maxVal uint16, decompRuns in
 	return
 }
 
-// benchMIC runs MIC (Delta+RLE+FSE) compression and decompression.
+// benchMIC runs MIC (Delta+RLE+FSE two-state) compression and decompression.
 // decompRuns controls how many decompression iterations are averaged for timing.
 func benchMIC(pixels []uint16, byteLen, width, height int, maxVal uint16, decompRuns int) (compMs, decompMs float64, compressedBytes int, err error) {
 	// Compression.
@@ -157,7 +157,7 @@ func benchMIC(pixels []uint16, byteLen, width, height int, maxVal uint16, decomp
 		return
 	}
 	var s ScratchU16
-	fseComp, compErr := FSECompressU16(deltaComp, &s)
+	fseComp, compErr := FSECompressU16TwoState(deltaComp, &s)
 	if compErr != nil {
 		err = compErr
 		return
@@ -170,7 +170,7 @@ func benchMIC(pixels []uint16, byteLen, width, height int, maxVal uint16, decomp
 	for i := 0; i < decompRuns; i++ {
 		start := time.Now()
 		var s2 ScratchU16
-		rleData, _ := FSEDecompressU16(fseComp, &s2)
+		rleData, _ := FSEDecompressU16TwoState(fseComp, &s2)
 		var drd DeltaRleDecompressU16
 		drd.Decompress(rleData, width, height)
 		elapsed := time.Since(start)
@@ -342,11 +342,11 @@ func BenchmarkMICvsHTJ2K(b *testing.B) {
 			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
 			origBytes := len(byteData)
 
-			// Pre-compress MIC.
+			// Pre-compress MIC (two-state FSE).
 			var drc DeltaRleCompressU16
 			deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
 			var s ScratchU16
-			fseComp, _ := FSECompressU16(deltaComp, &s)
+			fseComp, _ := FSECompressU16TwoState(deltaComp, &s)
 
 			// Pre-compress HTJ2K (once, for ratio).
 			htj2kComp, _, htj2kBytes, htj2kErr := benchHTJ2K(shortData, cols, rows, maxShort, 1, tmpDir)
@@ -360,10 +360,10 @@ func BenchmarkMICvsHTJ2K(b *testing.B) {
 			b.SetBytes(int64(origBytes))
 			b.ResetTimer()
 
-			// Benchmark MIC decompression.
+			// Benchmark MIC decompression (two-state FSE).
 			for i := 0; i < b.N; i++ {
 				var s2 ScratchU16
-				rleData, _ := FSEDecompressU16(fseComp, &s2)
+				rleData, _ := FSEDecompressU16TwoState(fseComp, &s2)
 				var drd DeltaRleDecompressU16
 				drd.Decompress(rleData, cols, rows)
 			}
