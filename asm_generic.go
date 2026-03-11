@@ -1,4 +1,4 @@
-//go:build !amd64
+//go:build !amd64 && !arm64
 
 // Copyright 2024 Kuldeep Singh
 // This source code is licensed under a MIT-style
