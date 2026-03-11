@@ -5,16 +5,21 @@
 #include "textflag.h"
 
 // func countSimpleU16Asm(in unsafe.Pointer, inLen int, count, count2 unsafe.Pointer)
-// Args (Go register ABI on arm64):
-//   R0 = in       *uint16
-//   R1 = inLen    int
-//   R2 = count    *uint32  [65536]
-//   R3 = count2   *uint32  [65536]
+// Args (Go ABI0 stack layout — caller stores args to RSP+8..32 before CALL):
+//   RSP+8  = in       *uint16
+//   RSP+16 = inLen    int
+//   RSP+24 = count    *uint32  [65536]
+//   RSP+32 = count2   *uint32  [65536]
 //
 // 4-way unrolled: elements 0,2 → count[], elements 1,3 → count2[].
 // This breaks store-to-load forwarding stalls when consecutive pixels share
 // the same or adjacent values (common after delta coding).
 TEXT ·countSimpleU16Asm(SB),NOSPLIT,$0-32
+    // Load args from stack (Go ABI0 on ARM64 passes via RSP offsets).
+    MOVD 8(RSP), R0          // in
+    MOVD 16(RSP), R1         // inLen
+    MOVD 24(RSP), R2         // count
+    MOVD 32(RSP), R3         // count2
     CBZ R1, done_hist        // len == 0 → skip
 
     // R4 = number of 4-element groups
@@ -77,12 +82,25 @@ done_hist:
 // Scalar pixel-by-pixel YCoCg-R forward transform.
 // Per pixel: Co=R-B, t=B+(Co>>1), Cg=G-t, Y=t+(Cg>>1), ZigZag(co,cg).
 //
+// Args (Go ABI0 stack layout — caller stores args to RSP+8..40 before CALL):
+//   RSP+8  = rgb  unsafe.Pointer
+//   RSP+16 = n    int
+//   RSP+24 = y    unsafe.Pointer
+//   RSP+32 = co   unsafe.Pointer
+//   RSP+40 = cg   unsafe.Pointer
+//
 // Register allocation:
 //   R0=rgb, R1=n, R2=y, R3=co, R4=cg
 //   R5=i(byte offset into rgb), R6=R, R7=G, R8=B
 //   R9=Co, R10=t, R11=Cg, R12=Y
 //   R13=scratch, R14=loop counter
 TEXT ·ycocgRForwardNEON(SB),NOSPLIT,$0-40
+    // Load args from stack (Go ABI0 on ARM64 passes via RSP offsets).
+    MOVD 8(RSP), R0          // rgb
+    MOVD 16(RSP), R1         // n
+    MOVD 24(RSP), R2         // y
+    MOVD 32(RSP), R3         // co
+    MOVD 40(RSP), R4         // cg
     CBZ R1, fwd_done
 
     MOVD $0, R14             // i = 0
@@ -142,11 +160,24 @@ fwd_done:
 // Scalar pixel-by-pixel YCoCg-R inverse transform.
 // Per pixel: unzigzag Co,Cg; t=Y-(Cg>>1); G=Cg+t; B=t-(Co>>1); R=Co+B.
 //
+// Args (Go ABI0 stack layout — caller stores args to RSP+8..40 before CALL):
+//   RSP+8  = y    unsafe.Pointer
+//   RSP+16 = co   unsafe.Pointer
+//   RSP+24 = cg   unsafe.Pointer
+//   RSP+32 = n    int
+//   RSP+40 = rgb  unsafe.Pointer
+//
 // Register allocation:
 //   R0=y, R1=co, R2=cg, R3=n, R4=rgb
 //   R5=i, R6=Y, R7=co_zz, R8=cg_zz
 //   R9=Co(unzz), R10=Cg(unzz), R11=t, R12=G, R13=B, R14=R, R15=scratch
 TEXT ·ycocgRInverseNEON(SB),NOSPLIT,$0-40
+    // Load args from stack (Go ABI0 on ARM64 passes via RSP offsets).
+    MOVD 8(RSP), R0          // y
+    MOVD 16(RSP), R1         // co
+    MOVD 24(RSP), R2         // cg
+    MOVD 32(RSP), R3         // n
+    MOVD 40(RSP), R4         // rgb
     CBZ R3, inv_done
 
     MOVD $0, R5              // i = 0
