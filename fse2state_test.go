@@ -6,6 +6,7 @@ package mic
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -294,24 +295,36 @@ func BenchmarkFSEDecompress(b *testing.B) {
 			b.SetBytes(uncompressedBytes)
 			b.ReportMetric(ratio1, "ratio")
 			b.ResetTimer()
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var sd ScratchU16
-				if _, err := FSEDecompressU16(comp1, &sd); err != nil {
-					b.Fatal(err)
-				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var sd ScratchU16
+					if _, err := FSEDecompressU16(comp1, &sd); err != nil {
+						b.Error(err)
+					}
+				}()
 			}
+			wg.Wait()
 		})
 
 		b.Run(tf.name+"/2state", func(b *testing.B) {
 			b.SetBytes(uncompressedBytes)
 			b.ReportMetric(ratio2, "ratio")
 			b.ResetTimer()
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var sd ScratchU16
-				if _, err := FSEDecompressU16TwoState(comp2, &sd); err != nil {
-					b.Fatal(err)
-				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var sd ScratchU16
+					if _, err := FSEDecompressU16TwoState(comp2, &sd); err != nil {
+						b.Error(err)
+					}
+				}()
 			}
+			wg.Wait()
 		})
 	}
 }
@@ -357,8 +370,8 @@ func BenchmarkFSECompressCompare(b *testing.B) {
 // frame decompression latency as seen by callers of DecompressSingleFrame.
 func BenchmarkDeltaRLEFSEDecompress(b *testing.B) {
 	for _, tf := range testFiles {
-		_, shortData, maxShort, cols, rows := SetupTests(tf)
-		pixelBytes := int64(len(shortData) * 2)
+		byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+		pixelBytes := int64(len(byteData))
 
 		// Build both compressed representations once.
 		var drc DeltaRleCompressU16
@@ -376,31 +389,43 @@ func BenchmarkDeltaRLEFSEDecompress(b *testing.B) {
 			b.Skipf("%s: FSE2: %v", tf.name, err)
 		}
 
-		ratio1 := float64(len(shortData)*2) / float64(len(comp1))
-		ratio2 := float64(len(shortData)*2) / float64(len(comp2))
+		ratio1 := float64(len(byteData)) / float64(len(comp1))
+		ratio2 := float64(len(byteData)) / float64(len(comp2))
 
 		b.Run(tf.name+"/1state", func(b *testing.B) {
 			b.SetBytes(pixelBytes)
 			b.ReportMetric(ratio1, "ratio")
 			b.ResetTimer()
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var sd ScratchU16
-				rle, _ := FSEDecompressU16(comp1, &sd)
-				var drd DeltaRleDecompressU16
-				drd.Decompress(rle, cols, rows)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var sd ScratchU16
+					rle, _ := FSEDecompressU16(comp1, &sd)
+					var drd DeltaRleDecompressU16
+					drd.Decompress(rle, cols, rows)
+				}()
 			}
+			wg.Wait()
 		})
 
 		b.Run(tf.name+"/2state", func(b *testing.B) {
 			b.SetBytes(pixelBytes)
 			b.ReportMetric(ratio2, "ratio")
 			b.ResetTimer()
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var sd ScratchU16
-				rle, _ := FSEDecompressU16TwoState(comp2, &sd)
-				var drd DeltaRleDecompressU16
-				drd.Decompress(rle, cols, rows)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var sd ScratchU16
+					rle, _ := FSEDecompressU16TwoState(comp2, &sd)
+					var drd DeltaRleDecompressU16
+					drd.Decompress(rle, cols, rows)
+				}()
 			}
+			wg.Wait()
 		})
 	}
 }
@@ -438,18 +463,30 @@ func BenchmarkFSE2StateSummary(b *testing.B) {
 
 		b.Run(tf.name+"/1state", func(b *testing.B) {
 			b.ResetTimer()
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var sd ScratchU16
-				FSEDecompressU16(comp1, &sd)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var sd ScratchU16
+					FSEDecompressU16(comp1, &sd)
+				}()
 			}
+			wg.Wait()
 			dur1 = b.Elapsed().Seconds() / float64(b.N)
 		})
 		b.Run(tf.name+"/2state", func(b *testing.B) {
 			b.ResetTimer()
+			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				var sd ScratchU16
-				FSEDecompressU16TwoState(comp2, &sd)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var sd ScratchU16
+					FSEDecompressU16TwoState(comp2, &sd)
+				}()
 			}
+			wg.Wait()
 			dur2 = b.Elapsed().Seconds() / float64(b.N)
 		})
 

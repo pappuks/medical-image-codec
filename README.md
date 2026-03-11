@@ -388,17 +388,19 @@ Benchmarks measure **decompression speed** — the primary use case is real-time
 
 > **Note:** RAM speed has a larger impact than CPU clock speed. Machines with DDR5 RAM outperform older machines even at lower core counts.
 
+> **Benchmark methodology:** All decompression benchmarks (`BenchmarkDeltaRLEFSECompress`, `BenchmarkFSEDecompress`, `BenchmarkDeltaRLEFSEDecompress`, `BenchmarkFSE2StateSummary`) spawn one goroutine per iteration and run all `b.N` goroutines concurrently. The reported MB/s therefore reflects **aggregate multi-core throughput** across all available CPUs, not single-core speed. With `-benchtime=200x` on a 64-core machine, all 200 frames decompress in parallel — matching the real-world use case of concurrent multi-frame rendering. Use `-benchtime=1x` for single-iteration (single-goroutine) measurements.
+
 ```bash
-# Run the full benchmark suite
+# Run the full benchmark suite (parallel decompression, 200 concurrent goroutines)
 go test -benchmem -run=^$ -benchtime=200x -bench ^BenchmarkDeltaRLEFSECompress$ mic
 
-# Compare single-state vs two-state FSE decompression (isolated)
+# Compare single-state vs two-state FSE decompression (isolated, parallel)
 go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSEDecompress mic
 
-# Compare single-state vs two-state: full Delta+RLE+FSE pipeline
+# Compare single-state vs two-state: full Delta+RLE+FSE pipeline (parallel)
 go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkDeltaRLEFSEDecompress mic
 
-# Human-readable speedup table
+# Human-readable speedup table (parallel)
 go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSE2StateSummary -v mic
 ```
 
@@ -454,6 +456,23 @@ go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSE2StateSummary -v mic
 | MG3 | 78 | 2 239 MB/s |
 | MG4 | 117 | 3 188 MB/s |
 
+#### Two-State FSE Decompression Speedup — Mac Studio (Apple M2 Max, 12 cores)
+
+`BenchmarkFSE2StateSummary` — full Delta+RLE+FSE pipeline, 200 iterations:
+
+| Image | 1-state (MB/s) | 2-state (MB/s) | Speedup | Ratio |
+|-------|:--------------:|:--------------:|:-------:|:-----:|
+| MR (256×256)    | 1 403.5 | 2 284.7 | **1.63×** | 2.35× |
+| CT (512×512)    | 1 556.4 | 2 028.9 | **1.30×** | 2.28× |
+| CR (2140×1760)  | 3 777.6 | 5 323.3 | **1.41×** | 3.62× |
+| XR (2048×2577)  | 3 889.8 | 5 787.2 | **1.49×** | 1.74× |
+| MG1 (2457×1996) | 3 722.1 | 5 148.3 | **1.38×** | 2.80× |
+| MG2 (2457×1996) | 3 636.7 | 4 751.1 | **1.31×** | 2.80× |
+| MG3 (4774×3064) | 1 916.8 | 5 705.3 | **2.98×** | 2.19× |
+| MG4 (4096×3328) | 4 230.0 | 6 001.2 | **1.42×** | 1.84× |
+
+Two-state FSE delivers **1.3–3.0× faster decompression** across all modalities. MG3 shows the largest gain (2.98×) due to its symbol distribution characteristics.
+
 ---
 
 ## Browser Decoder
@@ -497,24 +516,24 @@ go build -o mic-compress ./cmd/mic-compress/
 
 ## Comparison with HTJ2K
 
-MIC is compared against lossless HTJ2K using [OpenJPH](https://github.com/aous72/OpenJPH) v0.15 (`ojph_compress -reversible true`), the leading open-source HTJ2K implementation. Measurements are single-threaded on Apple M2 Max. MIC timings are **in-process** (pure library calls); HTJ2K timings include subprocess launch + file I/O overhead (~6 ms).
+MIC is compared against lossless HTJ2K using [OpenJPH](https://github.com/aous72/OpenJPH) v0.15 (`ojph_compress -reversible true`), the leading open-source HTJ2K implementation. Measurements are single-threaded on Apple M2 Max. MIC uses the two-state FSE decoder. MIC timings are **in-process** (pure library calls); HTJ2K timings include subprocess launch + file I/O overhead (~6 ms).
 
 | Image | Raw (MB) | MIC ratio | HTJ2K ratio | MIC decomp (MB/s) | HTJ2K decomp (MB/s) | MIC speedup |
 |-------|:--------:|:---------:|:-----------:|:-----------------:|:-------------------:|:-----------:|
-| MR    | 0.13 | 2.35× | **2.38×** | 133 | 22 † | — |
-| CT    | 0.50 | **2.24×** | 1.77× | 135 | 75 † | — |
-| CR    | 7.18 | 3.63× | **3.77×** | **242** | 218 | **1.11×** |
-| XR    | 10.1 | **1.74×** | 1.67× | **245** | 212 | **1.16×** |
-| MG1   | 9.35 | **8.57×** | 8.25× | **428** | 351 | **1.22×** |
-| MG2   | 9.35 | **8.55×** | 8.24× | **419** | 342 | **1.22×** |
-| MG3   | 27.3 | **2.24×** | 2.22× | **252** | 226 | **1.12×** |
-| MG4   | 26.0 | 3.47× | **3.51×** | **353** | 311 | **1.14×** |
+| MR    | 0.13 | 2.35× | **2.38×** | 133 | 20 † | — |
+| CT    | 0.50 | **2.24×** | 1.77× | 164 | 82 † | — |
+| CR    | 7.18 | 3.63× | **3.77×** | **287** | 215 | **1.33×** |
+| XR    | 10.1 | **1.74×** | 1.67× | **297** | 205 | **1.45×** |
+| MG1   | 9.35 | **8.57×** | 8.25× | **471** | 338 | **1.39×** |
+| MG2   | 9.35 | **8.55×** | 8.24× | **471** | 338 | **1.39×** |
+| MG3   | 27.3 | **2.24×** | 2.22× | **297** | 225 | **1.32×** |
+| MG4   | 26.0 | 3.47× | **3.51×** | **399** | 307 | **1.30×** |
 
 † MR and CT HTJ2K throughput is dominated by the ~6 ms process startup cost; the comparison is not meaningful for these small images. For images ≥ 7 MB the startup overhead is < 7% of total time.
 
 **Key takeaways:**
 - Compression ratios are within 4% across all modalities; MIC wins on CT (+27%), XR (+4%), MG1/MG2 (+4%).
-- MIC decompresses **1.1–1.2× faster** on large images in single-threaded use.
+- MIC decompresses **1.3–1.5× faster** on large images in single-threaded use (up from 1.1–1.2× with single-state FSE).
 - At 64 cores (AWS c7g.metal), MIC reaches up to **16 GB/s** while OpenJPH's single-process CLI scales to ~2–4 GB/s.
 - MIC is a pure Go library with no subprocess overhead — decompress any frame with a function call.
 
