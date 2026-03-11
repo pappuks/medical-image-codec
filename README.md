@@ -290,7 +290,7 @@ An alternative entropy stage using [canonical Huffman codes](https://en.wikipedi
 
 ## Native Optimizations
 
-MIC includes platform-specific optimizations that are automatically active on amd64 and fall back to pure Go on other architectures.
+MIC includes platform-specific optimizations that are automatically active on **amd64** (Intel/AMD) and **arm64** (Apple Silicon, AWS Graviton), and fall back to equivalent pure-Go implementations on all other architectures.
 
 ### Two-State FSE (`fse2state.go`)
 
@@ -301,7 +301,7 @@ symbol[0] ← stateA    symbol[2] ← stateA    ...
 symbol[1] ← stateB    symbol[3] ← stateB    ...
 ```
 
-The two chains are independent, so the CPU's out-of-order engine executes them in parallel. Streams are prefixed with `[0xFF, 0x02]` magic bytes; `FSEDecompressU16Auto` dispatches transparently — existing single-state compressed files continue to work unchanged.
+The two chains are independent, so the CPU's out-of-order engine executes them in parallel. This is **pure Go** — it delivers ILP benefits on every platform (amd64, arm64, WASM) without any assembly. Streams are prefixed with `[0xFF, 0x02]` magic bytes; `FSEDecompressU16Auto` dispatches transparently — existing single-state compressed files continue to work unchanged.
 
 **Measured gains** (Intel Xeon @ 2.80 GHz, isolated FSE decompression):
 
@@ -311,13 +311,17 @@ The two chains are independent, so the CPU's out-of-order engine executes them i
 | MG3 4774×3064 | 243 MB/s | 312 MB/s | **+28%** |
 | MG4 4096×3328 | 256 MB/s | 321 MB/s | **+25%** |
 
-### Interleaved Histogram (`asm_amd64.s`)
+### Interleaved Histogram (`asm_amd64.s`, `asm_arm64.s`)
 
 The symbol frequency histogram distributes even-indexed pixels into `count[]` and odd-indexed pixels into `count2[]`, avoiding store-to-load forwarding stalls when consecutive pixels have identical values (common after delta coding). The two arrays are merged in a single backward scan that finds the max symbol and symbol range simultaneously.
 
-### CPUID Dispatch (`asm_amd64.go`)
+The same 4-way unrolled algorithm is implemented in assembly for both amd64 (using `ADDL`/`MOVWQZX`) and arm64 (using `MOVWU`/`MOVW`/`LSL`).
 
-A one-time `init()` probes SSSE3 and AVX2 support via `CPUID`. Functions `ycocgRForwardNative` and `ycocgRInverseNative` dispatch to the best available implementation at runtime, with a pure-Go fallback on non-amd64 platforms.
+### Platform Dispatch (`asm_amd64.go`, `asm_arm64.go`)
+
+- **amd64**: A one-time `init()` probes SSSE3 and AVX2 support via `CPUID`. `ycocgRForwardNative` and `ycocgRInverseNative` dispatch to the best available implementation at runtime.
+- **arm64**: NEON is always available on ARM64 — no CPUID probe needed. The dispatch wrappers call scalar-in-assembly stubs whose register layout is ready for a future 8-pixel-wide NEON path.
+- **other platforms**: `asm_generic.go` (`//go:build !amd64 && !arm64`) provides identical pure-Go fallbacks.
 
 For full details, design decisions, and benchmark methodology see [`docs/native-optimizations.md`](./docs/native-optimizations.md).
 
@@ -524,7 +528,7 @@ go test -run TestHTJ2KComparison -v -timeout 300s
 
 ## Roadmap
 
-- [x] Native amd64 optimizations — two-state FSE (ILP via dual ANS chains), interleaved histogram (store-to-load stall avoidance), CPUID dispatch for future SIMD paths — see [`docs/native-optimizations.md`](./docs/native-optimizations.md)
+- [x] Native amd64 + arm64 optimizations — two-state FSE (ILP via dual ANS chains, pure Go, all platforms), interleaved histogram assembly (amd64 + arm64), CPUID dispatch (amd64) / always-NEON dispatch (arm64) for future SIMD paths — see [`docs/native-optimizations.md`](./docs/native-optimizations.md)
 - [x] Browser-based decoding in JS and WASM — see [web decoder](./web/README.md)
 - [x] Multi-frame image support (Breast Tomosynthesis) — MIC2 container with independent and temporal modes, browser movie player
 - [x] Wavelet (5/3 integer) decorrelation stage — benchmarked; Delta+RLE+FSE wins for lossless; wavelet remains a candidate for a future lossy/progressive mode

@@ -4,6 +4,8 @@
 
 This document describes the native-code optimizations added to MIC in this branch, their design rationale, and measured performance impact.
 
+Optimizations are active on **amd64** (Intel/AMD) and **arm64** (Apple Silicon, AWS Graviton) automatically. All other platforms (WASM, RISC-V, …) fall back to equivalent pure-Go implementations with no code changes required.
+
 ---
 
 ## Optimizations Implemented
@@ -37,12 +39,13 @@ The two chains are completely independent — the CPU's OOO engine can issue bot
 
 ---
 
-### 2. Interleaved Histogram (`asm_amd64.s` — `countSimpleU16Asm`)
+### 2. Interleaved Histogram (`asm_amd64.s`, `asm_arm64.s` — `countSimpleU16Asm`)
 
 **Problem**: The `countSimple` histogram increments `count[v]++` for every pixel. When consecutive pixels have similar values (common in medical images after delta coding), the processor sees a store followed immediately by a load to the same or adjacent address — a store-to-load forwarding stall costing 4–10 cycles per update.
 
-**Solution**: 4-way unrolled loop distributing even-indexed pixels to `count[]` and odd-indexed pixels to `count2[]`:
+**Solution**: 4-way unrolled loop distributing even-indexed pixels to `count[]` and odd-indexed pixels to `count2[]`. Both amd64 and arm64 use the same algorithm:
 
+amd64 (Plan 9 x86-64):
 ```asm
 ADDL $1, (DI)(AX*4)   // count[v0]   even
 ADDL $1, (R8)(BX*4)   // count2[v1]  odd
@@ -50,23 +53,41 @@ ADDL $1, (DI)(R11*4)  // count[v2]   even
 ADDL $1, (R8)(R12*4)  // count2[v3]  odd
 ```
 
+arm64 (Plan 9 ARM64):
+```asm
+LSL $2, R5, R9        // byte offset = v0 * 4
+MOVWU (R2)(R9), R10   // load count[v0]
+ADD $1, R10, R10
+MOVW R10, (R2)(R9)    // store count[v0]++
+
+LSL $2, R6, R9        // byte offset = v1 * 4
+MOVWU (R3)(R9), R10   // load count2[v1]
+ADD $1, R10, R10
+MOVW R10, (R3)(R9)    // store count2[v1]++
+```
+
 With two separate arrays, consecutive identical values hit different cache lines, eliminating the stall. After the loop the two arrays are merged in a single backward pass that simultaneously finds `symbolLen` and `max`.
 
 ---
 
-### 3. YCoCg-R Native Dispatch (`asm_amd64.go`, `ycocgr.go`)
+### 3. YCoCg-R Native Dispatch (`asm_amd64.go`, `asm_arm64.go`, `ycocgr.go`)
 
 **Problem**: The RGB → YCoCg-R transform (used for WSI color images) was a plain Go loop with branch-heavy logic on every pixel.
 
-**Solution**: `ycocgRForwardNative` and `ycocgRInverseNative` dispatch to CPU-capability-detected implementations at startup (via `cpuidAMD64`). The current assembly implements the same scalar algorithm with explicit register allocation, serving as the scaffolding for a future SIMD path. The CPUID probe is zero-overhead (runs once in `init()`).
+**Solution**: `ycocgRForwardNative` and `ycocgRInverseNative` dispatch to platform-specific implementations:
 
-**Extension point**: Replacing `ycocgRForwardSSSE3` / `ycocgRInverseSSSE3` with actual SSE2/SSSE3 packed 8-pixel-wide code would yield a further 4–8× improvement on the color transform; the dispatch plumbing is already in place.
+- **amd64**: `cpuidAMD64` probes SSSE3 and AVX2 support once in `init()`. The current scalar-in-assembly path (`ycocgRForwardSSSE3` / `ycocgRInverseSSSE3`) establishes the dispatch plumbing and explicit register allocation needed for a future SSE2/SSSE3 8-pixel-wide SIMD path.
+- **arm64**: NEON is always available — no CPUID probe needed. `ycocgRForwardNEON` / `ycocgRInverseNEON` are scalar-in-assembly stubs that provide the same dispatch scaffolding for a future 8-pixel-wide NEON path.
+
+**Extension points**:
+- amd64: Replace `ycocgRForwardSSSE3` / `ycocgRInverseSSSE3` with SSE2/SSSE3 packed 8-pixel-wide code → estimated 4–8× improvement on the color transform.
+- arm64: Replace `ycocgRForwardNEON` / `ycocgRInverseNEON` with NEON-vectorised 8-pixel code using `VLD3` and `VADDV` → similar 4–8× gain.
 
 ---
 
 ### 4. Platform Portability (`asm_generic.go`)
 
-Build tag `//go:build !amd64` provides identical pure-Go implementations of `countSimpleNative`, `ycocgRForwardNative`, and `ycocgRInverseNative` for non-amd64 targets (ARM64, WASM, etc.).
+Build tag `//go:build !amd64 && !arm64` provides identical pure-Go implementations of `countSimpleNative`, `ycocgRForwardNative`, and `ycocgRInverseNative` for all remaining targets (WASM, RISC-V, etc.). The two-state FSE (`fse2state.go`) is pure Go and delivers ILP benefits on every platform with no additional code.
 
 ---
 
@@ -200,7 +221,9 @@ The Go Plan 9 assembler does not support bitwise-NOT immediates (`$^N`). Two's c
 | `fse2state_test.go` | New — correctness tests and comparison benchmarks (see above) |
 | `asm_amd64.go` | New — CPUID init, `//go:noescape` stubs, dispatch wrappers, scalar fallbacks |
 | `asm_amd64.s` | New — `cpuidAMD64`, `countSimpleU16Asm`, `ycocgRForwardSSSE3`, `ycocgRInverseSSSE3` |
-| `asm_generic.go` | New — pure-Go fallbacks for non-amd64 (`//go:build !amd64`) |
+| `asm_arm64.go` | New — ARM64 dispatch; NEON always present so no CPUID; stubs + scalar fallbacks |
+| `asm_arm64.s` | New — `countSimpleU16Asm`, `ycocgRForwardNEON`, `ycocgRInverseNEON` (ARM64 Plan 9) |
+| `asm_generic.go` | New — pure-Go fallbacks for `!amd64 && !arm64` (WASM, RISC-V, …) |
 | `fsecompressu16.go` | `countSimple` delegates to `countSimpleNative` |
 | `ycocgr.go` | `YCoCgRForward`/`YCoCgRInverse` delegate to native dispatch |
 | `multiframecompress.go` | Use two-state FSE with single-state fallback |
