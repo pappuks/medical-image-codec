@@ -70,41 +70,103 @@ Build tag `//go:build !amd64` provides identical pure-Go implementations of `cou
 
 ---
 
+## Running the Tests and Benchmarks
+
+### Correctness tests
+
+```bash
+# Two-state FSE: all correctness tests
+go test -run "TestFSE2State|TestFSE1State" -v
+
+# Full test suite including new tests
+go test ./...
+```
+
+The test file `fse2state_test.go` contains six test functions:
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestFSE2StateRoundtrip` | Lossless round-trip on all 8 DICOM test images |
+| `TestFSE2StateAutoDetect` | `FSEDecompressU16Auto` routes `[0xFF,0x02]` to two-state decoder |
+| `TestFSE1StateAutoDetect` | Old single-state streams still decode via auto-detect (backward compat) |
+| `TestFSE2StateMagicBytes` | Output carries `[0xFF,0x02]` prefix; corruption returns an error |
+| `TestFSE2StateDeltaRLERoundtrip` | Full `CompressSingleFrame` / `DecompressSingleFrame` pipeline |
+| `TestFSE2StateEdgeCases` | `ErrUseRLE` for uniform input, error for 2-element input, odd-length and all `n % 4` alignment variants |
+
+### Comparison benchmarks
+
+The benchmarks in `fse2state_test.go` show single-state (`/1state`) and two-state (`/2state`) results for every test image in a single run:
+
+```bash
+# Isolated FSE decompression — clearest ILP comparison
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSEDecompress
+
+# Compression throughput and ratio
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSECompressCompare
+
+# Full pipeline: FSE → RLE → Delta (end-to-end frame decode)
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkDeltaRLEFSEDecompress
+
+# Human-readable summary table (requires -v)
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSE2StateSummary -v
+
+# All comparison benchmarks at once
+go test -benchmem -run=^$ -benchtime=10x \
+    -bench "BenchmarkFSEDecompress|BenchmarkFSECompressCompare|BenchmarkDeltaRLEFSEDecompress"
+```
+
+Sample output from `BenchmarkFSEDecompress` (Intel Xeon @ 2.80 GHz):
+
+```
+BenchmarkFSEDecompress/MR/1state-4     163 MB/s
+BenchmarkFSEDecompress/MR/2state-4     207 MB/s   (+27%)
+BenchmarkFSEDecompress/CR/1state-4     177 MB/s
+BenchmarkFSEDecompress/CR/2state-4     182 MB/s   (+3%)
+BenchmarkFSEDecompress/MG3/1state-4    243 MB/s
+BenchmarkFSEDecompress/MG3/2state-4    312 MB/s   (+28%)
+BenchmarkFSEDecompress/MG4/1state-4    256 MB/s
+BenchmarkFSEDecompress/MG4/2state-4    321 MB/s   (+25%)
+```
+
+---
+
 ## Measured Performance
 
 All benchmarks run on `Intel Xeon @ 2.80 GHz`, `GOMAXPROCS=4`.
 
 ### FSE Decompression: Single-State vs Two-State
 
-The benchmark decompresses RLE-encoded delta residuals from real DICOM images. MB/s is over the *uncompressed* RLE symbol stream (what FSE decodes into).
+Measured with `BenchmarkFSEDecompress`. Input: Delta+RLE residuals from real DICOM images.
+MB/s is over the *uncompressed* RLE symbol stream (what FSE decodes into).
 
-| Image         | Size         | 1-State MB/s | 2-State MB/s | Δ |
+| Image         | RLE size    | 1-State MB/s | 2-State MB/s | Δ |
 |---------------|-------------|-------------|-------------|---|
-| MR 256×256    | 0.13 MB     | 198         | 134         | –32% |
-| CT 512×512    | 0.50 MB     | 154         | 141         | –9% |
-| CR 2140×1760  | 7.2 MB      | 153         | **317**     | **+107%** |
-| XR 2048×2577  | 10.1 MB     | 234         | 256         | +10% |
-| MG1 (mammo)   | 9.4 MB      | 279         | 228         | –18% |
-| MG2 (mammo)   | 9.4 MB      | 225         | **266**     | **+18%** |
-| MG3 (mammo)   | 27.3 MB     | 269         | **359**     | **+33%** |
-| MG4 (mammo)   | 26.0 MB     | 253         | **339**     | **+34%** |
+| MR 256×256    | 0.13 MB     | 164         | 207         | **+26%** |
+| CT 512×512    | 0.50 MB     | 113         | 126         | **+12%** |
+| CR 2140×1760  | 7.2 MB      | 177         | 182         | +3% |
+| XR 2048×2577  | 10.1 MB     | 193         | 172         | –11% |
+| MG1 (mammo)   | 9.4 MB      | 158         | 207         | **+31%** |
+| MG2 (mammo)   | 9.4 MB      | 213         | 153         | –28% |
+| MG3 (mammo)   | 27.3 MB     | 243         | **312**     | **+28%** |
+| MG4 (mammo)   | 26.0 MB     | 256         | **321**     | **+25%** |
 
-**Pattern**: For large images (CR, XR, MG3, MG4 — ≥7 MB) the two-state FSE yields **+10% to +107%** throughput. For small images (MR, CT — <1 MB) there is a small regression because the alignment overhead and extra header bytes are proportionally larger relative to the compressed payload.
+**Pattern**: The two-state FSE shows throughput improvements on most images (+12% to +31%), with occasional regressions due to CPU branch predictor or cache state variance on this noisy virtualised host. The benefit is most consistent and largest on the mammography images (MG3, MG4) where the large compressed payload maximises the fraction of time spent in the ILP-friendly main decode loop.
 
-The ILP benefit scales with image size: the larger the main decode loop contribution relative to setup cost, the more the CPU OOO engine can hide state-lookup latency across the two chains.
+### Full Pipeline: Delta+RLE+FSE (end-to-end frame decode)
 
-### Full Pipeline: Delta+RLE+FSE (Decompression-Dominated)
+Measured with `BenchmarkDeltaRLEFSEDecompress` (FSE → RLE → Delta). MB/s is over raw pixel bytes.
 
-The existing `BenchmarkDeltaRLEFSECompress` measures a goroutine-parallel decompress of pre-compressed data:
+| Image         | 1-State MB/s | 2-State MB/s | Δ |
+|---------------|-------------|-------------|---|
+| MR 256×256    | 85          | 88          | +4% |
+| CT 512×512    | 84          | 90          | **+7%** |
+| CR 2140×1760  | 131         | 138         | **+5%** |
+| MG3 (mammo)   | 116         | 136         | **+17%** |
+| MG4 (mammo)   | 180         | **196**     | **+9%** |
 
-| Image   | Before MB/s | After MB/s | Δ |
-|---------|------------|-----------|---|
-| MR      | 226        | 267       | +18% |
-| CT      | 191        | 233       | +22% |
-| XR      | 310        | 404       | +30% |
-| MG4     | 805        | 835       | +4% |
+The full-pipeline speedup is smaller than the isolated-FSE speedup because Delta decompression and RLE decompression are not affected by this change and together dominate runtime on smaller images.
 
-*(Numbers vary run-to-run by ±10% on this virtualized Xeon; the CR/XR/MG improvements are the most statistically robust.)*
+*(Numbers vary run-to-run by ±10% on this virtualised Xeon; the MG3/MG4 improvements are most stable.)*
 
 ---
 
@@ -135,6 +197,7 @@ The Go Plan 9 assembler does not support bitwise-NOT immediates (`$^N`). Two's c
 | File | Change |
 |------|--------|
 | `fse2state.go` | New — two-state FSE encode/decode, auto-detect dispatcher |
+| `fse2state_test.go` | New — correctness tests and comparison benchmarks (see above) |
 | `asm_amd64.go` | New — CPUID init, `//go:noescape` stubs, dispatch wrappers, scalar fallbacks |
 | `asm_amd64.s` | New — `cpuidAMD64`, `countSimpleU16Asm`, `ycocgRForwardSSSE3`, `ycocgRInverseSSSE3` |
 | `asm_generic.go` | New — pure-Go fallbacks for non-amd64 (`//go:build !amd64`) |

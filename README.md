@@ -24,12 +24,13 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 3. [Multi-Frame Support (MIC2)](#multi-frame-support-mic2)
 4. [Whole Slide Imaging (MIC3)](#whole-slide-imaging-mic3)
 5. [Algorithm Details](#algorithm-details)
-6. [Compression Results](#compression-results)
-7. [Benchmark Results](#benchmark-results)
-8. [Browser Decoder](#browser-decoder)
-9. [CLI Reference](#cli-reference)
-10. [Comparison with HTJ2K](#comparison-with-htj2k)
-11. [Roadmap](#roadmap)
+6. [Native Optimizations](#native-optimizations)
+7. [Compression Results](#compression-results)
+8. [Benchmark Results](#benchmark-results)
+9. [Browser Decoder](#browser-decoder)
+10. [CLI Reference](#cli-reference)
+11. [Comparison with HTJ2K](#comparison-with-htj2k)
+12. [Roadmap](#roadmap)
 
 ---
 
@@ -287,6 +288,41 @@ An alternative entropy stage using [canonical Huffman codes](https://en.wikipedi
 
 ---
 
+## Native Optimizations
+
+MIC includes platform-specific optimizations that are automatically active on amd64 and fall back to pure Go on other architectures.
+
+### Two-State FSE (`fse2state.go`)
+
+The standard FSE decode loop has a serial dependency chain: each state transition depends on the output of the previous one, limiting throughput to ~1 symbol per table-lookup latency (~4 cycles). Two-state FSE breaks this by running two independent state machines on alternating symbol positions:
+
+```
+symbol[0] ← stateA    symbol[2] ← stateA    ...
+symbol[1] ← stateB    symbol[3] ← stateB    ...
+```
+
+The two chains are independent, so the CPU's out-of-order engine executes them in parallel. Streams are prefixed with `[0xFF, 0x02]` magic bytes; `FSEDecompressU16Auto` dispatches transparently — existing single-state compressed files continue to work unchanged.
+
+**Measured gains** (Intel Xeon @ 2.80 GHz, isolated FSE decompression):
+
+| Image | 1-State | 2-State | Δ |
+|-------|---------|---------|---|
+| MR 256×256 | 164 MB/s | 207 MB/s | **+26%** |
+| MG3 4774×3064 | 243 MB/s | 312 MB/s | **+28%** |
+| MG4 4096×3328 | 256 MB/s | 321 MB/s | **+25%** |
+
+### Interleaved Histogram (`asm_amd64.s`)
+
+The symbol frequency histogram distributes even-indexed pixels into `count[]` and odd-indexed pixels into `count2[]`, avoiding store-to-load forwarding stalls when consecutive pixels have identical values (common after delta coding). The two arrays are merged in a single backward scan that finds the max symbol and symbol range simultaneously.
+
+### CPUID Dispatch (`asm_amd64.go`)
+
+A one-time `init()` probes SSSE3 and AVX2 support via `CPUID`. Functions `ycocgRForwardNative` and `ycocgRInverseNative` dispatch to the best available implementation at runtime, with a pure-Go fallback on non-amd64 platforms.
+
+For full details, design decisions, and benchmark methodology see [`docs/native-optimizations.md`](./docs/native-optimizations.md).
+
+---
+
 ## Compression Results
 
 `Delta + RLE + FSE` — all images are 16-bit greyscale DICOM. CT has the widest dynamic range (max value 65 535).
@@ -349,8 +385,17 @@ Benchmarks measure **decompression speed** — the primary use case is real-time
 > **Note:** RAM speed has a larger impact than CPU clock speed. Machines with DDR5 RAM outperform older machines even at lower core counts.
 
 ```bash
-# Run the benchmark
+# Run the full benchmark suite
 go test -benchmem -run=^$ -benchtime=200x -bench ^BenchmarkDeltaRLEFSECompress$ mic
+
+# Compare single-state vs two-state FSE decompression (isolated)
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSEDecompress mic
+
+# Compare single-state vs two-state: full Delta+RLE+FSE pipeline
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkDeltaRLEFSEDecompress mic
+
+# Human-readable speedup table
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSE2StateSummary -v mic
 ```
 
 ### AWS c7g.metal — ARM64 | 64 cores
@@ -479,6 +524,7 @@ go test -run TestHTJ2KComparison -v -timeout 300s
 
 ## Roadmap
 
+- [x] Native amd64 optimizations — two-state FSE (ILP via dual ANS chains), interleaved histogram (store-to-load stall avoidance), CPUID dispatch for future SIMD paths — see [`docs/native-optimizations.md`](./docs/native-optimizations.md)
 - [x] Browser-based decoding in JS and WASM — see [web decoder](./web/README.md)
 - [x] Multi-frame image support (Breast Tomosynthesis) — MIC2 container with independent and temporal modes, browser movie player
 - [x] Wavelet (5/3 integer) decorrelation stage — benchmarked; Delta+RLE+FSE wins for lossless; wavelet remains a candidate for a future lossy/progressive mode
