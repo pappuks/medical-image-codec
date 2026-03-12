@@ -30,7 +30,8 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 9. [Browser Decoder](#browser-decoder)
 10. [CLI Reference](#cli-reference)
 11. [Comparison with HTJ2K](#comparison-with-htj2k)
-12. [Roadmap](#roadmap)
+12. [Design Background](#design-background)
+13. [Roadmap](#roadmap)
 
 > **New:** [Delta+Zstandard comparison](#comparison-with-deltazstandard) and [MED predictor comparison](#med-predictor-comparison) added — see [Compression Results](#compression-results).
 
@@ -592,6 +593,18 @@ Reproduce the comparison:
 ```bash
 go test -run TestHTJ2KComparison -v -timeout 300s
 ```
+
+---
+
+## Design Background
+
+Two design choices in MIC deserve deeper motivation than the README can provide:
+
+- **Why a 16-bit-native entropy coder?** Classical entropy coders (Huffman, arithmetic coding, Zstandard/FSE) were designed for 8-bit byte streams. Medical images store pixels at 10–16 bits per sample, which creates a fundamental alphabet mismatch. Byte-splitting loses inter-byte correlation; truncating at 256 symbols forces expensive escapes for high-dynamic-range modalities like CT. MIC's extended FSE and 16-bit RLE operate natively on uint16 symbols and exploit the sparse, peaked residual distributions that emerge after delta prediction — outperforming Delta+zstd-ultra by 10–22% across all modalities.
+
+- **Why delta prediction instead of a wavelet transform?** Wavelet/DCT filter-bank decompositions excel at lossy compression (quantize high-frequency bands with little perceptual impact) but introduce coefficient overflow, update-step correlation, doubled memory bandwidth, and subband entropy-coding mismatch when used for lossless compression of already-smooth medical images. Simple delta prediction leaves a single homogeneous near-zero residual distribution ideal for a uniform 16-bit entropy coder — no subband partitioning or context modeling needed.
+
+Full discussion: [**docs/16bit-alphabet-entropy-coding.md**](./docs/16bit-alphabet-entropy-coding.md)
 
 ---
 
