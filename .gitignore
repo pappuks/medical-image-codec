@@ -2,3 +2,4 @@ testdata/mg-mf-dcm.dcm
 .venv/
 testdata/Series*/
 testdata/0acbebb*/
+*.so
