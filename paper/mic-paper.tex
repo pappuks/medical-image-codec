@@ -88,7 +88,7 @@ Beyond single-frame greyscale, MIC supports:
 \end{itemize}
 
 The remainder of this paper is organized as follows.
-Section~\ref{sec:related} surveys related work.
+Section~\ref{sec:related} surveys related work, including the challenges posed by 16-bit alphabets for classical entropy coders (Section~\ref{sec:related_16bit}) and the limitations of signal-processing-based filter-bank transforms for lossless compression (Section~\ref{sec:related_sigproc}).
 Section~\ref{sec:pipeline} describes the compression pipeline.
 Section~\ref{sec:formats} details the MIC2 and MIC3 container formats.
 Section~\ref{sec:implementation} covers implementation details and optimizations.
@@ -125,6 +125,75 @@ FSE was popularized by its use in Zstandard~\cite{zstd} and is used in MIC for t
 
 Canonical Huffman coding~\cite{schwartz1964} assigns codewords based on sorted code lengths, enabling compact codebook representation.
 MIC includes a canonical Huffman backend as an alternative to FSE; it produces slightly smaller output but decodes more slowly.
+
+\subsection{The 16-bit Alphabet Challenge in Entropy Coding}
+\label{sec:related_16bit}
+
+Classical entropy coders---Huffman coding~\cite{schwartz1964}, arithmetic coding, and their derivatives---were developed primarily in the context of byte-oriented data streams, where the symbol alphabet has at most 256 entries.
+The dominant general-purpose compressors (Deflate, Zstandard~\cite{zstd}, LZ4) all operate on 8-bit byte streams, as do the entropy coding stages of most image codecs: JPEG's Huffman and arithmetic coders, JPEG-LS's Golomb-Rice coder, and JPEG 2000's MQ coder all treat each coding unit as a small fixed-size symbol (typically 4--8 bits).
+FSE, as used in Zstandard, is likewise capped at 4\,096 symbols in its standard formulation.
+
+Medical images break this assumption.
+DICOM stores pixels at 10, 12, or 16 bits per sample, yielding alphabet sizes of 1\,024, 4\,096, or 65\,536 symbols respectively.
+Even after spatial delta prediction, the residual alphabet for a 16-bit CT image can span tens of thousands of distinct values.
+An entropy coder that assumes an 8-bit alphabet must either re-encode 16-bit symbols as byte pairs---losing inter-byte correlation and doubling the number of coding steps---or truncate the alphabet at 256 and fall back to raw storage for rare symbols.
+
+This mismatch has practical consequences.
+Applying zstd to delta-encoded 16-bit medical images (Section~\ref{sec:deltazstd}) treats each residual as a two-byte sequence, forcing the LZ77 back-reference engine to discover word-level patterns at the byte level.
+The match-length and offset statistics are fundamentally less favorable for 16-bit word streams than for natural-language or binary-protocol data, where 8-bit bytes are the natural coding unit.
+
+At the same time, the 16-bit alphabet presents an \emph{opportunity}.
+After delta prediction, medical image residuals are sharply concentrated: over 90\% of CT residuals fall within a $\pm$64 range, and mammography residuals cluster even more tightly near zero (Section~\ref{sec:results}).
+A 16-bit-aware entropy coder can exploit this concentration directly, building a precise probability model over the full uint16 range without the distortions introduced by byte-splitting.
+The effective active alphabet---the number of distinct residual values with non-zero counts---is typically far smaller than 65\,536 (often $<$500 for medical images), so dynamic table sizing (Section~\ref{sec:implementation}) can keep working-set sizes comparable to those of an 8-bit coder.
+
+MIC addresses this gap by extending FSE to support up to 65\,535 distinct symbols and pairing it with a 16-bit-native RLE stage.
+The RLE stage exploits run-length structure that a byte-oriented compressor cannot easily see---a run of 1\,000 identical 16-bit zero residuals is a single same-run record in MIC's RLE, but 2\,000 bytes with no obvious structure to a byte-level LZ77 matcher.
+Together, these 16-bit-native stages outperform Delta+zstd by 10--22\% across all tested modalities.
+
+\subsection{Signal Processing Approaches and Their Limitations for Lossless Compression}
+\label{sec:related_sigproc}
+
+Image compression research has long drawn on classical signal processing, applying the intuition that natural images can be efficiently represented in a transform domain where energy is concentrated in a small number of large coefficients.
+The discrete cosine transform (DCT) underpins JPEG, while the discrete wavelet transform (DWT) forms the core of JPEG 2000~\cite{jpeg2000}.
+Both transforms decompose the image into \emph{low-pass} components (coarse structure, bulk of the signal energy) and \emph{high-pass} components (edges, fine texture, noise), mirroring the classical filter-bank model of subband coding~\cite{legall1988}.
+
+For \emph{lossy} compression, this decomposition is highly effective.
+High-frequency subbands can be quantized aggressively with little perceptual impact: the human visual system is relatively insensitive to high-spatial-frequency contrast.
+Progressive bit-plane coding of wavelet coefficients (as in JPEG 2000's EBCOT) allows a smooth rate-distortion tradeoff at any target bit rate.
+For medical imaging standards that permit lossy modes---such as visually lossless compression of diagnostic images at moderate bit rates---wavelet-based codecs provide an excellent combination of compression ratio, perceptual quality, and standards compliance.
+
+For \emph{lossless} compression, however, the picture is more nuanced.
+Lossless reconstruction requires perfect recovery of every transform coefficient, which imposes several constraints that erode the advantages of the filter-bank approach:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Coefficient overflow.}
+    Even with integer lifting schemes (such as the 5/3 Le Gall wavelet~\cite{legall1988} used in JPEG 2000 lossless mode), the predict step can produce detail coefficients that exceed the input dynamic range.
+    For 16-bit inputs, this forces either promotion to 32-bit arithmetic or escape coding of out-of-range values, inflating the compressed stream and complicating the entropy coder.
+    MIC's experiments (Section~\ref{sec:wavelet}) confirm this: CT images, with their full 16-bit dynamic range, suffer a 52\% compression ratio drop when the wavelet replaces delta encoding (2.24$\times$ $\to$ 1.48$\times$).
+
+    \item \textbf{The update step reintroduces correlation.}
+    In the lifting scheme, the update step adjusts low-pass (scaling) coefficients to preserve the signal mean and orthogonality between subbands.
+    While this is desirable for lossy coding (it prevents low-pass coefficients from drifting), for lossless coding of images that are already well-predicted by a simple linear filter it adds residual energy to the low-pass band without a compensating reduction elsewhere.
+    The smooth homogeneous regions that dominate medical images are exactly the cases where delta encoding already produces near-zero residuals, and where the wavelet update step provides no benefit.
+
+    \item \textbf{Higher memory bandwidth.}
+    The 2D wavelet inverse transform requires two sequential passes---horizontal then vertical---each visiting every element of the coefficient array.
+    For large images at high parallelism, this doubles the memory traffic relative to a single-pass delta decoder.
+    Since decompression throughput is memory-bandwidth-limited at high core counts, the wavelet's additional passes impose a proportional throughput penalty.
+
+    \item \textbf{Entropy coding mismatch.}
+    Wavelet subbands each have distinct statistical characteristics (different variances, different spatial correlations), which ideally would be entropy-coded separately with subband-specific models.
+    JPEG 2000 addresses this through context-adaptive bit-plane coding (EBCOT), but EBCOT's complexity is precisely what HTJ2K set out to reduce.
+    Simpler entropy coders applied to concatenated wavelet coefficients---as in MIC's wavelet+FSE experiments (Section~\ref{sec:wavelet})---fail to exploit this structure.
+\end{enumerate}
+
+By contrast, simple spatial prediction (delta encoding) leaves a single residual image whose statistics are homogeneous across the frame: residuals are tightly clustered around zero everywhere, regardless of spatial frequency.
+This homogeneity makes the residual ideal for a uniform 16-bit entropy coding scheme---one RLE+FSE pipeline applied once, without subband partitioning or context modeling.
+The result is a codec that is simultaneously simpler, faster, and better-compressing than the wavelet alternative on every tested medical modality.
+
+This analysis suggests a broader principle: for lossless compression of images with moderate-to-low noise and strong spatial smoothness (the typical case in clinical medical imaging), filter-bank decompositions add complexity without benefit.
+The right tool is a fast, accurate spatial predictor paired with a 16-bit-native entropy coder capable of modeling the resulting sparse, peaked residual distribution directly.
 
 \subsection{Color Transforms for Pathology Imaging}
 
