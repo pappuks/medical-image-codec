@@ -1,6 +1,6 @@
 # MIC — Medical Image Codec
 
-A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC achieves JPEG 2000–comparable compression ratios with significantly higher decompression throughput — up to **16 GB/s** on large images.
+A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC achieves JPEG 2000–comparable compression ratios with significantly higher decompression throughput — up to **16 GB/s** on mammography (best case; geometric mean ~7.5 GB/s across modalities on 64 cores).
 
 | Branch | Status |
 |--------|--------|
@@ -10,8 +10,8 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 
 | Property | Value |
 |----------|-------|
-| Compression ratio | 1.7× – 8.9× greyscale, 3–5× RGB tissue (lossless) |
-| Peak decompression speed | up to 16 GB/s (ARM64, 64 cores) |
+| Compression ratio | 1.7× – 8.9× greyscale, 3–5× RGB tissue tiles (lossless) |
+| Peak decompression speed | up to 16 GB/s mammography best case (ARM64, 64 cores); ~7.5 GB/s geometric mean |
 | Supported formats | 8–16 bit greyscale, 8-bit RGB (WSI/pathology) |
 | Multi-frame support | MIC2 container (random access or temporal prediction) |
 | WSI support | MIC3 tiled container with pyramid levels, parallel encode/decode |
@@ -150,7 +150,7 @@ Frame N  →  Delta+RLE+FSE          Frame N  →  ZigZag(residual)+RLE+FSE
 | Independent | 614 MB | 46.1 MB | **13.3×** |
 | Temporal | 614 MB | 47.5 MB | 12.9× |
 
-For smooth mammographic images the spatial predictor outperforms inter-frame prediction. Temporal mode may win on datasets with less spatial redundancy.
+For smooth mammographic images the spatial predictor outperforms inter-frame prediction. Temporal mode is a design provision for sequences with high inter-frame correlation (e.g., cardiac cine MRI, fluoroscopy, nuclear medicine); it has not yet been benchmarked favorably on available clinical datasets.
 
 ---
 
@@ -276,7 +276,7 @@ Encodes the delta-coded stream as runs:
 - **Same runs** — a count followed by a single repeated value (most common after delta coding)
 - **Diff runs** — a count followed by that many distinct values
 
-The minimum encoded run length is 3, guaranteeing the RLE output is never larger than the input.
+The minimum encoded run length is 3, guaranteeing the RLE output is never larger than the input: a same-run of 3 encodes 3 symbols as 2 (header + value), saving 1; a diff-run of N costs N+1, but diff runs only follow same runs that already saved at least 1, so the cumulative output never exceeds the input.
 
 ### FSE (Finite State Entropy / ANS)
 
@@ -322,7 +322,7 @@ The same 4-way unrolled algorithm is implemented in assembly for both amd64 (usi
 ### Platform Dispatch (`asm_amd64.go`, `asm_arm64.go`)
 
 - **amd64**: A one-time `init()` probes SSSE3 and AVX2 support via `CPUID`. `ycocgRForwardNative` and `ycocgRInverseNative` dispatch to the best available implementation at runtime.
-- **arm64**: NEON is always available on ARM64 — no CPUID probe needed. The dispatch wrappers call scalar-in-assembly stubs whose register layout is ready for a future 8-pixel-wide NEON path.
+- **arm64**: NEON is always available on ARM64 — no CPUID probe needed. The dispatch wrappers call scalar-in-assembly stubs whose register layout is ready for a future 8-pixel-wide NEON path. **Note:** The current YCoCg-R assembly implementations are scalar and do not provide a measurable speedup over the Go compiler's scalar output — they establish dispatch scaffolding for planned SIMD-vectorized paths.
 - **other platforms**: `asm_generic.go` (`//go:build !amd64 && !arm64`) provides identical pure-Go fallbacks.
 
 For full details, design decisions, and benchmark methodology see [`docs/native-optimizations.md`](./docs/native-optimizations.md).
@@ -584,7 +584,7 @@ MIC is compared against lossless HTJ2K using [OpenJPH](https://github.com/aous72
 **Key takeaways:**
 - Compression ratios are within 4% across all modalities; MIC wins on CT (+27%), XR (+4%), MG1/MG2 (+4%).
 - MIC decompresses **1.3–1.5× faster** on large images in single-threaded use (up from 1.1–1.2× with single-state FSE).
-- At 64 cores (AWS c7g.metal), MIC reaches up to **16 GB/s** while OpenJPH's single-process CLI scales to ~2–4 GB/s.
+- At 64 cores (AWS c7g.metal), MIC reaches up to **16 GB/s** on mammography (best case; geometric mean ~7.5 GB/s across modalities) while OpenJPH's single-process CLI scales to ~2–4 GB/s.
 - MIC is a pure Go library with no subprocess overhead — decompress any frame with a function call.
 
 Reproduce the comparison:
