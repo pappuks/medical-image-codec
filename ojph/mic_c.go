@@ -1,0 +1,32 @@
+// Copyright 2021 Kuldeep Singh
+// This source code is licensed under a MIT-style
+// license that can be found in the LICENSE file.
+
+// mic_c.go — CGO bindings for the C implementation of MIC decompression.
+// This allows benchmarking the MIC pipeline in C vs Go vs HTJ2K.
+package ojph
+
+/*
+#include "mic_decompress_c.h"
+*/
+import "C"
+import (
+	"fmt"
+	"unsafe"
+)
+
+// MICDecompressTwoStateC decompresses a MIC two-state FSE stream using the C implementation.
+func MICDecompressTwoStateC(compressed []byte, width, height int) ([]uint16, error) {
+	pixels := make([]uint16, width*height)
+
+	rc := C.mic_decompress_two_state(
+		(*C.uint8_t)(unsafe.Pointer(&compressed[0])),
+		C.size_t(len(compressed)),
+		(*C.uint16_t)(unsafe.Pointer(&pixels[0])),
+		C.int(width), C.int(height),
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("mic_decompress_two_state failed: rc=%d", rc)
+	}
+	return pixels, nil
+}

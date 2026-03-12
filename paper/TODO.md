@@ -34,6 +34,27 @@ The paper makes a clear, well-scoped contribution: a practical, open-source loss
   | MG4   | 3.47      | 3.51        | 98.25            | 55.65              | 1.8×          |
   | **Geo mean** | | | | | **1.8×** |
 
+  **Follow-up: MIC ported to C (same algorithm, C implementation via CGO):**
+
+  Porting the MIC decompression pipeline (FSE two-state + RLE + Delta) to C closes
+  ~60% of the gap with HTJ2K. The C version is 1.56× faster than Go, and within
+  0.87× of HTJ2K (i.e., HTJ2K is only ~15% faster than MIC-C, vs ~80% faster than
+  MIC-Go). On CR and MG3, MIC-C matches HTJ2K. The remaining gap is likely due to
+  HTJ2K's SIMD-optimized wavelet/block decoder vs MIC's scalar RLE+delta.
+  See `ojph/mic_decompress_c.{h,c}`, `ojph/mic_c.go`, and `TestThreeWayComparison`.
+
+  | Image | Go (MB/s) | C (MB/s) | HTJ2K (MB/s) | C/Go | C/HTJ2K |
+  |-------|-----------|----------|--------------|------|---------|
+  | MR    | 137       | 252      | 266          | 1.6× | 0.94×   |
+  | CT    | 103       | 197      | 239          | 1.6× | 0.84×   |
+  | CR    | 151       | 319      | 329          | 1.8× | 0.99×   |
+  | XR    | 158       | 292      | 303          | 1.5× | 0.97×   |
+  | MG1   | 314       | 466      | 636          | 1.5× | 0.71×   |
+  | MG2   | 300       | 452      | 595          | 1.5× | 0.75×   |
+  | MG3   | 169       | 306      | 318          | 1.6× | 1.01×   |
+  | MG4   | 273       | 403      | 462          | 1.5× | 0.83×   |
+  | **Geo mean** | | | | **1.56×** | **0.87×** |
+
 - [ ] **Wavelet implementation details** *(Section 6)* — The wavelet pipeline is described in ~one paragraph. State: (a) number of decomposition levels applied, (b) subband scan order for RLE input (standard LL, HL, LH, HH?), (c) whether it received comparable optimization effort to the delta pipeline. The result that wavelet+RLE+FSE underperforms delta+RLE+FSE on compression ratio is surprising — JPEG 2000 routinely beats simple delta coders. If only one decomposition level is used, this would explain the gap and must be stated explicitly.
 
 ---
