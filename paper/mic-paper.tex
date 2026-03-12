@@ -15,6 +15,7 @@
 \usepackage{subcaption}
 \usepackage{enumitem}
 \usepackage{microtype}
+\usepackage{tikz}
 % hyperref must be loaded last
 \usepackage{hyperref}
 
@@ -41,16 +42,17 @@
 
 \begin{abstract}
 We present MIC (Medical Image Codec), a lossless compression codec optimized for 16-bit medical images stored in the DICOM format.
-MIC chains three lightweight stages---spatial delta prediction, run-length encoding (RLE), and finite state entropy (FSE) coding based on asymmetric numeral systems (ANS)---to achieve compression ratios of 1.7$\times$--8.6$\times$ on greyscale DICOM images and 3--5$\times$ on RGB whole slide imaging (WSI) tissue tiles, while delivering decompression throughput up to 16\,GB/s on a 64-core ARM64 server.
+MIC chains three lightweight stages---spatial delta prediction, run-length encoding (RLE), and finite state entropy (FSE) coding based on asymmetric numeral systems (ANS)---to achieve compression ratios of 1.7$\times$--8.6$\times$ on greyscale DICOM images and 3--5$\times$ on RGB whole slide imaging (WSI) tissue tiles (excluding degenerate constant-plane background tiles).
 The codec supports three container formats: MIC1 for single frames, MIC2 for multi-frame sequences with optional temporal prediction, and MIC3 for tiled whole slide images with multi-resolution pyramid levels.
-A two-state FSE decoder breaks the serial dependency chain inherent in ANS decoding by running two independent state machines on alternating symbol positions, enabling instruction-level parallelism that yields 1.3--3.0$\times$ faster FSE decompression.
-Platform-specific Go assembly routines for histogram computation (amd64 and arm64) and YCoCg-R color transforms further reduce overhead.
+A two-state FSE decoder breaks the serial dependency chain inherent in ANS decoding by running two independent state machines on alternating symbol positions, enabling instruction-level parallelism that yields 1.3--3.0$\times$ faster single-threaded FSE decompression.
+Platform-specific Go assembly routines for histogram computation (amd64 and arm64) provide dispatch scaffolding for future SIMD-vectorized paths.
 We evaluate MIC on eight clinical DICOM datasets spanning MR, CT, CR, X-ray, and mammography modalities, compare it against a 5/3 integer wavelet alternative, and benchmark it against High-Throughput JPEG\,2000 (HTJ2K) using OpenJPH.
 Delta+RLE+FSE outperforms the wavelet pipeline on all tested modalities in both compression ratio and decompression speed.
 A comparison against Zstandard (zstd) applied to the same delta-encoded residuals confirms that MIC's domain-specific RLE+FSE stages outperform the general-purpose compressor by 10--22\%, even at zstd's highest compression level.
 We also evaluate the JPEG-LS MED predictor as an alternative to MIC's average-of-neighbors predictor; MED yields only $\approx$0.9\% mean improvement at a 1.5--2$\times$ decompression speed penalty, validating the simpler predictor choice.
-Compared to HTJ2K, MIC achieves comparable or better lossless compression ratios across all modalities and decompresses 1.3--1.5$\times$ faster on a single core with two-state FSE, scaling to 16\,GB/s at 64 cores.
-MIC is implemented in Go with platform-specific assembly optimizations, JavaScript and WebAssembly browser decoders, and is released as open-source software.
+Compared to HTJ2K, MIC achieves comparable or better lossless compression ratios across all modalities and decompresses 1.3--1.5$\times$ faster on a single core with two-state FSE.
+Separately, MIC's per-frame parallelism scales to 16\,GB/s on a 64-core ARM64 server (best case, mammography).
+MIC is implemented in Go with JavaScript and WebAssembly browser decoders, and is released as open-source software.
 \end{abstract}
 
 \section{Introduction}
@@ -77,7 +79,7 @@ MIC exploits three properties of medical images:
 The codec processes pixels through a three-stage pipeline: spatial delta encoding, run-length encoding, and FSE (ANS-based) entropy coding.
 Each stage is simple enough to decode in a single sequential pass with minimal branching, enabling decompression speeds that scale with memory bandwidth.
 A two-state FSE decoder further increases throughput by exploiting instruction-level parallelism (ILP) via dual independent ANS state machines.
-On a 64-core AWS Graviton3 server (c7g.metal), MIC decompresses mammography images at 16\,GB/s---substantially faster than JPEG 2000 decoders.
+On a 64-core AWS Graviton3 server (c7g.metal), MIC decompresses mammography images (best case) at 16\,GB/s; cross-modality throughput ranges from 2.3\,GB/s (MR) to 16\,GB/s (MG1), with a geometric mean of approximately 7.5\,GB/s across the eight test images.
 
 Beyond single-frame greyscale, MIC supports:
 \begin{itemize}[nosep]
@@ -138,19 +140,26 @@ Figure~\ref{fig:pipeline} illustrates the dataflow.
 
 \begin{figure}[t]
 \centering
-\fbox{\parbox{0.9\linewidth}{\small\centering
-\texttt{Raw 16-bit Pixels} \\[2pt]
-$\downarrow$ \\[2pt]
-\texttt{Delta Encoding} \\
-\textit{pixel $-$ avg(top, left)} \\[2pt]
-$\downarrow$ \\[2pt]
-\texttt{Run-Length Encoding} \\
-\textit{same runs / diff runs} \\[2pt]
-$\downarrow$ \\[2pt]
-\texttt{FSE (tANS) Entropy Coding} \\[2pt]
-$\downarrow$ \\[2pt]
-\texttt{Compressed Bitstream}
-}}
+\begin{tikzpicture}[
+    node distance=0.9cm,
+    box/.style={draw, rounded corners, minimum width=5.8cm, minimum height=0.7cm,
+                font=\small\sffamily, align=center, fill=white},
+    annot/.style={font=\scriptsize\itshape, text=black!70},
+    arr/.style={->, >=stealth, thick}
+]
+\node[box] (input) {Raw 16-bit Pixels};
+\node[box, below=of input] (delta) {Delta Encoding};
+\node[annot, right=0.15cm of delta.east, anchor=west] {pixel $-$ avg(top, left)};
+\node[box, below=of delta] (rle) {Run-Length Encoding};
+\node[annot, right=0.15cm of rle.east, anchor=west] {same / diff runs};
+\node[box, below=of rle] (fse) {FSE (tANS) Entropy Coding};
+\node[box, below=of fse] (output) {Compressed Bitstream};
+
+\draw[arr] (input) -- (delta);
+\draw[arr] (delta) -- (rle);
+\draw[arr] (rle) -- (fse);
+\draw[arr] (fse) -- (output);
+\end{tikzpicture}
 \caption{MIC compression pipeline for single-frame greyscale images.}
 \label{fig:pipeline}
 \end{figure}
@@ -187,6 +196,9 @@ MIC's RLE stage encodes the symbol stream as alternating \emph{same runs} and \e
 \end{itemize}
 
 A key design constraint is that the minimum run length is 3, which guarantees that the RLE output is \emph{never larger} than the input.
+The proof is straightforward: a same-run header costs 1 symbol (the count) plus 1 symbol (the repeated value), encoding 3 input symbols in 2 output symbols---a net saving of~1.
+A diff-run header costs 1 symbol (the count), followed by the $n \geq 3$ distinct values verbatim, encoding $n$ input symbols in $n+1$ output symbols---a net cost of~1.
+Since diff runs can only follow same runs (which saved at least~1), the cumulative output never exceeds the input length.
 This eliminates the need for expansion detection or fallback paths.
 
 The run headers use a midpoint protocol: counts $\leq$ \texttt{midCount} signal same runs; counts $>$ \texttt{midCount} signal diff runs with the actual count obtained by subtracting \texttt{midCount}.
@@ -367,10 +379,11 @@ This avoids store-to-load forwarding stalls when consecutive pixels have identic
 The two arrays are merged in a single backward pass after the loop.
 Both amd64 (using \texttt{ADDL}/\texttt{MOVWQZX} instructions) and arm64 (using \texttt{MOVWU}/\texttt{LSL}/\texttt{ADD}) implement the same algorithm in Go Plan~9 assembly.
 
-\paragraph{YCoCg-R color transform.}
-The RGB$\to$YCoCg-R forward and inverse transforms are implemented in assembly with explicit register allocation, eliminating Go compiler overhead for the per-pixel arithmetic.
+\paragraph{YCoCg-R color transform (dispatch scaffolding).}
+The RGB$\to$YCoCg-R forward and inverse transforms have assembly stubs with explicit register allocation on amd64 and arm64.
 On amd64, a one-time \texttt{CPUID} probe at initialization detects SSSE3 and AVX2 support; on arm64, NEON is always available.
-The current scalar-in-assembly implementations establish the dispatch scaffolding for future SIMD-vectorized (8-pixel-wide) paths.
+\emph{Note:} the current implementations are scalar-in-assembly and do not provide a measurable speedup over the Go compiler's scalar output.
+They establish the dispatch scaffolding and calling conventions for planned SIMD-vectorized (8-pixel-wide) paths; the current scalar performance is equivalent to the pure-Go fallback.
 
 \paragraph{Platform portability.}
 A build-tagged fallback file (\texttt{asm\_generic.go}) provides identical pure-Go implementations for non-amd64/arm64 targets (WebAssembly, RISC-V, etc.), ensuring the codec compiles and runs correctly on all Go-supported platforms.
@@ -532,7 +545,8 @@ Temporal (inter-frame) & 47.5\,MB & 12.9$\times$ \\
 \end{table}
 
 Independent mode slightly outperforms temporal mode on this dataset because mammography images have strong spatial correlation (the spatial predictor is very effective) but only moderate inter-frame correlation (each slice images a different plane of breast tissue).
-Temporal mode may be advantageous for sequences with higher inter-frame correlation, such as cardiac cine MRI or fluoroscopy.
+Temporal mode is a design provision for sequences with high inter-frame correlation, such as cardiac cine MRI, fluoroscopy, or nuclear medicine dynamic studies, where consecutive frames share the same anatomy with only contrast or motion changes.
+We have not yet identified a clinical dataset where temporal mode outperforms independent mode; the feature is included as infrastructure for those use cases and has not been benchmarked favorably here.
 
 \subsection{WSI Compression Results}
 
@@ -606,9 +620,10 @@ MG4 & 26.0 & 3.47$\times$ & \textbf{3.51}$\times$ & \textbf{399} & 307 & 1.30$\t
 Ratios are within 4\% across all modalities.
 MIC achieves better ratios on CT ($+$27\%), XR ($+$4\%), and MG1/MG2 ($+$4\%).
 HTJ2K achieves slightly better ratios on MR ($+$1\%), CR ($+$4\%), and MG4 ($+$1\%).
-The CT advantage of MIC stems from better handling of the full 16-bit dynamic range:
-the overflow delimiter scheme adapts to the actual bit depth, keeping the symbol alphabet
-small, while HTJ2K's block coder operates on fixed 16-bit coefficients.
+The CT advantage of MIC stems from better handling of the full 16-bit dynamic range.
+MIC's overflow delimiter scheme adapts to the actual bit depth ($d = \lceil\log_2(\max+1)\rceil$): residuals within $\pm(2^{d-1}-1)$ are stored directly, while only the rare large residuals incur the two-symbol escape.
+After delta coding, the CT residual histogram is sharply peaked around zero---over 90\% of residuals fall within a $\pm$64 range---so the effective symbol alphabet remains small (typically $<$500 distinct values out of $2^{16}$), enabling the FSE table to model the distribution precisely.
+By contrast, HTJ2K's block coder operates on fixed-width 16-bit wavelet coefficients and cannot exploit this alphabet reduction, resulting in less efficient entropy coding for CT's high-dynamic-range but spatially smooth data.
 
 \paragraph{Decompression throughput.}
 For images where the subprocess overhead is negligible ($\geq$7\,MB: CR, XR, MG1--MG4),
@@ -728,7 +743,7 @@ We also include raw pixels compressed with \texttt{zstd} at level~3 (no delta en
 
 Table~\ref{tab:deltazstd} compares compression ratios.
 
-\begin{table}[t]
+\begin{table*}[t]
 \centering
 \caption{Compression ratio: MIC (Delta+RLE+FSE) vs.\ Delta+zstd at varying levels and raw+zstd (no delta).}
 \label{tab:deltazstd}
@@ -747,7 +762,7 @@ MG3 & \textbf{2.29}$\times$ & 1.71$\times$ & 1.89$\times$ & 2.09$\times$ & 1.50$
 MG4 & \textbf{3.47}$\times$ & 2.80$\times$ & 2.87$\times$ & 2.99$\times$ & 2.57$\times$ \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 MIC outperforms Delta+zstd on every modality, even at zstd's highest compression level (19).
 The advantage ranges from 10\% (MG3: 2.29$\times$ vs.\ 2.09$\times$) to 22\% (MG1: 8.57$\times$ vs.\ 7.07$\times$).
@@ -833,7 +848,7 @@ MIC achieves comparable or better lossless compression ratios and, with the two-
 decoder (Section~\ref{sec:twostate}), decompresses 1.3--1.5$\times$ faster on a single thread
 (Apple M2 Max)---an improvement over the 1.1--1.2$\times$ advantage of the single-state decoder.
 At 64 cores, MIC's advantage grows substantially: the simple per-frame parallelism of
-the Delta+RLE+FSE pipeline scales to 16\,GB/s, while the OpenJPH command-line tool is
+the Delta+RLE+FSE pipeline scales to 16\,GB/s on mammography (best case), while the OpenJPH command-line tool is
 limited by its single-process architecture.
 HTJ2K's key advantage is JPEG\,2000 ecosystem compatibility and support for
 progressive and region-of-interest decoding, which MIC does not currently provide for
@@ -842,11 +857,11 @@ greyscale images.
 \section{Conclusion}
 \label{sec:conclusion}
 
-We have presented MIC, a lossless medical image codec that achieves compression ratios of 1.7$\times$--8.6$\times$ on greyscale DICOM images and 3--5$\times$ on RGB pathology images, with decompression throughput up to 16\,GB/s.
+We have presented MIC, a lossless medical image codec that achieves compression ratios of 1.7$\times$--8.6$\times$ on greyscale DICOM images and 3--5$\times$ on RGB pathology tissue tiles, with decompression throughput up to 16\,GB/s on mammography (best case; geometric mean $\approx$7.5\,GB/s across modalities on 64 cores).
 The codec's three-stage pipeline (delta prediction, run-length encoding, FSE entropy coding) is designed for simplicity and speed: each stage processes the data in a single pass with minimal branching, enabling decompression performance that scales with memory bandwidth.
 
-A two-state FSE decoder that runs two independent ANS state machines on alternating symbols delivers 1.3--3.0$\times$ faster FSE decompression by exploiting instruction-level parallelism, without requiring any platform-specific assembly.
-Platform-specific Go assembly routines for histogram computation and YCoCg-R color transforms on amd64 and arm64 further reduce overhead, with pure-Go fallbacks ensuring portability to all architectures.
+A two-state FSE decoder that runs two independent ANS state machines on alternating symbols delivers 1.3--3.0$\times$ faster single-threaded FSE decompression by exploiting instruction-level parallelism, without requiring any platform-specific assembly.
+Platform-specific Go assembly routines for histogram computation and YCoCg-R color transforms on amd64 and arm64 provide dispatch scaffolding for planned SIMD-vectorized paths, with pure-Go fallbacks ensuring portability to all architectures.
 
 MIC supports three container formats for different clinical use cases: single-frame (MIC1), multi-frame with temporal prediction (MIC2), and tiled whole slide imaging with pyramid levels (MIC3).
 The implementation includes browser-based JavaScript and WebAssembly decoders for web viewing applications.
@@ -855,7 +870,8 @@ Our evaluation demonstrates that the simple delta+RLE+FSE pipeline outperforms a
 A comparison against Zstandard~\cite{zstd}---a general-purpose compressor from the same ANS family---confirms that MIC's domain-specific 16-bit RLE+FSE stages outperform byte-oriented Delta+zstd by 10--22\%, even at zstd's highest compression level.
 Evaluation of the JPEG-LS MED predictor shows only $\approx$0.9\% mean compression improvement over MIC's average-of-neighbors predictor, at a 1.5--2$\times$ decompression speed penalty, validating the simpler predictor choice.
 These results suggest that for lossless medical image compression, simple linear prediction combined with a domain-specific 16-bit entropy coding pipeline is more effective than both sophisticated wavelet transforms and general-purpose compressors.
-A quantitative comparison against HTJ2K (OpenJPH) shows that MIC achieves comparable or better lossless compression ratios across all modalities and, with the two-state FSE decoder, decompresses 1.3--1.5$\times$ faster on a single core (Apple M2 Max), scaling to 16\,GB/s on a 64-core ARM64 server---substantially higher than the throughput achievable by a single-process HTJ2K implementation.
+A quantitative comparison against HTJ2K (OpenJPH) shows that MIC achieves comparable or better lossless compression ratios across all modalities and, with the two-state FSE decoder, decompresses 1.3--1.5$\times$ faster on a single core (Apple M2 Max).
+Separately, MIC's per-frame parallelism scales to 16\,GB/s on mammography (best case) on a 64-core ARM64 server, with a geometric mean of $\approx$7.5\,GB/s across modalities.
 
 MIC is open-source and available at \url{https://github.com/pappuks/medical-image-codec}.
 
