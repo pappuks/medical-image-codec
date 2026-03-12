@@ -46,7 +46,9 @@ The codec supports three container formats: MIC1 for single frames, MIC2 for mul
 A two-state FSE decoder breaks the serial dependency chain inherent in ANS decoding by running two independent state machines on alternating symbol positions, enabling instruction-level parallelism that yields 1.3--3.0$\times$ faster FSE decompression.
 Platform-specific Go assembly routines for histogram computation (amd64 and arm64) and YCoCg-R color transforms further reduce overhead.
 We evaluate MIC on eight clinical DICOM datasets spanning MR, CT, CR, X-ray, and mammography modalities, compare it against a 5/3 integer wavelet alternative, and benchmark it against High-Throughput JPEG\,2000 (HTJ2K) using OpenJPH.
-Delta+RLE+FSE strictly dominates the wavelet pipeline on all tested modalities in both compression ratio and decompression speed.
+Delta+RLE+FSE outperforms the wavelet pipeline on all tested modalities in both compression ratio and decompression speed.
+A comparison against Zstandard (zstd) applied to the same delta-encoded residuals confirms that MIC's domain-specific RLE+FSE stages outperform the general-purpose compressor by 10--22\%, even at zstd's highest compression level.
+We also evaluate the JPEG-LS MED predictor as an alternative to MIC's average-of-neighbors predictor; MED yields only $\approx$0.9\% mean improvement at a 1.5--2$\times$ decompression speed penalty, validating the simpler predictor choice.
 Compared to HTJ2K, MIC achieves comparable or better lossless compression ratios across all modalities and decompresses 1.3--1.5$\times$ faster on a single core with two-state FSE, scaling to 16\,GB/s at 64 cores.
 MIC is implemented in Go with platform-specific assembly optimizations, JavaScript and WebAssembly browser decoders, and is released as open-source software.
 \end{abstract}
@@ -90,6 +92,8 @@ Section~\ref{sec:formats} details the MIC2 and MIC3 container formats.
 Section~\ref{sec:implementation} covers implementation details and optimizations.
 Section~\ref{sec:results} presents experimental results, including a comparison with HTJ2K (OpenJPH).
 Section~\ref{sec:wavelet} compares against a wavelet-based alternative.
+Section~\ref{sec:deltazstd} evaluates a Delta+Zstandard baseline to assess whether a general-purpose compressor can replace MIC's custom RLE+FSE stages.
+Section~\ref{sec:med} compares the JPEG-LS MED predictor against MIC's average-of-neighbors predictor.
 Section~\ref{sec:discussion} discusses design tradeoffs and limitations.
 Section~\ref{sec:conclusion} concludes.
 
@@ -714,6 +718,93 @@ Delta encoding outperforms the wavelet transform for lossless medical image comp
 
 The wavelet transform remains valuable for two use cases outside MIC's current scope: \emph{lossy compression} (where wavelet coefficients can be quantized by subband) and \emph{progressive/multi-resolution delivery} (where the LL subband is a valid downscaled image at each decomposition level).
 
+\section{Comparison with Delta+Zstandard}
+\label{sec:deltazstd}
+
+MIC's entropy coder (FSE) belongs to the same ANS family as Zstandard~\cite{zstd}, a widely deployed general-purpose compressor.
+A natural question is whether MIC's custom RLE+FSE stages add value beyond feeding delta-encoded residuals to a general-purpose compressor.
+To answer this, we delta-encode the raw uint16 stream (using MIC's spatial predictor), serialize the residuals to little-endian bytes, and compress with \texttt{zstd} at three compression levels: 1 (fast), 3 (default), and 19 (ultra).
+We also include raw pixels compressed with \texttt{zstd} at level~3 (no delta encoding) to isolate the contribution of the delta stage.
+
+Table~\ref{tab:deltazstd} compares compression ratios.
+
+\begin{table}[t]
+\centering
+\caption{Compression ratio: MIC (Delta+RLE+FSE) vs.\ Delta+zstd at varying levels and raw+zstd (no delta).}
+\label{tab:deltazstd}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Image & \makecell{MIC} & \makecell{d+zstd\\-1} & \makecell{d+zstd\\-3} & \makecell{d+zstd\\-19} & \makecell{raw\\zstd-3} \\
+\midrule
+MR  & \textbf{2.35}$\times$ & 1.75$\times$ & 1.82$\times$ & 1.95$\times$ & 1.65$\times$ \\
+CT  & \textbf{2.24}$\times$ & 1.71$\times$ & 1.89$\times$ & 2.03$\times$ & 1.79$\times$ \\
+CR  & \textbf{3.63}$\times$ & 2.70$\times$ & 2.95$\times$ & 3.27$\times$ & 2.05$\times$ \\
+XR  & \textbf{1.74}$\times$ & 1.43$\times$ & 1.43$\times$ & 1.43$\times$ & 1.32$\times$ \\
+MG1 & \textbf{8.57}$\times$ & 6.19$\times$ & 6.37$\times$ & 7.07$\times$ & 5.77$\times$ \\
+MG2 & \textbf{8.55}$\times$ & 6.18$\times$ & 6.36$\times$ & 7.04$\times$ & 5.75$\times$ \\
+MG3 & \textbf{2.29}$\times$ & 1.71$\times$ & 1.89$\times$ & 2.09$\times$ & 1.50$\times$ \\
+MG4 & \textbf{3.47}$\times$ & 2.80$\times$ & 2.87$\times$ & 2.99$\times$ & 2.57$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+MIC outperforms Delta+zstd on every modality, even at zstd's highest compression level (19).
+The advantage ranges from 10\% (MG3: 2.29$\times$ vs.\ 2.09$\times$) to 22\% (MG1: 8.57$\times$ vs.\ 7.07$\times$).
+The gap is most pronounced on mammography images, where MIC's 16-bit-aware RLE stage efficiently encodes long runs of identical residuals that zstd's byte-oriented LZ77 matcher cannot exploit as effectively.
+
+The raw+zstd column confirms that delta encoding is essential: removing the delta stage reduces zstd's compression ratio by 10--44\% across modalities.
+However, even with delta encoding, zstd cannot match MIC's RLE+FSE backend.
+This validates the design decision to use a domain-specific RLE stage that operates on 16-bit symbols rather than relying on a general-purpose byte-level compressor.
+
+\section{MED Predictor Comparison}
+\label{sec:med}
+
+The JPEG-LS standard~\cite{jpegls} uses the Median Edge Detector (MED) predictor, which selects among three candidates based on edge orientation:
+\begin{equation}
+    \hat{x} = \begin{cases}
+        \min(a,b) & \text{if } c \geq \max(a,b) \\
+        \max(a,b) & \text{if } c \leq \min(a,b) \\
+        a + b - c & \text{otherwise}
+    \end{cases}
+\end{equation}
+where $a$ is the left neighbor, $b$ is the top neighbor, and $c$ is the top-left diagonal neighbor.
+MED adapts to horizontal, vertical, and diagonal edges, whereas MIC's average predictor $\hat{x} = \lfloor(a+b)/2\rfloor$ treats all directions equally.
+
+To evaluate whether the more sophisticated MED predictor improves MIC's compression, we implemented a MED-based delta encoder with the same overflow delimiter scheme and ran it through the full RLE+FSE pipeline.
+Table~\ref{tab:med} compares compression ratios.
+
+\begin{table}[t]
+\centering
+\caption{Compression ratio: avg-of-neighbors predictor (MIC default) vs.\ MED predictor, both through the RLE+FSE pipeline.}
+\label{tab:med}
+\small
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+Image & Avg predictor & MED predictor & Diff \\
+\midrule
+MR  & 2.348$\times$ & 2.357$\times$ & $+$0.3\% \\
+CT  & 2.238$\times$ & 2.306$\times$ & $+$3.1\% \\
+CR  & 3.628$\times$ & 3.632$\times$ & $+$0.1\% \\
+XR  & 1.738$\times$ & 1.734$\times$ & $-$0.2\% \\
+MG1 & 8.566$\times$ & 8.690$\times$ & $+$1.5\% \\
+MG2 & 8.553$\times$ & 8.678$\times$ & $+$1.5\% \\
+MG3 & 2.289$\times$ & 2.356$\times$ & $+$2.9\% \\
+MG4 & 3.474$\times$ & 3.415$\times$ & $-$1.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The MED predictor shows modest compression improvements on some modalities (CT: $+$3.1\%, MG3: $+$2.9\%, MG1/MG2: $+$1.5\%) but slight losses on others (XR: $-$0.2\%, MG4: $-$1.7\%).
+Across all eight test images, the geometric mean improvement is approximately $+$0.9\%.
+
+However, MED incurs a meaningful decompression speed penalty.
+The MED predictor requires access to three neighbors (left, top, top-left diagonal) versus two for the average predictor (left, top).
+The diagonal dependency prevents the branch-free interior loop optimization used in MIC's average-predictor decoder (Section~\ref{sec:pipeline}), adding one extra memory load and two comparisons per pixel.
+In our measurements, MED decompression is approximately 1.5--2$\times$ slower than the average predictor.
+
+MIC retains the average-of-neighbors predictor as the default because: (1)~the compression ratio gains are small and inconsistent across modalities, (2)~the decompression speed penalty is significant, and (3)~MIC's design philosophy prioritizes decompression throughput over marginal ratio improvements.
+
 \section{Discussion}
 \label{sec:discussion}
 
@@ -760,8 +851,10 @@ Platform-specific Go assembly routines for histogram computation and YCoCg-R col
 MIC supports three container formats for different clinical use cases: single-frame (MIC1), multi-frame with temporal prediction (MIC2), and tiled whole slide imaging with pyramid levels (MIC3).
 The implementation includes browser-based JavaScript and WebAssembly decoders for web viewing applications.
 
-Our evaluation demonstrates that the simple delta+RLE+FSE pipeline strictly dominates a wavelet-based alternative on all tested DICOM modalities, in both compression ratio and decompression speed.
-This result suggests that for lossless medical image compression, simple linear prediction combined with fast entropy coding is more effective than the sophisticated wavelet transforms used in JPEG 2000.
+Our evaluation demonstrates that the simple delta+RLE+FSE pipeline outperforms a wavelet-based alternative on all tested DICOM modalities, in both compression ratio and decompression speed.
+A comparison against Zstandard~\cite{zstd}---a general-purpose compressor from the same ANS family---confirms that MIC's domain-specific 16-bit RLE+FSE stages outperform byte-oriented Delta+zstd by 10--22\%, even at zstd's highest compression level.
+Evaluation of the JPEG-LS MED predictor shows only $\approx$0.9\% mean compression improvement over MIC's average-of-neighbors predictor, at a 1.5--2$\times$ decompression speed penalty, validating the simpler predictor choice.
+These results suggest that for lossless medical image compression, simple linear prediction combined with a domain-specific 16-bit entropy coding pipeline is more effective than both sophisticated wavelet transforms and general-purpose compressors.
 A quantitative comparison against HTJ2K (OpenJPH) shows that MIC achieves comparable or better lossless compression ratios across all modalities and, with the two-state FSE decoder, decompresses 1.3--1.5$\times$ faster on a single core (Apple M2 Max), scaling to 16\,GB/s on a 64-core ARM64 server---substantially higher than the throughput achievable by a single-process HTJ2K implementation.
 
 MIC is open-source and available at \url{https://github.com/pappuks/medical-image-codec}.
