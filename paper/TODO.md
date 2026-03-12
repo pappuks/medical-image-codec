@@ -38,9 +38,9 @@ The paper makes a clear, well-scoped contribution: a practical, open-source loss
 
 ## Consider Adding
 
-- [ ] **Delta+zstd baseline** — Compare against running `zstd` directly on the delta-encoded uint16 stream. Since MIC's entropy coder is FSE (the same family as Zstandard), this establishes whether the custom 16-bit RLE+FSE stages add value beyond a general-purpose compressor.
+- [x] **Delta+zstd baseline** — Compare against running `zstd` directly on the delta-encoded uint16 stream. Since MIC's entropy coder is FSE (the same family as Zstandard), this establishes whether the custom 16-bit RLE+FSE stages add value beyond a general-purpose compressor. *(Done: MIC outperforms Delta+zstd-19 by 10–22% on all modalities. See `TestDeltaZstdComparison` and paper Section 8.)*
 
-- [ ] **MED predictor comparison** — The JPEG-LS MED predictor (`median(left, top, left+top-diag)`) is a well-known improvement over avg-of-neighbors. Either benchmark it or cite a reason why the simpler predictor was chosen (simplicity, decompression speed). If avg-of-neighbors produces similar ratios, that is worth noting.
+- [x] **MED predictor comparison** — The JPEG-LS MED predictor (`median(left, top, left+top-diag)`) is a well-known improvement over avg-of-neighbors. Either benchmark it or cite a reason why the simpler predictor was chosen (simplicity, decompression speed). If avg-of-neighbors produces similar ratios, that is worth noting. *(Done: MED yields ~0.9% mean improvement at 1.5–2× decompression speed penalty. Avg predictor retained. See `TestMEDPredictorComparison` and paper Section 9.)*
 
 - [ ] **Browser decoder methodology** — "10–30 M pixels/s in V8" is unverifiable as stated. Add: browser version, platform, which image(s), and how it was measured.
 

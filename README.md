@@ -32,6 +32,8 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 11. [Comparison with HTJ2K](#comparison-with-htj2k)
 12. [Roadmap](#roadmap)
 
+> **New:** [Delta+Zstandard comparison](#comparison-with-deltazstandard) and [MED predictor comparison](#med-predictor-comparison) added — see [Compression Results](#compression-results).
+
 ---
 
 ## Quick Start
@@ -349,6 +351,54 @@ For full details, design decisions, and benchmark methodology see [`docs/native-
 | CR | 3.47× | 3.63× | +4.4% |
 | MG1 | 7.99× | 8.57× | +7.1% |
 | MG2 | 7.98× | 8.55× | +7.1% |
+
+### Comparison with Delta+Zstandard
+
+MIC's entropy coder (FSE) belongs to the same ANS family as [Zstandard](https://facebook.github.io/zstd/). To verify that MIC's custom RLE+FSE stages add value beyond a general-purpose compressor, we delta-encode the raw uint16 stream and compress the byte representation with `zstd` at three levels. A raw+zstd column (no delta) isolates the delta stage's contribution.
+
+| Modality | MIC | d+zstd-1 | d+zstd-3 | d+zstd-19 | raw zstd-3 |
+|----------|:---:|:--------:|:--------:|:---------:|:----------:|
+| MR | **2.35×** | 1.75× | 1.82× | 1.95× | 1.65× |
+| CT | **2.24×** | 1.71× | 1.89× | 2.03× | 1.79× |
+| CR | **3.63×** | 2.70× | 2.95× | 3.27× | 2.05× |
+| XR | **1.74×** | 1.43× | 1.43× | 1.43× | 1.32× |
+| MG1 | **8.57×** | 6.19× | 6.37× | 7.07× | 5.77× |
+| MG2 | **8.55×** | 6.18× | 6.36× | 7.04× | 5.75× |
+| MG3 | **2.29×** | 1.71× | 1.89× | 2.09× | 1.50× |
+| MG4 | **3.47×** | 2.80× | 2.87× | 2.99× | 2.57× |
+
+**Key findings:**
+- MIC outperforms Delta+zstd-19 (ultra compression) on every modality by 10–22%.
+- The advantage is largest on mammography (MG1: 8.57× vs 7.07×) where MIC's 16-bit-aware RLE efficiently encodes long runs of identical residuals that zstd's byte-oriented LZ77 matcher cannot exploit.
+- Removing delta encoding reduces zstd's ratio by 10–44%, confirming delta encoding is essential.
+
+```bash
+go test -run TestDeltaZstdComparison -v
+```
+
+### MED Predictor Comparison
+
+The JPEG-LS MED (Median Edge Detector) predictor `median(left, top, left+top-diag)` adapts to horizontal, vertical, and diagonal edges. MIC uses a simpler `avg(left, top)` predictor. We benchmarked MED through the same RLE+FSE pipeline:
+
+| Modality | Avg (MIC) | MED | Diff |
+|----------|:---------:|:---:|:----:|
+| MR | 2.348× | 2.357× | +0.3% |
+| CT | 2.238× | 2.306× | +3.1% |
+| CR | 3.628× | 3.632× | +0.1% |
+| XR | 1.738× | 1.734× | −0.2% |
+| MG1 | 8.566× | 8.690× | +1.5% |
+| MG2 | 8.553× | 8.678× | +1.5% |
+| MG3 | 2.289× | 2.356× | +2.9% |
+| MG4 | 3.474× | 3.415× | −1.7% |
+
+**Key findings:**
+- MED gives modest improvements on some modalities (CT: +3.1%, MG3: +2.9%) but slight losses on others (XR: −0.2%, MG4: −1.7%). Geometric mean improvement: ~0.9%.
+- MED decompression is ~1.5–2× slower due to the diagonal pixel dependency, which prevents the branch-free interior loop optimization.
+- The simpler avg predictor is justified: marginal ratio gain does not offset the decompression speed penalty.
+
+```bash
+go test -run TestMEDPredictorComparison -v
+```
 
 ### Wavelet+FSE vs Delta+RLE+FSE
 
