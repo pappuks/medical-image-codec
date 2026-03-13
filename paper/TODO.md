@@ -10,13 +10,50 @@ The paper makes a clear, well-scoped contribution: a practical, open-source loss
 - The wavelet comparison is a useful negative result that strengthens the case for the chosen pipeline.
 - The MIC2/MIC3 container formats are practical and well-specified.
 
-**Blocking issues before submission:** the HTJ2K comparison methodology is not apples-to-apples (subprocess overhead vs. in-process library), and the wavelet comparison needs more implementation detail to support the "strictly dominates" claim. A JPEG-LS comparison is also expected by reviewers given JPEG-LS is a primary DICOM lossless standard.
+**Blocking issues before submission:** ~~the HTJ2K comparison methodology is not apples-to-apples (subprocess overhead vs. in-process library)~~ *(resolved: re-benchmarked in-process via CGO; HTJ2K is actually ~1.8× faster than MIC single-threaded; paper claims must be corrected)*, and the wavelet comparison needs more implementation detail to support the "strictly dominates" claim. A JPEG-LS comparison is also expected by reviewers given JPEG-LS is a primary DICOM lossless standard.
 
 ---
 
 ## Must Fix (Methodology)
 
-- [ ] **HTJ2K comparison fairness** *(Section 5.4)* — MIC timings are in-process library calls; HTJ2K timings include subprocess launch, PGM I/O, and codestream I/O overhead (~6 ms per call). Even for a 27 MB image, 6 ms at 225 MB/s represents ~27% inflation of apparent HTJ2K latency. Re-benchmark using OpenJPH as a library (it has a C API) or a harness that eliminates subprocess/I/O overhead. The 1.3–1.5× speedup claim in the abstract depends on a fair comparison.
+- [x] **HTJ2K comparison fairness** *(Section 5.4)* — MIC timings are in-process library calls; HTJ2K timings include subprocess launch, PGM I/O, and codestream I/O overhead (~6 ms per call). Even for a 27 MB image, 6 ms at 225 MB/s represents ~27% inflation of apparent HTJ2K latency. Re-benchmark using OpenJPH as a library (it has a C API) or a harness that eliminates subprocess/I/O overhead. The 1.3–1.5× speedup claim in the abstract depends on a fair comparison.
+
+  *(Done: Re-benchmarked using OpenJPH as an in-process library via CGO with mem_infile/mem_outfile — no subprocess launch, no disk I/O. Results show HTJ2K (OpenJPH) is actually ~1.8× faster than MIC at single-threaded decompression when measured fairly. The original 1.3–1.5× MIC advantage was entirely due to subprocess overhead inflating HTJ2K timings. MIC still achieves comparable or slightly better compression ratios on most modalities (notably CT: 2.24× vs 1.77×), but the decompression speed advantage claim must be retracted. MIC's value proposition is now: (a) competitive compression ratios, (b) very simple pipeline amenable to parallel scaling (16 GB/s on 64 cores for mammography), (c) purpose-built for 16-bit DICOM with no external dependencies. See `ojph/htj2k_fair_comparison_test.go` and `BenchmarkHTJ2KFairDecomp`.)*
+
+  **Fair comparison results (single-threaded, in-process):**
+
+  | Image | MIC ratio | HTJ2K ratio | MIC decomp (ms) | HTJ2K decomp (ms) | HTJ2K speedup |
+  |-------|-----------|-------------|------------------|--------------------|---------------|
+  | MR    | 2.35      | 2.38        | 0.61             | 0.38               | 1.6×          |
+  | CT    | 2.24      | 1.77        | 3.69             | 1.93               | 1.9×          |
+  | CR    | 3.63      | 3.77        | 38.82            | 22.09              | 1.8×          |
+  | XR    | 1.74      | 1.67        | 54.63            | 33.66              | 1.6×          |
+  | MG1   | 8.57      | 8.25        | 30.47            | 15.10              | 2.0×          |
+  | MG2   | 8.55      | 8.24        | 30.30            | 15.54              | 2.0×          |
+  | MG3   | 2.24      | 2.22        | 154.45           | 88.39              | 1.7×          |
+  | MG4   | 3.47      | 3.51        | 98.25            | 55.65              | 1.8×          |
+  | **Geo mean** | | | | | **1.8×** |
+
+  **Follow-up: MIC ported to C (same algorithm, C implementation via CGO):**
+
+  Porting the MIC decompression pipeline (FSE two-state + RLE + Delta) to C closes
+  ~60% of the gap with HTJ2K. The C version is 1.56× faster than Go, and within
+  0.87× of HTJ2K (i.e., HTJ2K is only ~15% faster than MIC-C, vs ~80% faster than
+  MIC-Go). On CR and MG3, MIC-C matches HTJ2K. The remaining gap is likely due to
+  HTJ2K's SIMD-optimized wavelet/block decoder vs MIC's scalar RLE+delta.
+  See `ojph/mic_decompress_c.{h,c}`, `ojph/mic_c.go`, and `TestThreeWayComparison`.
+
+  | Image | Go (MB/s) | C (MB/s) | HTJ2K (MB/s) | C/Go | C/HTJ2K |
+  |-------|-----------|----------|--------------|------|---------|
+  | MR    | 137       | 252      | 266          | 1.6× | 0.94×   |
+  | CT    | 103       | 197      | 239          | 1.6× | 0.84×   |
+  | CR    | 151       | 319      | 329          | 1.8× | 0.99×   |
+  | XR    | 158       | 292      | 303          | 1.5× | 0.97×   |
+  | MG1   | 314       | 466      | 636          | 1.5× | 0.71×   |
+  | MG2   | 300       | 452      | 595          | 1.5× | 0.75×   |
+  | MG3   | 169       | 306      | 318          | 1.6× | 1.01×   |
+  | MG4   | 273       | 403      | 462          | 1.5× | 0.83×   |
+  | **Geo mean** | | | | **1.56×** | **0.87×** |
 
 - [ ] **Wavelet implementation details** *(Section 6)* — The wavelet pipeline is described in ~one paragraph. State: (a) number of decomposition levels applied, (b) subband scan order for RLE input (standard LL, HL, LH, HH?), (c) whether it received comparable optimization effort to the delta pipeline. The result that wavelet+RLE+FSE underperforms delta+RLE+FSE on compression ratio is surprising — JPEG 2000 routinely beats simple delta coders. If only one decomposition level is used, this would explain the gap and must be stated explicitly.
 
