@@ -93,10 +93,14 @@ func FSEDecompressU16TwoState(b []byte, s *ScratchU16) ([]uint16, error) {
 	return s.OutU16, nil
 }
 
-// FSEDecompressU16Auto auto-detects the stream format:
-// if the stream starts with [0xFF, 0x02] it uses the two-state decoder,
-// otherwise falls back to the single-state decoder.
+// FSEDecompressU16Auto auto-detects the stream format based on the magic prefix:
+//   [0xFF, 0x04] → four-state decoder
+//   [0xFF, 0x02] → two-state decoder
+//   otherwise   → single-state decoder
 func FSEDecompressU16Auto(b []byte, s *ScratchU16) ([]uint16, error) {
+	if len(b) >= 2 && b[0] == fourStateMagic0 && b[1] == fourStateMagic1 {
+		return FSEDecompressU16FourState(b, s)
+	}
 	if len(b) >= 2 && b[0] == twoStateMagic0 && b[1] == twoStateMagic1 {
 		return FSEDecompressU16TwoState(b, s)
 	}

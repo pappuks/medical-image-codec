@@ -8,6 +8,23 @@ package mic
 
 import "unsafe"
 
+// fse4StateDecompKernel is the AMD64 assembly hot loop for 4-state FSE decode.
+// Uses BMI2 SHLXQ/SHRXQ for fast bit extraction and avoids bounds checks.
+// Only valid for the non-zeroBits path (all nbBits > 0).
+// Returns the number of symbols written to out.
+//
+//go:noescape
+func fse4StateDecompKernel(dt, br, states, out unsafe.Pointer, count int) int
+
+// fse4StateDecompNative dispatches to the AMD64 assembly kernel when AVX2/BMI2
+// is available (Haswell+). Falls back to 0 (no-op) so caller uses pure Go.
+func fse4StateDecompNative(dt, br, states, out unsafe.Pointer, count int) int {
+	if cpuHasAVX2 {
+		return fse4StateDecompKernel(dt, br, states, out, count)
+	}
+	return 0
+}
+
 var (
 	cpuHasSSSE3 bool
 	cpuHasAVX2  bool
