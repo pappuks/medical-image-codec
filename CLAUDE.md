@@ -34,6 +34,12 @@ go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkWSICompress mic
 
 # Run all benchmarks
 go test -bench=. -benchtime=10x
+
+# HTJ2K comparison (requires OpenJPH + CGO, uses build tag)
+go test -tags cgo_ojph -run TestHTJ2KFairComparison -v ./ojph/ -timeout 300s
+go test -tags cgo_ojph -run TestFourWayComparison -v ./ojph/ -timeout 300s
+go test -tags cgo_ojph -run TestMICCorrectnessSIMD -v ./ojph/
+go test -tags cgo_ojph -run=^$ -bench BenchmarkThreeWay ./ojph/ -benchtime=10x
 ```
 
 ## Architecture
@@ -193,6 +199,24 @@ Key files:
 | `wsi_test.go` | WSI tests: color transform, tiles, full roundtrip, benchmarks |
 
 Key functions: `CompressWSI`, `DecompressWSITile`, `DecompressWSIRegion`, `ReadWSIHeader`, `YCoCgRForward`/`YCoCgRInverse`.
+
+### HTJ2K Comparison / ojph Package (build tag: `cgo_ojph`)
+
+The `ojph/` package provides in-process benchmarking against HTJ2K via OpenJPH CGO bindings, plus a C implementation of MIC decompression (scalar + SSE2/AVX2 SIMD). Gated behind the `cgo_ojph` build tag — skipped by default in `go build ./...` and `go test ./...`.
+
+| File | Purpose |
+|------|---------|
+| `ojph/ojph.go` | OpenJPH CGO bindings: `CompressU16`, `DecompressU16` |
+| `ojph/ojph_wrapper.cpp` | C++ wrapper calling OpenJPH `codestream` API |
+| `ojph/mic_decompress_c.c` | C implementation of MIC decompression (scalar + SIMD two-pass) |
+| `ojph/mic_decompress_c.h` | C header for MIC decompression functions |
+| `ojph/mic_c.go` | Go CGO bindings for MIC-C and MIC-SIMD decompression |
+| `ojph/htj2k_fair_comparison_test.go` | Fair in-process MIC vs HTJ2K comparison test + benchmark |
+| `ojph/mic_c_test.go` | Correctness tests, four-way comparison (MIC-Go vs MIC-C vs MIC-SIMD vs HTJ2K) |
+
+Key functions: `CompressU16`, `DecompressU16` (HTJ2K), `MICDecompressTwoStateC`, `MICDecompressTwoStateSIMD` (MIC-C).
+
+Full details: [`docs/htj2k-performance-comparison.md`](./docs/htj2k-performance-comparison.md).
 
 Per-plane encoding modes: `planeConstantZero` (1 byte), `planeConstant` (3 bytes: mode + uint16), `planeCompressed` (CompressSingleFrame), `planeRaw` (fallback for incompressible data).
 

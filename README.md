@@ -30,8 +30,9 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 9. [Browser Decoder](#browser-decoder)
 10. [CLI Reference](#cli-reference)
 11. [Comparison with HTJ2K](#comparison-with-htj2k)
-12. [Design Background](#design-background)
-13. [Roadmap](#roadmap)
+12. [Fair In-Process HTJ2K Comparison](#fair-in-process-htj2k-comparison)
+13. [Design Background](#design-background)
+14. [Roadmap](#roadmap)
 
 > **New:** [Delta+Zstandard comparison](#comparison-with-deltazstandard) and [MED predictor comparison](#med-predictor-comparison) added — see [Compression Results](#compression-results).
 
@@ -596,6 +597,41 @@ go test -run TestHTJ2KComparison -v -timeout 300s
 
 ---
 
+## Fair In-Process HTJ2K Comparison
+
+The `ojph/` package provides a fair in-process comparison framework where **both MIC and HTJ2K run as library calls** — no subprocess launch, no file I/O, no temp files. HTJ2K uses [OpenJPH](https://github.com/aous72/OpenJPH) via CGO with in-memory buffers (`mem_infile`/`mem_outfile`).
+
+The package also includes a C implementation of the MIC decompression pipeline (scalar and SSE2/AVX2 SIMD-optimized) for a four-way cross-language comparison.
+
+### Build Requirements
+
+The `ojph/` package requires `libopenjph` and is gated behind the `cgo_ojph` build tag. Without the tag, `go build ./...` and `go test ./...` skip it entirely.
+
+```bash
+# Run the fair comparison (requires OpenJPH installed)
+go test -tags cgo_ojph -run TestHTJ2KFairComparison -v ./ojph/ -timeout 300s
+
+# Four-way comparison: MIC-Go vs MIC-C vs MIC-SIMD vs HTJ2K
+go test -tags cgo_ojph -run TestFourWayComparison -v ./ojph/ -timeout 300s
+
+# Verify SIMD correctness (all test images)
+go test -tags cgo_ojph -run TestMICCorrectnessSIMD -v ./ojph/
+
+# Go benchmarks for all decompressors
+go test -tags cgo_ojph -run=^$ -bench BenchmarkThreeWay ./ojph/ -benchtime=10x
+```
+
+### MIC-C SIMD Architecture
+
+The C SIMD decompression uses a two-pass architecture to maximize vectorization:
+
+1. **Pass 1 — RLE decode**: SSE2/AVX2 broadcast fills for same-runs, SIMD bulk copies for diff-runs
+2. **Pass 2 — Delta decode**: SIMD delimiter scanning (`_mm_cmpeq_epi16` + `_mm_movemask_epi8`) and batch top-row preloading; the left-neighbor dependency remains serial
+
+For full details, design decisions, and file inventory see [`docs/htj2k-performance-comparison.md`](./docs/htj2k-performance-comparison.md).
+
+---
+
 ## Design Background
 
 Two design choices in MIC deserve deeper motivation than the README can provide:
@@ -617,6 +653,7 @@ Full discussion: [**docs/16bit-alphabet-entropy-coding.md**](./docs/16bit-alphab
 - [x] Whole Slide Imaging (WSI) — MIC3 tiled container with YCoCg-R color transform, pyramid levels, parallel tile compression, browser RGB viewer with level selector
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [x] Left+Up average predictor — implemented from [Klaus Post's feedback](https://github.com/pappuks/medical-image-codec/issues/1); avg(left, top) replaces pure-left prediction in the main Delta+RLE+FSE pipeline
+- [x] Fair in-process HTJ2K comparison — `ojph/` package with OpenJPH CGO bindings, MIC-C scalar/SIMD decompressor, four-way benchmark (MIC-Go vs MIC-C vs MIC-SIMD vs HTJ2K) — see [`docs/htj2k-performance-comparison.md`](./docs/htj2k-performance-comparison.md)
 - [ ] Gap removal for sparse value distributions (XR images) — bitmap to collapse unused symbols before FSE; estimated 15–20% size reduction for XR modality
 - [ ] Dynamic prediction switching (every 32 pixels) — adaptive selection between left, top, avg predictors; ~5% CT improvement in Klaus's experiments
 - [ ] Paeth filtering — PNG-style predictor; marginal gain (~1–3%) over current avg predictor, low priority
