@@ -2,6 +2,8 @@
 // This source code is licensed under a MIT-style
 // license that can be found in the LICENSE file.
 
+//go:build cgo_ojph
+
 // mic_c_test.go — Correctness test and 3-way benchmark: MIC-Go vs MIC-C vs HTJ2K.
 package ojph
 

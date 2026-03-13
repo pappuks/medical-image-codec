@@ -2,6 +2,8 @@
 // This source code is licensed under a MIT-style
 // license that can be found in the LICENSE file.
 
+//go:build cgo_ojph
+
 // mic_c.go — CGO bindings for the C implementation of MIC decompression.
 // This allows benchmarking the MIC pipeline in C vs Go vs HTJ2K.
 package ojph

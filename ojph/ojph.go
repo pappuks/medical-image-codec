@@ -2,6 +2,8 @@
 // This source code is licensed under a MIT-style
 // license that can be found in the LICENSE file.
 
+//go:build cgo_ojph
+
 // Package ojph provides CGO bindings for OpenJPH in-process HTJ2K compress/decompress.
 // This eliminates subprocess overhead for fair benchmarking against MIC.
 //

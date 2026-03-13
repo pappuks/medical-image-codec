@@ -2,6 +2,8 @@
 // This source code is licensed under a MIT-style
 // license that can be found in the LICENSE file.
 
+//go:build cgo_ojph
+
 // Fair HTJ2K Comparison Framework (In-Process)
 //
 // Compares MIC (Delta+RLE+FSE two-state) against HTJ2K (lossless) using OpenJPH

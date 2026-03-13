@@ -1,3 +1,5 @@
+//go:build cgo_ojph
+
 package ojph
 
 import (
