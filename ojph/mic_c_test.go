@@ -58,6 +58,54 @@ func loadTestImage(ti testImage) ([]byte, []uint16, uint16, int, int) {
 	return byteData, shortData, maxShort, nativeFrame.Cols, nativeFrame.Rows
 }
 
+// TestMICCorrectnessSIMD verifies the SIMD decompression matches original pixels.
+func TestMICCorrectnessSIMD(t *testing.T) {
+	for _, ti := range testImages {
+		t.Run(ti.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := loadTestImage(ti)
+			if len(shortData) == 0 {
+				t.Skip("could not load image")
+			}
+
+			// Compress with Go
+			var drc mic.DeltaRleCompressU16
+			deltaComp, err := drc.Compress(shortData, cols, rows, maxShort)
+			if err != nil {
+				t.Fatalf("compress: %v", err)
+			}
+			var s mic.ScratchU16
+			fseComp, err := mic.FSECompressU16TwoState(deltaComp, &s)
+			if err != nil {
+				t.Fatalf("FSE compress: %v", err)
+			}
+
+			// Decompress with SIMD
+			simdPixels, err := MICDecompressTwoStateSIMD(fseComp, cols, rows)
+			if err != nil {
+				t.Fatalf("SIMD decompress: %v", err)
+			}
+
+			// Compare against original
+			if len(simdPixels) != len(shortData) {
+				t.Fatalf("length mismatch: SIMD=%d, orig=%d", len(simdPixels), len(shortData))
+			}
+			mismatches := 0
+			for i := range shortData {
+				if simdPixels[i] != shortData[i] {
+					if mismatches < 10 {
+						t.Errorf("pixel %d: SIMD=%d, orig=%d", i, simdPixels[i], shortData[i])
+					}
+					mismatches++
+				}
+			}
+			if mismatches > 0 {
+				t.Fatalf("%d pixel mismatches out of %d", mismatches, len(shortData))
+			}
+			t.Logf("OK: %s (%dx%d) — all %d pixels match", ti.name, cols, rows, len(shortData))
+		})
+	}
+}
+
 // TestMICCorrrectnessC verifies the C decompression matches Go decompression.
 func TestMICCorrectnessC(t *testing.T) {
 	for _, ti := range testImages {
@@ -123,8 +171,8 @@ func TestMICCorrectnessC(t *testing.T) {
 	}
 }
 
-// TestThreeWayComparison prints a side-by-side comparison table: MIC-Go vs MIC-C vs HTJ2K.
-func TestThreeWayComparison(t *testing.T) {
+// TestFourWayComparison prints a side-by-side comparison table: MIC-Go vs MIC-C vs MIC-SIMD vs HTJ2K.
+func TestFourWayComparison(t *testing.T) {
 	const decompRuns = 10
 
 	type result struct {
@@ -135,6 +183,7 @@ func TestThreeWayComparison(t *testing.T) {
 		htj2kRatio    float64
 		goDecompMs    float64
 		cDecompMs     float64
+		simdDecompMs  float64
 		htj2kDecompMs float64
 	}
 
@@ -181,7 +230,7 @@ func TestThreeWayComparison(t *testing.T) {
 			}
 		}
 
-		// Benchmark MIC-C decompress
+		// Benchmark MIC-C (scalar) decompress
 		cMin := time.Duration(math.MaxInt64)
 		for i := 0; i < decompRuns; i++ {
 			start := time.Now()
@@ -189,6 +238,17 @@ func TestThreeWayComparison(t *testing.T) {
 			elapsed := time.Since(start)
 			if elapsed < cMin {
 				cMin = elapsed
+			}
+		}
+
+		// Benchmark MIC-C-SIMD decompress
+		simdMin := time.Duration(math.MaxInt64)
+		for i := 0; i < decompRuns; i++ {
+			start := time.Now()
+			MICDecompressTwoStateSIMD(fseComp, cols, rows)
+			elapsed := time.Since(start)
+			if elapsed < simdMin {
+				simdMin = elapsed
 			}
 		}
 
@@ -212,50 +272,52 @@ func TestThreeWayComparison(t *testing.T) {
 			htj2kRatio:    htj2kRatio,
 			goDecompMs:    float64(goMin.Microseconds()) / 1000.0,
 			cDecompMs:     float64(cMin.Microseconds()) / 1000.0,
+			simdDecompMs:  float64(simdMin.Microseconds()) / 1000.0,
 			htj2kDecompMs: float64(htj2kMin.Microseconds()) / 1000.0,
 		})
 	}
 
 	fmt.Println()
-	fmt.Println("=== Three-Way Comparison: MIC-Go vs MIC-C vs HTJ2K (All In-Process) ===")
+	fmt.Println("=== Four-Way Comparison: MIC-Go vs MIC-C vs MIC-SIMD vs HTJ2K (All In-Process) ===")
 	fmt.Println()
-	fmt.Printf("Decompression: best of %d runs. All codecs in-process, no subprocess or I/O overhead.\n", decompRuns)
+	fmt.Printf("Decompression: best of %d runs. All codecs in-process.\n", decompRuns)
 	fmt.Println()
 
-	fmt.Printf("%-6s  %9s  %7s  %7s  %10s  %10s  %10s  %9s  %9s  %9s  %7s  %7s\n",
+	fmt.Printf("%-6s  %9s  %7s  %7s  %10s  %10s  %10s  %10s  %9s  %9s  %9s  %9s  %8s  %8s\n",
 		"Image", "Orig(MB)", "MIC-r", "HTJ2K-r",
-		"Go-d(ms)", "C-d(ms)", "HTJ2K-d(ms)",
-		"Go GB/s", "C GB/s", "HTJ2K GB/s",
-		"C/Go", "C/HTJ2K")
-	sep := "------  ---------  -------  -------  ----------  ----------  ----------  ---------  ---------  ----------  -------  -------"
+		"Go(ms)", "C(ms)", "SIMD(ms)", "HTJ2K(ms)",
+		"Go GB/s", "C GB/s", "SIMD GB/s", "HTJ2K GB/s",
+		"SIMD/C", "SIMD/HTJ2K")
+	sep := "------  ---------  -------  -------  ----------  ----------  ----------  ----------  ---------  ---------  ---------  ----------  --------  --------"
 	fmt.Println(sep)
 
-	var geoGoC, geoCHTJ2K float64
+	var geoSimdC, geoSimdHTJ2K float64
 	count := 0
 
 	for _, r := range results {
 		origMB := float64(r.origBytes) / (1 << 20)
 		goGBs := (float64(r.origBytes) / (1 << 30)) / (r.goDecompMs / 1000.0)
 		cGBs := (float64(r.origBytes) / (1 << 30)) / (r.cDecompMs / 1000.0)
+		simdGBs := (float64(r.origBytes) / (1 << 30)) / (r.simdDecompMs / 1000.0)
 		htj2kGBs := (float64(r.origBytes) / (1 << 30)) / (r.htj2kDecompMs / 1000.0)
-		cOverGo := cGBs / goGBs
-		cOverHTJ2K := cGBs / htj2kGBs
+		simdOverC := simdGBs / cGBs
+		simdOverHTJ2K := simdGBs / htj2kGBs
 
-		fmt.Printf("%-6s  %9.2f  %7.2f  %7.2f  %10.2f  %10.2f  %10.2f  %9.2f  %9.2f  %10.2f  %7.2fx  %7.2fx\n",
+		fmt.Printf("%-6s  %9.2f  %7.2f  %7.2f  %10.2f  %10.2f  %10.2f  %10.2f  %9.2f  %9.2f  %9.2f  %10.2f  %8.2fx  %8.2fx\n",
 			r.name, origMB, r.micRatio, r.htj2kRatio,
-			r.goDecompMs, r.cDecompMs, r.htj2kDecompMs,
-			goGBs, cGBs, htj2kGBs,
-			cOverGo, cOverHTJ2K)
+			r.goDecompMs, r.cDecompMs, r.simdDecompMs, r.htj2kDecompMs,
+			goGBs, cGBs, simdGBs, htj2kGBs,
+			simdOverC, simdOverHTJ2K)
 
-		geoGoC += math.Log(cOverGo)
-		geoCHTJ2K += math.Log(cOverHTJ2K)
+		geoSimdC += math.Log(simdOverC)
+		geoSimdHTJ2K += math.Log(simdOverHTJ2K)
 		count++
 	}
 	fmt.Println(sep)
 	if count > 0 {
 		fmt.Printf("\nGeometric mean speedups:\n")
-		fmt.Printf("  MIC-C vs MIC-Go:  %.2fx\n", math.Exp(geoGoC/float64(count)))
-		fmt.Printf("  MIC-C vs HTJ2K:   %.2fx\n", math.Exp(geoCHTJ2K/float64(count)))
+		fmt.Printf("  MIC-SIMD vs MIC-C-scalar:  %.2fx\n", math.Exp(geoSimdC/float64(count)))
+		fmt.Printf("  MIC-SIMD vs HTJ2K:         %.2fx\n", math.Exp(geoSimdHTJ2K/float64(count)))
 	}
 }
 
@@ -302,6 +364,15 @@ func BenchmarkThreeWay(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				MICDecompressTwoStateC(fseComp, cols, rows)
+			}
+			b.ReportMetric(micRatio, "ratio")
+		})
+
+		b.Run("MIC-SIMD/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				MICDecompressTwoStateSIMD(fseComp, cols, rows)
 			}
 			b.ReportMetric(micRatio, "ratio")
 		})

@@ -24,6 +24,11 @@ extern "C" {
 int mic_decompress_two_state(const uint8_t *compressed, size_t compressed_len,
                              uint16_t *pixels_out, int width, int height);
 
+// SIMD-optimized version (SSE2/AVX2). Same interface as above.
+// Uses two-pass architecture: RLE decode with SIMD fills, then SIMD delta decode.
+int mic_decompress_two_state_simd(const uint8_t *compressed, size_t compressed_len,
+                                   uint16_t *pixels_out, int width, int height);
+
 #ifdef __cplusplus
 }
 #endif

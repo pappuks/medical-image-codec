@@ -7,6 +7,7 @@
 package ojph
 
 /*
+#cgo CFLAGS: -O2 -msse2 -mavx2
 #include "mic_decompress_c.h"
 */
 import "C"
@@ -27,6 +28,22 @@ func MICDecompressTwoStateC(compressed []byte, width, height int) ([]uint16, err
 	)
 	if rc != 0 {
 		return nil, fmt.Errorf("mic_decompress_two_state failed: rc=%d", rc)
+	}
+	return pixels, nil
+}
+
+// MICDecompressTwoStateSIMD decompresses using the SIMD-optimized C implementation.
+func MICDecompressTwoStateSIMD(compressed []byte, width, height int) ([]uint16, error) {
+	pixels := make([]uint16, width*height)
+
+	rc := C.mic_decompress_two_state_simd(
+		(*C.uint8_t)(unsafe.Pointer(&compressed[0])),
+		C.size_t(len(compressed)),
+		(*C.uint16_t)(unsafe.Pointer(&pixels[0])),
+		C.int(width), C.int(height),
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("mic_decompress_two_state_simd failed: rc=%d", rc)
 	}
 	return pixels, nil
 }

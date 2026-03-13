@@ -539,6 +539,244 @@ static void rle_delta_decompress(const uint16_t *rle_in, int rle_len,
 }
 
 // ---------------------------------------------------------------------------
+// SIMD-optimized RLE decode (pass 1 of two-pass architecture)
+// ---------------------------------------------------------------------------
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+
+static void rle_decode_simd(const uint16_t *rle_in, int rle_len,
+                            uint16_t *out, int out_len) {
+    uint16_t delim_value = rle_in[0];
+    int bit_depth = 0;
+    {
+        uint16_t v = delim_value;
+        while (v > 0) { bit_depth++; v >>= 1; }
+    }
+    if (bit_depth == 0) bit_depth = 1;
+    uint16_t mid_count = (uint16_t)((1 << (bit_depth - 1)) - 1);
+
+    int ri = 1;
+    int oi = 0;
+
+    while (oi < out_len && ri < rle_len) {
+        uint16_t c = rle_in[ri++];
+        if (c <= mid_count) {
+            // Same run
+            uint16_t val = rle_in[ri++];
+            int run_len = (int)c;
+            if (oi + run_len > out_len) run_len = out_len - oi;
+
+            // SIMD fill for runs >= 8
+            if (run_len >= 8) {
+                __m128i vfill = _mm_set1_epi16((short)val);
+                int i = 0;
+#ifdef __AVX2__
+                __m256i vfill256 = _mm256_set1_epi16((short)val);
+                for (; i + 16 <= run_len; i += 16) {
+                    _mm256_storeu_si256((__m256i *)(out + oi + i), vfill256);
+                }
+#endif
+                for (; i + 8 <= run_len; i += 8) {
+                    _mm_storeu_si128((__m128i *)(out + oi + i), vfill);
+                }
+                for (; i < run_len; i++) {
+                    out[oi + i] = val;
+                }
+            } else {
+                for (int i = 0; i < run_len; i++) {
+                    out[oi + i] = val;
+                }
+            }
+            oi += run_len;
+        } else {
+            // Diff run
+            int run_len = (int)(c - mid_count);
+            if (oi + run_len > out_len) run_len = out_len - oi;
+
+            // SIMD copy for runs >= 8
+            if (run_len >= 8) {
+                int i = 0;
+#ifdef __AVX2__
+                for (; i + 16 <= run_len; i += 16) {
+                    __m256i v = _mm256_loadu_si256((const __m256i *)(rle_in + ri + i));
+                    _mm256_storeu_si256((__m256i *)(out + oi + i), v);
+                }
+#endif
+                for (; i + 8 <= run_len; i += 8) {
+                    __m128i v = _mm_loadu_si128((const __m128i *)(rle_in + ri + i));
+                    _mm_storeu_si128((__m128i *)(out + oi + i), v);
+                }
+                for (; i < run_len; i++) {
+                    out[oi + i] = rle_in[ri + i];
+                }
+            } else {
+                for (int i = 0; i < run_len; i++) {
+                    out[oi + i] = rle_in[ri + i];
+                }
+            }
+            ri += run_len;
+            oi += run_len;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SIMD-optimized Delta decode (pass 2 of two-pass architecture)
+// ---------------------------------------------------------------------------
+static void delta_decode_simd(const uint16_t *deltas, int delta_len,
+                              uint16_t *pixels, int width, int height) {
+    // First symbol is image_max_value (consumed, not output)
+    uint16_t image_max_value = deltas[0];
+    int img_depth = 0;
+    {
+        uint16_t v = image_max_value;
+        while (v > 0) { img_depth++; v >>= 1; }
+    }
+    if (img_depth == 0) img_depth = 1;
+    uint16_t delta_threshold = (uint16_t)((1 << (img_depth - 1)) - 1);
+    uint16_t delimiter = (uint16_t)((1 << img_depth) - 1);
+
+    int di = 1; // skip image_max_value
+
+    // Top-left corner
+    {
+        uint16_t input_val = deltas[di++];
+        if (input_val == delimiter) {
+            pixels[0] = deltas[di++];
+        } else {
+            pixels[0] = (uint16_t)((int32_t)input_val - (int32_t)delta_threshold);
+        }
+    }
+
+    // First row: left-neighbor only prediction
+    for (int x = 1; x < width; x++) {
+        uint16_t input_val = deltas[di++];
+        if (input_val == delimiter) {
+            pixels[x] = deltas[di++];
+        } else {
+            int32_t diff = (int32_t)input_val - (int32_t)delta_threshold;
+            pixels[x] = (uint16_t)((int32_t)pixels[x - 1] + diff);
+        }
+    }
+
+    // Remaining rows: avg(left, top) prediction
+    // The left-neighbor dependency is inherently serial within a row.
+    // However, we can use SIMD to:
+    // 1. Pre-load top row values in bulk
+    // 2. Check for delimiter values in bulk to find non-overflow stretches
+    // 3. Process non-overflow runs more efficiently
+    const __m128i vdelim = _mm_set1_epi16((short)delimiter);
+    const __m128i vthresh = _mm_set1_epi16((short)delta_threshold);
+
+    for (int y = 1; y < height; y++) {
+        int row_start = y * width;
+
+        // x=0: top-only prediction
+        {
+            uint16_t input_val = deltas[di++];
+            if (input_val == delimiter) {
+                pixels[row_start] = deltas[di++];
+            } else {
+                int32_t diff = (int32_t)input_val - (int32_t)delta_threshold;
+                pixels[row_start] = (uint16_t)((int32_t)pixels[row_start - width] + diff);
+            }
+        }
+
+        // Interior: scan for delimiter-free stretches and batch process
+        int x = 1;
+        while (x < width) {
+            // Check how many consecutive non-delimiter values we have
+            int run_start = x;
+            int run_di = di;
+
+            // Use SIMD to scan for delimiters in batches of 8
+            while (x + 8 <= width) {
+                __m128i vals = _mm_loadu_si128((const __m128i *)(deltas + di));
+                __m128i cmp = _mm_cmpeq_epi16(vals, vdelim);
+                int mask = _mm_movemask_epi8(cmp);
+                if (mask != 0) {
+                    // Found a delimiter in this batch — find where
+                    int first_delim = __builtin_ctz(mask) / 2;
+                    x += first_delim;
+                    di += first_delim;
+                    break;
+                }
+                x += 8;
+                di += 8;
+            }
+
+            // Also check remaining scalars
+            if (x < width && x == run_start + ((x - run_start) & ~7)) {
+                // We exited the SIMD loop without finding a delimiter
+                while (x < width && deltas[di] != delimiter) {
+                    x++;
+                    di++;
+                }
+            }
+
+            int run_len = x - run_start;
+
+            // Process the delimiter-free run
+            if (run_len > 0) {
+                // For this run, all values are non-delimiter deltas
+                // pred = (left + top) >> 1; pixel = pred + diff
+                // diff = input_val - delta_threshold
+                //
+                // We can precompute top>>1 with SIMD and store diffs with SIMD,
+                // but left dependency is serial. Still, reducing memory loads helps.
+                const uint16_t *top_row = pixels + row_start - width;
+                int xi = run_start;
+                int dii = run_di;
+
+                // Process in SIMD batches: preload top values and compute diffs
+                while (xi + 8 <= run_start + run_len) {
+                    // Load 8 top values and 8 delta values with SIMD
+                    __m128i vtop = _mm_loadu_si128((const __m128i *)(top_row + xi));
+                    __m128i vdelta = _mm_loadu_si128((const __m128i *)(deltas + dii));
+
+                    // Compute diff = delta - threshold (signed)
+                    __m128i vdiff = _mm_sub_epi16(vdelta, vthresh);
+
+                    // Store precomputed values for serial left-dep loop
+                    uint16_t top_vals[8];
+                    int16_t diff_vals[8];
+                    _mm_storeu_si128((__m128i *)top_vals, vtop);
+                    _mm_storeu_si128((__m128i *)diff_vals, vdiff);
+
+                    for (int k = 0; k < 8; k++) {
+                        int32_t left = (int32_t)pixels[row_start + xi + k - 1];
+                        int32_t top = (int32_t)top_vals[k];
+                        int32_t pred = (left + top) >> 1;
+                        pixels[row_start + xi + k] = (uint16_t)(pred + (int32_t)diff_vals[k]);
+                    }
+                    xi += 8;
+                    dii += 8;
+                }
+                // Scalar tail
+                for (; xi < run_start + run_len; xi++, dii++) {
+                    int idx = row_start + xi;
+                    int32_t diff = (int32_t)deltas[dii] - (int32_t)delta_threshold;
+                    int32_t pred = ((int32_t)pixels[idx - 1] + (int32_t)pixels[idx - width]) >> 1;
+                    pixels[idx] = (uint16_t)(pred + diff);
+                }
+            }
+
+            // Handle delimiter (overflow) if we stopped at one
+            if (x < width && deltas[di] == delimiter) {
+                di++; // skip delimiter
+                pixels[row_start + x] = deltas[di++]; // raw value
+                x++;
+            }
+        }
+    }
+}
+
+#else
+// Non-x86 fallback: just use the scalar rle_delta_decompress
+#define NO_SIMD_AVAILABLE 1
+#endif
+
+// ---------------------------------------------------------------------------
 // Public API: full MIC two-state decompress
 // ---------------------------------------------------------------------------
 int mic_decompress_two_state(const uint8_t *compressed, size_t compressed_len,
@@ -604,4 +842,81 @@ int mic_decompress_two_state(const uint8_t *compressed, size_t compressed_len,
 
     free(rle_out);
     return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: SIMD-optimized MIC two-state decompress
+// ---------------------------------------------------------------------------
+int mic_decompress_two_state_simd(const uint8_t *compressed, size_t compressed_len,
+                                   uint16_t *pixels_out, int width, int height) {
+#if defined(NO_SIMD_AVAILABLE)
+    // Fallback to scalar on non-x86
+    return mic_decompress_two_state(compressed, compressed_len,
+                                    pixels_out, width, height);
+#else
+    // Parse header: [0xFF][0x02][count_u32_le]
+    if (compressed_len < 6) return -1;
+    if (compressed[0] != 0xFF || compressed[1] != 0x02) return -1;
+
+    uint32_t symbol_count = (uint32_t)compressed[2] |
+                            ((uint32_t)compressed[3] << 8) |
+                            ((uint32_t)compressed[4] << 16) |
+                            ((uint32_t)compressed[5] << 24);
+
+    const uint8_t *payload = compressed + 6;
+    size_t payload_len = compressed_len - 6;
+
+    // Parse FSE header
+    int32_t norm[MAX_SYMBOL_VALUE + 1];
+    memset(norm, 0, sizeof(norm));
+    uint32_t symbol_len = 0;
+    uint8_t table_log = 0;
+    int zero_bits = 0;
+
+    byte_reader_t brd;
+    byte_reader_init(&brd, payload, payload_len);
+
+    if (read_ncount(&brd, norm, &symbol_len, &table_log, &zero_bits) != 0)
+        return -2;
+
+    // Build decode table
+    uint32_t table_size = 1u << table_log;
+    dec_symbol_t *dt = (dec_symbol_t *)malloc(table_size * sizeof(dec_symbol_t));
+    if (!dt) return -3;
+
+    if (build_dtable(norm, symbol_len, table_log, dt) != 0) {
+        free(dt);
+        return -4;
+    }
+
+    // Allocate RLE output buffer (FSE output = RLE encoded stream)
+    uint16_t *rle_out = (uint16_t *)malloc(symbol_count * sizeof(uint16_t));
+    if (!rle_out) { free(dt); return -5; }
+
+    // FSE decode (same as scalar — FSE is inherently serial)
+    const uint8_t *bitstream_data = payload + brd.off;
+    size_t bitstream_len = payload_len - (size_t)brd.off;
+
+    int rc = fse_decompress_two_state(bitstream_data, bitstream_len,
+                                      rle_out, (int)symbol_count,
+                                      dt, table_log, zero_bits);
+    free(dt);
+    if (rc != 0) { free(rle_out); return -6; }
+
+    // Two-pass SIMD decode:
+    // Pass 1: RLE decode with SIMD fills → delta buffer
+    // Estimate max delta output size: width * height + some overhead for delimiters
+    int max_delta = width * height * 2 + 1024;
+    uint16_t *delta_buf = (uint16_t *)malloc(max_delta * sizeof(uint16_t));
+    if (!delta_buf) { free(rle_out); return -7; }
+
+    rle_decode_simd(rle_out, (int)symbol_count, delta_buf, max_delta);
+    free(rle_out);
+
+    // Pass 2: Delta decode with SIMD assistance
+    delta_decode_simd(delta_buf, max_delta, pixels_out, width, height);
+
+    free(delta_buf);
+    return 0;
+#endif
 }
