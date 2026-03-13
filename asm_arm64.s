@@ -235,3 +235,195 @@ inv_loop:
 
 inv_done:
     RET
+
+// func fse4StateDecompNEON(dt, br, states, out unsafe.Pointer, count int) int
+//
+// ABI0 stack layout on ARM64 (Go ABI0 passes args at RSP+8, +16, ...):
+//   RSP+8  = dt     unsafe.Pointer — *decSymbolU16 base
+//   RSP+16 = br     unsafe.Pointer — *bitReader
+//   RSP+24 = states unsafe.Pointer — *[4]uint32
+//   RSP+32 = out    unsafe.Pointer — *uint16 output
+//   RSP+40 = count  int
+//   RSP+48 = ret    int            (return value)
+//
+// bitReader layout:
+//   0(br)  = in.ptr   *byte
+//   24(br) = off      uint
+//   32(br) = value    uint64
+//   40(br) = bitsRead uint8
+//
+// decSymbolU16 layout (8 bytes):
+//   0: newState uint32
+//   4: symbol   uint16
+//   6: nbBits   uint8
+//   7: padding
+//
+// Register allocation:
+//   R0  = decTable base (dt)
+//   R1  = br.in.ptr
+//   R2  = br.off
+//   R3  = br.value
+//   R4  = br.bitsRead (zero-extended)
+//   R5  = sA.state
+//   R6  = sB.state
+//   R7  = sC.state
+//   R8  = sD.state
+//   R9  = output pointer (advances)
+//   R10 = remaining count
+//   R11 = produced count
+//   R12 = temp: entry byte offset (state << 3)
+//   R13 = temp: nbBits
+//   R14 = temp: symbol / lowBits
+//   R15 = temp: 64-nbBits, fill scratch
+//
+TEXT ·fse4StateDecompNEON(SB),NOSPLIT,$0-48
+    // Load args from stack (Go ABI0).
+    MOVD 8(RSP),  R0    // dt
+    MOVD 16(RSP), R1    // br (temp, read fields then freed)
+    MOVD 24(RSP), R12   // states pointer (temp)
+    MOVD 32(RSP), R9    // out
+    MOVD 40(RSP), R10   // count (remaining)
+
+    // Load bitReader fields.
+    MOVD 0(R1),  R2    // br.in.ptr (saved for fill)
+    MOVD 24(R1), R3    // br.off   -- note: loaded as whole uint, stored back later
+    // We need br.off later for writeback, keep it in R3 and also save br ptr.
+    // But R1 will be freed after loading. Save br ptr on stack? We can't with $0 frame.
+    // Instead, save br ptr in R8 temporarily... but R8 will be sD.state.
+    // Solution: load all br fields, reload br ptr from stack at end for writeback.
+    MOVD 32(R1), R14   // br.value (temp: load into R14, then move)
+    MOVBU 40(R1), R4   // br.bitsRead (uint8, zero-extended)
+    // Move value to R3_value register. We need: br.in.ptr=R2, br.off=R3, br.value, bitsRead.
+    // Use: R2=in.ptr, R3=value, R4=bitsRead, and need off.
+    // Reshuffle: load off separately.
+    MOVD 24(R1), R15   // br.off into R15 temporarily
+    MOVD R14, R3       // br.value → R3
+    MOVD R15, R2       // br.off → R2  (and re-use R15 for in.ptr)
+    MOVD 0(R1), R15    // br.in.ptr → R15 (R15 is scratch but we need it persistent)
+    // This is getting messy. Let me use different register layout.
+    // Reload cleanly:
+
+    // Final register layout for bit reader:
+    //   R15 = br.in.ptr
+    //   R2  = br.off
+    //   R3  = br.value
+    //   R4  = br.bitsRead
+    MOVD 0(R1),   R15  // br.in.ptr
+    MOVD 24(R1),  R2   // br.off
+    MOVD 32(R1),  R3   // br.value
+    MOVBU 40(R1), R4   // br.bitsRead
+
+    // Load states (R1 was br ptr, now reuse R1 for states ptr for a moment).
+    MOVD 24(RSP), R1   // reload states ptr
+    MOVWU 0(R1),  R5   // sA.state
+    MOVWU 4(R1),  R6   // sB.state
+    MOVWU 8(R1),  R7   // sC.state
+    MOVWU 12(R1), R8   // sD.state
+
+    // R11 = produced = 0
+    MOVD $0, R11
+
+fse4_loop:
+    CMP  $4, R10
+    BLT  fse4_done
+    CMP  $8, R2        // br.off >= 8?
+    BLT  fse4_done
+
+    // === fillFast 1: if bitsRead >= 32, load 4 bytes ===
+    CMP  $32, R4
+    BLT  nf4_1
+    SUB  $4, R2, R12   // R12 = off - 4
+    MOVWU (R15)(R12),  R13  // R13 = *(uint32 LE)(in + off-4)
+    LSL  $32, R3, R3   // value <<= 32
+    ORR  R13, R3, R3   // value |= new bytes
+    SUB  $32, R4, R4   // bitsRead -= 32
+    SUB  $4, R2, R2    // off -= 4
+nf4_1:
+
+    // === Symbol A (state in R5) ===
+    LSL  $3, R5, R12         // R12 = sA.state * 8 (byte offset)
+    MOVBU 6(R0)(R12),  R13   // R13 = nbBits_A
+    MOVHU 4(R0)(R12),  R14   // R14 = symbol_A
+    MOVH  R14, 0(R9)         // store symbol_A
+    LSLV R4, R3, R14         // R14 = value << bitsRead  (variable shift)
+    ADD  R13, R4, R4          // bitsRead += nbBits_A
+    MOVD $64, R1
+    SUB  R13, R1, R1          // R1 = 64 - nbBits_A
+    LSRV R1, R14, R14         // R14 = lowBits_A
+    MOVWU 0(R0)(R12), R5      // R5 = newState_A
+    ADD  R14, R5, R5          // R5 = newState_A + lowBits_A  (new sA.state)
+    // Mask to 32-bit: AND $0xFFFFFFFF, R5 — not needed, newState+lowBits fits in 32-bit
+
+    // === Symbol B (state in R6) ===
+    LSL  $3, R6, R12
+    MOVBU 6(R0)(R12), R13
+    MOVHU 4(R0)(R12), R14
+    MOVH  R14, 2(R9)
+    LSLV R4, R3, R14
+    ADD  R13, R4, R4
+    MOVD $64, R1
+    SUB  R13, R1, R1
+    LSRV R1, R14, R14
+    MOVWU 0(R0)(R12), R6
+    ADD  R14, R6, R6
+
+    // === fillFast 2 ===
+    CMP  $32, R4
+    BLT  nf4_2
+    SUB  $4, R2, R12
+    MOVWU (R15)(R12), R13
+    LSL  $32, R3, R3
+    ORR  R13, R3, R3
+    SUB  $32, R4, R4
+    SUB  $4, R2, R2
+nf4_2:
+
+    // === Symbol C (state in R7) ===
+    LSL  $3, R7, R12
+    MOVBU 6(R0)(R12), R13
+    MOVHU 4(R0)(R12), R14
+    MOVH  R14, 4(R9)
+    LSLV R4, R3, R14
+    ADD  R13, R4, R4
+    MOVD $64, R1
+    SUB  R13, R1, R1
+    LSRV R1, R14, R14
+    MOVWU 0(R0)(R12), R7
+    ADD  R14, R7, R7
+
+    // === Symbol D (state in R8) ===
+    LSL  $3, R8, R12
+    MOVBU 6(R0)(R12), R13
+    MOVHU 4(R0)(R12), R14
+    MOVH  R14, 6(R9)
+    LSLV R4, R3, R14
+    ADD  R13, R4, R4
+    MOVD $64, R1
+    SUB  R13, R1, R1
+    LSRV R1, R14, R14
+    MOVWU 0(R0)(R12), R8
+    ADD  R14, R8, R8
+
+    ADD  $8, R9,  R9    // out += 4 × 2 bytes
+    ADD  $4, R11, R11   // produced += 4
+    SUB  $4, R10, R10   // remaining -= 4
+    B    fse4_loop
+
+fse4_done:
+    // Write back bitReader fields.
+    MOVD 16(RSP), R1   // reload br ptr
+    MOVD R15, 0(R1)    // br.in.ptr (unchanged, but writeback for consistency)
+    MOVD R2, 24(R1)    // br.off
+    MOVD R3, 32(R1)    // br.value
+    MOVB R4, 40(R1)    // br.bitsRead
+
+    // Write back states.
+    MOVD 24(RSP), R1   // reload states ptr
+    MOVW R5, 0(R1)
+    MOVW R6, 4(R1)
+    MOVW R7, 8(R1)
+    MOVW R8, 12(R1)
+
+    // Return produced.
+    MOVD R11, 48(RSP)
+    RET

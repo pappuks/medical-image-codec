@@ -8,6 +8,20 @@ package mic
 
 import "unsafe"
 
+// fse4StateDecompNEON is the ARM64 assembly hot loop for 4-state FSE decode.
+// NEON is always present on ARM64, so this is always dispatched.
+// Only valid for the non-zeroBits path (all nbBits > 0).
+// Returns the number of symbols written to out.
+//
+//go:noescape
+func fse4StateDecompNEON(dt, br, states, out unsafe.Pointer, count int) int
+
+// fse4StateDecompNative dispatches to the ARM64 assembly kernel.
+// NEON/advanced SIMD is mandatory on ARM64.
+func fse4StateDecompNative(dt, br, states, out unsafe.Pointer, count int) int {
+	return fse4StateDecompNEON(dt, br, states, out, count)
+}
+
 // countSimpleU16Asm is implemented in asm_arm64.s.
 // NEON is always available on ARM64 — no runtime detection needed.
 //

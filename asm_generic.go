@@ -6,6 +6,11 @@
 
 package mic
 
+import "unsafe"
+
+// fse4StateDecompNative is a no-op for non-amd64/arm64 platforms.
+func fse4StateDecompNative(_, _, _, _ unsafe.Pointer, _ int) int { return 0 }
+
 // countSimpleNative is the pure-Go fallback for non-amd64 platforms.
 func countSimpleNative(in []uint16, count, count2 *[maxSymbolValue + 1]uint32) {
 	for i := 0; i < len(in)-1; i += 2 {

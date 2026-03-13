@@ -230,3 +230,180 @@ inv_loop:
 
 inv_done:
     RET
+
+// func fse4StateDecompKernel(dt, br, states, out unsafe.Pointer, count int) int
+//
+// ABI0 stack layout (Go calls assembly via stack):
+//   dt+0(FP)     unsafe.Pointer  (8 bytes) — *decSymbolU16 base
+//   br+8(FP)     unsafe.Pointer  (8 bytes) — *bitReader
+//   states+16(FP) unsafe.Pointer (8 bytes) — *[4]uint32
+//   out+24(FP)   unsafe.Pointer  (8 bytes) — *uint16 output buffer
+//   count+32(FP) int             (8 bytes) — symbols to decode
+//   ret+40(FP)   int             (8 bytes) — return: symbols written
+//
+// bitReader layout (offsets from br pointer):
+//   0(br)  = in.ptr   *byte
+//   24(br) = off      uint    (next byte: in[off-1])
+//   32(br) = value    uint64
+//   40(br) = bitsRead uint8
+//
+// states layout: [sA, sB, sC, sD] uint32 × 4
+//
+// decSymbolU16 layout (8 bytes each):
+//   0: newState uint32
+//   4: symbol   uint16
+//   6: nbBits   uint8
+//   7: padding
+//
+// Register allocation during loop:
+//   AX  = decTable base
+//   BX  = output pointer (advances)
+//   CX  = temp: nbBits, shift counts
+//   DX  = temp: symbol, lowBits, fill scratch
+//   DI  = remaining count
+//   SI  = produced count (returned)
+//   R8  = br.in.ptr
+//   R9  = br.off
+//   R10 = br.value
+//   R11 = br.bitsRead (zero-extended uint8 → uint64)
+//   R12 = sA.state  (callee-saved)
+//   R13 = sB.state  (callee-saved)
+//   R14 = sC.state  (callee-saved)
+//   R15 = sD.state  (callee-saved)
+//
+// Uses BMI2 SHLXQ/SHRXQ for variable-shift bit extraction without needing CL.
+// Safe to use when cpuHasAVX2=true (Haswell+ implies BMI2).
+//
+TEXT ·fse4StateDecompKernel(SB),NOSPLIT,$32-48
+    // Save callee-saved registers.
+    MOVQ R12, 0(SP)
+    MOVQ R13, 8(SP)
+    MOVQ R14, 16(SP)
+    MOVQ R15, 24(SP)
+
+    // Load args.
+    MOVQ dt+0(FP),     AX   // decTable base
+    MOVQ br+8(FP),     DX   // br pointer (temporary, then freed)
+    MOVQ states+16(FP), CX  // states pointer (temporary)
+    MOVQ out+24(FP),   BX   // output pointer
+    MOVQ count+32(FP), DI   // count (remaining)
+
+    // Load bitReader fields from DX (br pointer).
+    MOVQ 0(DX),  R8    // br.in.ptr
+    MOVQ 24(DX), R9    // br.off
+    MOVQ 32(DX), R10   // br.value
+    MOVBLZX 40(DX), R11 // br.bitsRead (byte → 32-bit ZX, upper 32 auto-zeroed)
+
+    // Load states from CX.
+    MOVL 0(CX),  R12   // sA.state
+    MOVL 4(CX),  R13   // sB.state
+    MOVL 8(CX),  R14   // sC.state
+    MOVL 12(CX), R15   // sD.state
+
+    // SI = 0 (produced count)
+    XORQ SI, SI
+
+decode4_loop:
+    CMPQ DI, $4
+    JL   decode4_done
+    CMPQ R9, $8
+    JL   decode4_done
+
+    // === fillFast 1: ensure 32+ bits available ===
+    CMPQ R11, $32
+    JL   nf1
+    MOVL -4(R8)(R9*1), DX  // DX = *(uint32 LE)(in + off - 4)
+    SHLQ $32, R10           // value <<= 32
+    MOVLQZX DX, DX          // zero-extend DX to 64-bit
+    ORQ  DX, R10            // value |= new low 32 bits
+    SUBQ $32, R11           // bitsRead -= 32
+    SUBQ $4, R9             // off -= 4
+nf1:
+
+    // === Symbol A (state in R12) ===
+    MOVBLZX 6(AX)(R12*8), CX   // CX = nbBits_A
+    MOVWQZX 4(AX)(R12*8), DX   // DX = symbol_A
+    MOVW    DX, 0(BX)           // store symbol_A to output
+    SHLXQ  R11, R10, DX         // DX = value << bitsRead  (BMI2)
+    ADDQ    CX, R11             // bitsRead += nbBits_A
+    NEGQ    CX
+    ADDQ    $64, CX             // CX = 64 - nbBits_A
+    SHRXQ  CX, DX, DX           // DX = lowBits_A  (BMI2)
+    MOVL    0(AX)(R12*8), R12   // R12 = newState_A (32-bit, auto ZX to 64)
+    ADDL    DX, R12             // R12 = new sA.state
+
+    // === Symbol B (state in R13) ===
+    MOVBLZX 6(AX)(R13*8), CX
+    MOVWQZX 4(AX)(R13*8), DX
+    MOVW    DX, 2(BX)
+    SHLXQ  R11, R10, DX
+    ADDQ    CX, R11
+    NEGQ    CX
+    ADDQ    $64, CX
+    SHRXQ  CX, DX, DX
+    MOVL    0(AX)(R13*8), R13
+    ADDL    DX, R13
+
+    // === fillFast 2 ===
+    CMPQ R11, $32
+    JL   nf2
+    MOVL -4(R8)(R9*1), DX
+    SHLQ $32, R10
+    MOVLQZX DX, DX
+    ORQ  DX, R10
+    SUBQ $32, R11
+    SUBQ $4, R9
+nf2:
+
+    // === Symbol C (state in R14) ===
+    MOVBLZX 6(AX)(R14*8), CX
+    MOVWQZX 4(AX)(R14*8), DX
+    MOVW    DX, 4(BX)
+    SHLXQ  R11, R10, DX
+    ADDQ    CX, R11
+    NEGQ    CX
+    ADDQ    $64, CX
+    SHRXQ  CX, DX, DX
+    MOVL    0(AX)(R14*8), R14
+    ADDL    DX, R14
+
+    // === Symbol D (state in R15) ===
+    MOVBLZX 6(AX)(R15*8), CX
+    MOVWQZX 4(AX)(R15*8), DX
+    MOVW    DX, 6(BX)
+    SHLXQ  R11, R10, DX
+    ADDQ    CX, R11
+    NEGQ    CX
+    ADDQ    $64, CX
+    SHRXQ  CX, DX, DX
+    MOVL    0(AX)(R15*8), R15
+    ADDL    DX, R15
+
+    ADDQ $8, BX   // output pointer += 4 symbols × 2 bytes
+    ADDQ $4, SI   // produced += 4
+    SUBQ $4, DI   // remaining -= 4
+    JMP  decode4_loop
+
+decode4_done:
+    // Write back bitReader fields.
+    MOVQ br+8(FP), CX
+    MOVQ R10, 32(CX)   // br.value
+    MOVB R11, 40(CX)   // br.bitsRead
+    MOVQ R9, 24(CX)    // br.off
+
+    // Write back states.
+    MOVQ states+16(FP), CX
+    MOVL R12, 0(CX)
+    MOVL R13, 4(CX)
+    MOVL R14, 8(CX)
+    MOVL R15, 12(CX)
+
+    // Return produced count.
+    MOVQ SI, ret+40(FP)
+
+    // Restore callee-saved registers.
+    MOVQ 0(SP), R12
+    MOVQ 8(SP), R13
+    MOVQ 16(SP), R14
+    MOVQ 24(SP), R15
+    RET

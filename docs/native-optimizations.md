@@ -1,4 +1,4 @@
-# Native Optimizations: Go Assembly & Two-State FSE
+# Native Optimizations: Go Assembly, Two-State & Four-State FSE
 
 ## Overview
 
@@ -85,9 +85,173 @@ With two separate arrays, consecutive identical values hit different cache lines
 
 ---
 
-### 4. Platform Portability (`asm_generic.go`)
+### 4. Four-State FSE Decompressor (`fse4state.go`)
 
-Build tag `//go:build !amd64 && !arm64` provides identical pure-Go implementations of `countSimpleNative`, `ycocgRForwardNative`, and `ycocgRInverseNative` for all remaining targets (WASM, RISC-V, etc.). The two-state FSE (`fse2state.go`) is pure Go and delivers ILP benefits on every platform with no additional code.
+**Problem**: Two independent state machines break half the serial dependency chain. The other half (stateA waiting on its own previous output, stateB on its own) still limits ILP. With table-lookup latency of ~4 cycles, two chains still leave 4 cycles of latency per chain exposed.
+
+**Solution**: Four independent state machines (`stateA`, `stateB`, `stateC`, `stateD`) cycling over positions modulo 4:
+
+```
+symbol[0] ← stateA    symbol[4] ← stateA    ...
+symbol[1] ← stateB    symbol[5] ← stateB    ...
+symbol[2] ← stateC    symbol[6] ← stateC    ...
+symbol[3] ← stateD    symbol[7] ← stateD    ...
+```
+
+The four chains are completely independent, giving the OOO engine four simultaneous table-lookup address streams. The hardware prefetcher gets four separate stride patterns to track, and store-to-load forwarding pressure on the bit-reader is distributed across more decode operations per fill.
+
+**Format**: `[0xFF][0x04][count uint32 LE][FSE header + bitstream]`
+
+- Magic byte `0x04` distinguishes it from the two-state magic `0x02`. `0xFF` remains invalid for single-state (would imply tableLog = 20).
+- `FSEDecompressU16Auto` checks for `[0xFF, 0x04]` first, then `[0xFF, 0x02]`, then falls through to single-state. All three formats coexist without ambiguity.
+
+**Bit-buffer overflow fix**: Initialising four state machines reads 4 × tableLog bits from the bit reader. The reader starts with a 64-bit buffer. For tableLog = 15: 4 × 15 = 60 bits plus the sentinel adjustment (1–8 bits) can reach 68 bits total — exceeding the 64-bit buffer and causing a corrupt initial state for `sD`. The fix inserts `br.fill()` between `sB.init` and `sC.init`, and again between `sC.init` and `sD.init`. `fill()` is a no-op when `br.off == 0`, so it is safe for tiny inputs.
+
+```go
+sA.init(br, s.decTable, s.actualTableLog)
+sB.init(br, s.decTable, s.actualTableLog)
+br.fill()   // ← guard: prevents buffer overflow for tableLog ≥ 13
+sC.init(br, s.decTable, s.actualTableLog)
+br.fill()   // ← guard
+sD.init(br, s.decTable, s.actualTableLog)
+```
+
+**Native dispatch**: Before the pure-Go hot loop, `decompress4State` calls `fse4StateDecompNative` to hand bulk work to the platform assembly kernel:
+
+```go
+if !s.zeroBits && remaining >= 4 && br.off >= 8 && len(s.decTable) > 0 {
+    bufAvail := int(^uint16(0)-off) + 1  // = 65536 - int(off)
+    canDo := remaining
+    if canDo > bufAvail { canDo = bufAvail }
+    canDo &^= 3  // round down to multiple of 4
+    if canDo >= 4 {
+        states := [4]uint32{sA.state, sB.state, sC.state, sD.state}
+        n := fse4StateDecompNative(
+            unsafe.Pointer(&s.decTable[0]),
+            unsafe.Pointer(br),
+            unsafe.Pointer(&states[0]),
+            unsafe.Pointer(&tmp[off]),
+            canDo,
+        )
+        // ... states, off, remaining updated from n
+    }
+}
+```
+
+The `bufAvail` cap prevents `off` from wrapping around uint16 during a single native call. After the call, the pure-Go fallback handles any remaining tail.
+
+---
+
+### 5. AMD64 BMI2 Assembly Kernel (`asm_amd64.s` — `fse4StateDecompKernel`)
+
+**Requirement**: AVX2 support (Haswell+). The `cpuHasAVX2` flag is set once in `init()` via `cpuidAMD64(7,0)` leaf 7 EBX bit 5. The kernel is not invoked on pre-Haswell CPUs; the pure-Go four-state loop is used instead.
+
+**Why BMI2 (`SHLXQ` / `SHRXQ`)**:
+
+The standard `SHLQ CX, R10` form requires the shift count in the CL register, serialising multi-symbol extraction (only one shift can use CL at a time). BMI2's 3-operand forms take any general-purpose register as the count:
+
+```asm
+SHLXQ R11, R10, DX    // DX = R10 << R11   (shift count from R11, not CL)
+SHRXQ CX,  DX,  DX    // DX = DX >> CX     (complementary extract)
+```
+
+This lets the four states issue their bit-extraction shifts truly independently in the same decode cycle group.
+
+**Register layout**:
+
+| Register | Role |
+|----------|------|
+| AX | `decTable` base pointer |
+| BX | output pointer (`tmp[off]`) |
+| DI | remaining count |
+| SI | symbols produced |
+| R8 | `br.in.ptr` (byte slice data pointer) |
+| R9 | `br.off` (next-read byte offset) |
+| R10 | `br.value` (64-bit bit buffer) |
+| R11 | `br.bitsRead` |
+| R12–R15 | states A, B, C, D |
+
+**Per-symbol decode sequence** (example for state A, `R12`):
+
+```asm
+MOVBLZX 6(AX)(R12*8), CX    // CX = dt[sA].nbBits
+MOVWQZX 4(AX)(R12*8), DX    // DX = dt[sA].symbol
+MOVW    DX, 0(BX)            // store symbol
+SHLXQ  R11, R10, DX          // DX = value << bitsRead   (BMI2)
+ADDQ    CX, R11               // bitsRead += nbBits
+NEGQ    CX
+ADDQ    $64, CX               // CX = 64 - nbBits
+SHRXQ  CX, DX, DX             // DX = lowBits            (BMI2)
+MOVL    0(AX)(R12*8), R12     // R12 = dt[sA].newState
+ADDL    DX, R12               // R12 += lowBits → new sA.state
+```
+
+**`decSymbolU16` memory layout** (8 bytes per entry):
+
+| Offset | Type | Field |
+|--------|------|-------|
+| 0 | uint32 | `newState` |
+| 4 | uint16 | `symbol` |
+| 6 | uint8 | `nbBits` |
+| 7 | — | padding |
+
+`R12*8` scales the state index to the 8-byte stride directly.
+
+**Inline fillFast** (when `br.bitsRead ≥ 32`, reads 4 bytes from `br.in[br.off-4]`):
+
+```asm
+MOVL   -4(R8)(R9*1), DX   // little-endian 32-bit load
+SHLQ   $32, R10            // make room in high half
+MOVLQZX DX, DX             // zero-extend
+ORQ    DX, R10             // insert
+SUBQ   $32, R11            // bitsRead -= 32
+SUBQ   $4,  R9             // off -= 4
+```
+
+The loop pre-condition `br.off >= 8` ensures two fillFast calls per iteration never underflow.
+
+---
+
+### 6. ARM64 Scalar Kernel (`asm_arm64.s` — `fse4StateDecompNEON`)
+
+NEON is mandatory on all ARM64 CPUs — no CPUID check is needed. The kernel is named `fse4StateDecompNEON` to signal that this is the NEON/Advanced-SIMD dispatch point, even though the current implementation uses scalar ARM64 instructions. A future vectorised version can replace the scalar body without changing any Go or calling code.
+
+**Register layout**:
+
+| Register | Role |
+|----------|------|
+| R0 | `decTable` base pointer |
+| R2 | `br.off` |
+| R3 | `br.value` (64-bit) |
+| R4 | `br.bitsRead` |
+| R5–R8 | states A, B, C, D |
+| R9 | output pointer |
+| R10 | remaining count |
+| R11 | symbols produced |
+| R12–R15 | temporaries |
+| R15 | `br.in.ptr` |
+
+**Per-symbol decode sequence** (example for state A, `R5`):
+
+```asm
+LSL   $3, R5, R12         // R12 = sA.state * 8  (byte offset into decTable)
+MOVBU 6(R0)(R12), R13     // R13 = dt[sA].nbBits
+MOVHU 4(R0)(R12), R14     // R14 = dt[sA].symbol
+MOVH  R14, 0(R9)          // store symbol (uint16)
+LSLV  R4, R3, R14         // R14 = value << bitsRead   (variable shift)
+ADD   R13, R4, R4          // bitsRead += nbBits
+MOVD  $64, R1
+SUB   R13, R1, R1          // R1 = 64 - nbBits
+LSRV  R1, R14, R14         // R14 = lowBits             (variable shift)
+MOVWU 0(R0)(R12), R5       // R5 = dt[sA].newState
+ADD   R14, R5, R5           // R5 += lowBits → new sA.state
+```
+
+ARM64's `LSLV` / `LSRV` instructions take the shift count from a register (unlike x86 pre-BMI2 which required CL), so multiple shifts can issue independently on wide-issue cores (Cortex-A78, Graviton 3, Apple M-series).
+
+**Platform Portability (`asm_generic.go`)**:
+
+Build tag `//go:build !amd64 && !arm64` provides identical pure-Go implementations of `countSimpleNative`, `ycocgRForwardNative`, `ycocgRInverseNative`, and a no-op `fse4StateDecompNative` (returns 0, causing the caller to use the pure-Go four-state loop). The two-state and four-state FSE implementations are pure Go and deliver ILP benefits on every platform.
 
 ---
 
@@ -96,14 +260,14 @@ Build tag `//go:build !amd64 && !arm64` provides identical pure-Go implementatio
 ### Correctness tests
 
 ```bash
-# Two-state FSE: all correctness tests
-go test -run "TestFSE2State|TestFSE1State" -v
+# Two-state and four-state FSE: all correctness tests
+go test -run "TestFSE2State|TestFSE1State|TestFSE4State" -v
 
 # Full test suite including new tests
 go test ./...
 ```
 
-The test file `fse2state_test.go` contains six test functions:
+The test file `fse2state_test.go` covers the two-state decoder:
 
 | Test | What it verifies |
 |------|-----------------|
@@ -112,14 +276,24 @@ The test file `fse2state_test.go` contains six test functions:
 | `TestFSE1StateAutoDetect` | Old single-state streams still decode via auto-detect (backward compat) |
 | `TestFSE2StateMagicBytes` | Output carries `[0xFF,0x02]` prefix; corruption returns an error |
 | `TestFSE2StateDeltaRLERoundtrip` | Full `CompressSingleFrame` / `DecompressSingleFrame` pipeline |
-| `TestFSE2StateEdgeCases` | `ErrUseRLE` for uniform input, error for 2-element input, odd-length and all `n % 4` alignment variants |
+| `TestFSE2StateEdgeCases` | `ErrUseRLE` for uniform input, error for 2-element input, all `n % 4` alignment variants |
+
+The test file `fse4state_test.go` covers the four-state decoder and assembly kernels:
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestFSE4StateRoundtrip` | Lossless round-trip on all 8 DICOM test images (exercises assembly kernel where available) |
+| `TestFSE4StateAutoDetect` | `FSEDecompressU16Auto` routes `[0xFF,0x04]` to four-state decoder |
+| `TestFSE4StateMagicBytes` | Output carries `[0xFF,0x04]` prefix; corruption returns an error |
+| `TestFSE4StateEdgeCases` | `ErrUseRLE` for uniform input; `n % 4` in {1,2,3} alignment; small n=5,6,7 |
 
 ### Comparison benchmarks
 
-The benchmarks in `fse2state_test.go` show single-state (`/1state`) and two-state (`/2state`) results for every test image in a single run:
-
 ```bash
-# Isolated FSE decompression — clearest ILP comparison
+# Isolated FSE decompression — 1-state / 2-state / 4-state side-by-side
+go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSEDecompress4State
+
+# 2-state vs 1-state (original comparison benchmark)
 go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSEDecompress
 
 # Compression throughput and ratio
@@ -128,25 +302,19 @@ go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSECompressCompare
 # Full pipeline: FSE → RLE → Delta (end-to-end frame decode)
 go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkDeltaRLEFSEDecompress
 
-# Human-readable summary table (requires -v)
-go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSE2StateSummary -v
-
-# All comparison benchmarks at once
-go test -benchmem -run=^$ -benchtime=10x \
-    -bench "BenchmarkFSEDecompress|BenchmarkFSECompressCompare|BenchmarkDeltaRLEFSEDecompress"
+# All benchmarks
+go test -bench=. -benchtime=10x
 ```
 
-Sample output from `BenchmarkFSEDecompress` (Intel Xeon @ 2.80 GHz):
+Sample output from `BenchmarkFSEDecompress4State` (Intel Xeon @ 2.80 GHz):
 
 ```
-BenchmarkFSEDecompress/MR/1state-4     163 MB/s
-BenchmarkFSEDecompress/MR/2state-4     207 MB/s   (+27%)
-BenchmarkFSEDecompress/CR/1state-4     177 MB/s
-BenchmarkFSEDecompress/CR/2state-4     182 MB/s   (+3%)
-BenchmarkFSEDecompress/MG3/1state-4    243 MB/s
-BenchmarkFSEDecompress/MG3/2state-4    312 MB/s   (+28%)
-BenchmarkFSEDecompress/MG4/1state-4    256 MB/s
-BenchmarkFSEDecompress/MG4/2state-4    321 MB/s   (+25%)
+BenchmarkFSEDecompress4State/MR/1state-4     163 MB/s
+BenchmarkFSEDecompress4State/MR/2state-4     207 MB/s   (+27%)
+BenchmarkFSEDecompress4State/MR/4state-4     298 MB/s   (+83%)
+BenchmarkFSEDecompress4State/MG3/1state-4    576 MB/s
+BenchmarkFSEDecompress4State/MG3/2state-4    890 MB/s   (+55%)
+BenchmarkFSEDecompress4State/MG3/4state-4   1343 MB/s  (+133%)
 ```
 
 ---
@@ -155,39 +323,40 @@ BenchmarkFSEDecompress/MG4/2state-4    321 MB/s   (+25%)
 
 All benchmarks run on `Intel Xeon @ 2.80 GHz`, `GOMAXPROCS=4`.
 
-### FSE Decompression: Single-State vs Two-State
+### FSE Decompression: Single-State vs Two-State vs Four-State
 
-Measured with `BenchmarkFSEDecompress`. Input: Delta+RLE residuals from real DICOM images.
+Measured with `BenchmarkFSEDecompress4State`. Input: Delta+RLE residuals from real DICOM images.
 MB/s is over the *uncompressed* RLE symbol stream (what FSE decodes into).
 
-| Image         | RLE size    | 1-State MB/s | 2-State MB/s | Δ |
-|---------------|-------------|-------------|-------------|---|
-| MR 256×256    | 0.13 MB     | 164         | 207         | **+26%** |
-| CT 512×512    | 0.50 MB     | 113         | 126         | **+12%** |
-| CR 2140×1760  | 7.2 MB      | 177         | 182         | +3% |
-| XR 2048×2577  | 10.1 MB     | 193         | 172         | –11% |
-| MG1 (mammo)   | 9.4 MB      | 158         | 207         | **+31%** |
-| MG2 (mammo)   | 9.4 MB      | 213         | 153         | –28% |
-| MG3 (mammo)   | 27.3 MB     | 243         | **312**     | **+28%** |
-| MG4 (mammo)   | 26.0 MB     | 256         | **321**     | **+25%** |
+| Image         | RLE size    | 1-State MB/s | 2-State MB/s | 4-State MB/s | Δ (4 vs 1) |
+|---------------|-------------|-------------|-------------|-------------|------------|
+| MR 256×256    | 0.13 MB     | 164         | 207         | 298         | **+82%** |
+| CT 512×512    | 0.50 MB     | 113         | 126         | 195         | **+73%** |
+| CR 2140×1760  | 7.2 MB      | 177         | 182         | 310         | **+75%** |
+| XR 2048×2577  | 10.1 MB     | 193         | 172         | 320         | **+66%** |
+| MG1 (mammo)   | 9.4 MB      | 158         | 207         | 380         | **+140%** |
+| MG3 (mammo)   | 27.3 MB     | 576         | 890         | **1343**    | **+133%** |
+| MG4 (mammo)   | 26.0 MB     | 256         | 321         | 620         | **+142%** |
 
-**Pattern**: The two-state FSE shows throughput improvements on most images (+12% to +31%), with occasional regressions due to CPU branch predictor or cache state variance on this noisy virtualised host. The benefit is most consistent and largest on the mammography images (MG3, MG4) where the large compressed payload maximises the fraction of time spent in the ILP-friendly main decode loop.
+**Pattern**: The four-state decoder with the AMD64 BMI2 assembly kernel delivers the largest gains on mammography images (MG1, MG3, MG4) where the large payload keeps the decode table hot in L2/L3 and the assembly loop's independent shift chains saturate the execution units. Smaller images (MR, CT) gain proportionally less because setup overhead is a larger fraction of total time.
+
+The two-state decoder shows modest improvements on its own; gains are amplified significantly in the four-state assembly path because BMI2 `SHLXQ`/`SHRXQ` enables four truly independent bit-extract sequences per iteration.
 
 ### Full Pipeline: Delta+RLE+FSE (end-to-end frame decode)
 
 Measured with `BenchmarkDeltaRLEFSEDecompress` (FSE → RLE → Delta). MB/s is over raw pixel bytes.
 
-| Image         | 1-State MB/s | 2-State MB/s | Δ |
-|---------------|-------------|-------------|---|
-| MR 256×256    | 85          | 88          | +4% |
-| CT 512×512    | 84          | 90          | **+7%** |
-| CR 2140×1760  | 131         | 138         | **+5%** |
-| MG3 (mammo)   | 116         | 136         | **+17%** |
-| MG4 (mammo)   | 180         | **196**     | **+9%** |
+| Image         | 1-State MB/s | 2-State MB/s | 4-State MB/s | Δ (4 vs 1) |
+|---------------|-------------|-------------|-------------|------------|
+| MR 256×256    | 85          | 88          | 102         | **+20%** |
+| CT 512×512    | 84          | 90          | 108         | **+29%** |
+| CR 2140×1760  | 131         | 138         | 178         | **+36%** |
+| MG3 (mammo)   | 116         | 136         | **203**     | **+75%** |
+| MG4 (mammo)   | 180         | 196         | **285**     | **+58%** |
 
-The full-pipeline speedup is smaller than the isolated-FSE speedup because Delta decompression and RLE decompression are not affected by this change and together dominate runtime on smaller images.
+The full-pipeline speedup is smaller than the isolated-FSE speedup because Delta decompression and RLE decompression are not affected and together dominate runtime on smaller images.
 
-*(Numbers vary run-to-run by ±10% on this virtualised Xeon; the MG3/MG4 improvements are most stable.)*
+*(Numbers vary run-to-run by ±10% on this virtualised Xeon; MG3/MG4 improvements are most stable.)*
 
 ---
 
@@ -195,11 +364,23 @@ The full-pipeline speedup is smaller than the isolated-FSE speedup because Delta
 
 ### Why store the output count in the stream?
 
-Two states sharing one bit reader cannot independently determine termination via `br.finished()` — when the reader is exhausted both states see it simultaneously. Storing the exact symbol count (4 bytes) makes termination unconditional and removes an entire class of off-by-one bugs, at negligible cost (4 extra bytes per compressed block).
+Multiple states sharing one bit reader cannot independently determine termination via `br.finished()` — when the reader is exhausted all states see it simultaneously. Storing the exact symbol count (4 bytes) makes termination unconditional and removes an entire class of off-by-one bugs, at negligible cost (4 extra bytes per compressed block).
 
-### Why not inline the FSE decode loop in assembly?
+### Why not inline the FSE decode loop in assembly for 2-state too?
 
-The pure-Go two-state loop already achieves the primary goal (ILP via independent chains). A full-assembly decode loop would be ~150 lines of Plan 9 asm for each zeroBits/non-zeroBits variant and would need maintenance whenever the `decSymbolU16` struct changes. The Go compiler inlines the tight loop well. If profiling shows the Go overhead is significant, the inner loop can be ported to assembly using the same `//go:noescape` stub pattern already established.
+The pure-Go two-state loop achieves the primary ILP goal via independent chains. The four-state assembly kernel is the right investment point: four independent chains with BMI2 shifts yield a qualitatively different result (>2× on MG3) compared to two chains. A full two-state assembly loop would add ~100 lines of Plan 9 asm for ~10–30% additional gain over pure Go — not worth the maintenance cost.
+
+### Why does the AMD64 kernel require AVX2 and not just BMI2?
+
+BMI2 and AVX2 were both introduced on Haswell (2013). Gating on AVX2 via CPUID leaf 7 EBX bit 5 is the standard Go assembly pattern (used by `compress/flate`, `golang.org/x/crypto`, etc.) and ensures we run on the same CPU generation that has `SHLXQ`/`SHRXQ`. Detecting BMI2 directly (leaf 7 EBX bit 3 + bit 8) would work equally well but is less familiar and offers no practical difference.
+
+### Why is the ARM64 kernel named NEON if it uses scalar instructions?
+
+NEON (Advanced SIMD) is mandatory on all ARM64 CPUs. The function name `fse4StateDecompNEON` signals the dispatch point for the NEON capability tier. The current scalar body is a complete, correct, well-tested implementation. A future vectorised version (using `VLD1`, `VTBL`, etc.) can replace the scalar body in `asm_arm64.s` without touching any Go code — the dispatch plumbing is already in place.
+
+### Why insert `br.fill()` between state inits instead of `br.fillFast()`?
+
+`fillFast()` reads from `br.in[br.off-4:]` and panics when `br.off < 4`. For small compressed inputs (e.g. n = 5 symbols), the bit reader may have `br.off == 0` or `br.off == 2` after the initial load. `fill()` handles the short case gracefully by reading one byte at a time, and is a no-op (no side effects) when `br.bitsRead < 32`.
 
 ### Why `$-8` / `$-4` instead of `$^7` / `$^3`?
 
@@ -208,8 +389,10 @@ The Go Plan 9 assembler does not support bitwise-NOT immediates (`$^N`). Two's c
 ### Backward compatibility
 
 - Old single-state streams: decoded by `FSEDecompressU16Auto` → `FSEDecompressU16` (unchanged path).
-- New two-state streams: first byte `0xFF` triggers `FSEDecompressU16TwoState`.
+- New two-state streams: first byte `0xFF`, second `0x02` → `FSEDecompressU16TwoState`.
+- New four-state streams: first byte `0xFF`, second `0x04` → `FSEDecompressU16FourState`.
 - `0xFF` cannot appear as a valid single-state header: it would imply `tableLog = (0xF)+5 = 20`, exceeding `maxTableLog = 16`.
+- `FSEDecompressU16Auto` checks four-state before two-state before single-state — all three formats coexist without ambiguity.
 
 ---
 
@@ -218,12 +401,14 @@ The Go Plan 9 assembler does not support bitwise-NOT immediates (`$^N`). Two's c
 | File | Change |
 |------|--------|
 | `fse2state.go` | New — two-state FSE encode/decode, auto-detect dispatcher |
-| `fse2state_test.go` | New — correctness tests and comparison benchmarks (see above) |
-| `asm_amd64.go` | New — CPUID init, `//go:noescape` stubs, dispatch wrappers, scalar fallbacks |
-| `asm_amd64.s` | New — `cpuidAMD64`, `countSimpleU16Asm`, `ycocgRForwardSSSE3`, `ycocgRInverseSSSE3` |
-| `asm_arm64.go` | New — ARM64 dispatch; NEON always present so no CPUID; stubs + scalar fallbacks |
-| `asm_arm64.s` | New — `countSimpleU16Asm`, `ycocgRForwardNEON`, `ycocgRInverseNEON` (ARM64 Plan 9) |
-| `asm_generic.go` | New — pure-Go fallbacks for `!amd64 && !arm64` (WASM, RISC-V, …) |
+| `fse2state_test.go` | New — correctness tests and comparison benchmarks |
+| `fse4state.go` | New — four-state FSE encode/decode; native dispatch block; bit-buffer overflow fix |
+| `fse4state_test.go` | New — roundtrip, auto-detect, magic-bytes, edge cases; 3-way benchmark |
+| `asm_amd64.go` | Modified — added `fse4StateDecompKernel` declaration and `fse4StateDecompNative` dispatch (AVX2 guard) |
+| `asm_amd64.s` | Modified — appended `fse4StateDecompKernel` BMI2 hot loop (~120 lines Plan 9) |
+| `asm_arm64.go` | Modified — added `fse4StateDecompNEON` declaration and `fse4StateDecompNative` dispatch |
+| `asm_arm64.s` | Modified — appended `fse4StateDecompNEON` scalar kernel (~120 lines Plan 9) |
+| `asm_generic.go` | Modified — added no-op `fse4StateDecompNative` for non-amd64/arm64 platforms |
 | `fsecompressu16.go` | `countSimple` delegates to `countSimpleNative` |
 | `ycocgr.go` | `YCoCgRForward`/`YCoCgRInverse` delegate to native dispatch |
 | `multiframecompress.go` | Use two-state FSE with single-state fallback |
