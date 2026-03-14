@@ -31,7 +31,10 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 10. [CLI Reference](#cli-reference)
 11. [Comparison with HTJ2K](#comparison-with-htj2k)
 12. [Design Background](#design-background)
-13. [Roadmap](#roadmap)
+13. [Source Files & Architecture](#source-files--architecture)
+14. [Test Data](#test-data)
+15. [Developer Guide](#developer-guide)
+16. [Roadmap](#roadmap)
 
 > **New:** [Delta+Zstandard comparison](#comparison-with-deltazstandard) and [MED predictor comparison](#med-predictor-comparison) added — see [Compression Results](#compression-results).
 
@@ -55,7 +58,23 @@ mic.CompressWSI(rgbPixels, width, height, 3, 8, mic.WSIOptions{})
 # Run all tests
 go test -v ./...
 
+# Run specific test suites
+go test -run TestDeltaRleFSECompress -v    # Delta+RLE+FSE pipeline
+go test -run TestDeltaRleHuffCompress -v   # Delta+RLE+Huffman pipeline
+go test -run TestFSECompress -v            # FSE only
+go test -run TestHuffCompress -v           # Huffman only
+go test -run TestTemporalDelta -v          # Temporal delta encode/decode
+go test -run TestMultiFrame -v             # Multi-frame roundtrip (both modes)
+go test -run TestMultiFrameTomo -v         # Real DICOM 69-frame tomo test
+go test -run TestYCoCgR -v                 # YCoCg-R color transform roundtrip
+go test -run TestWSITileCompress -v        # WSI tile compression
+go test -run TestWSICompress -v            # Full WSI compress/decompress roundtrip
+go test -run TestWSIPyramidLevels -v       # Pyramid level generation
+go test -run TestWSIRegion -v              # Cross-tile region decompression
+
 # Run benchmarks
+go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
+go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEHuffCompress$ mic
 go test -bench=. -benchtime=10x
 ```
 
@@ -605,6 +624,70 @@ Two design choices in MIC deserve deeper motivation than the README can provide:
 - **Why delta prediction instead of a wavelet transform?** Wavelet/DCT filter-bank decompositions excel at lossy compression (quantize high-frequency bands with little perceptual impact) but introduce coefficient overflow, update-step correlation, doubled memory bandwidth, and subband entropy-coding mismatch when used for lossless compression of already-smooth medical images. Simple delta prediction leaves a single homogeneous near-zero residual distribution ideal for a uniform 16-bit entropy coder — no subband partitioning or context modeling needed.
 
 Full discussion: [**docs/16bit-alphabet-entropy-coding.md**](./docs/16bit-alphabet-entropy-coding.md)
+
+---
+
+## Source Files & Architecture
+
+For a complete description of the internal architecture — key source files, bit-depth handling, FSE/ANS state machine details, RLE protocol, and container format layouts — see:
+
+**[docs/architecture.md](./docs/architecture.md)**
+
+Quick reference of the most important source files:
+
+| File | Purpose |
+|------|---------|
+| `fseu16.go` | FSE data structures and constants |
+| `fsecompressu16.go` / `fsedecompressu16.go` | FSE compress/decompress |
+| `deltacompressu16.go` | Delta encoding/decoding |
+| `deltarlecompressu16.go` | Combined Delta+RLE pipeline |
+| `rlecompressu16.go` / `rledecompressu16.go` | RLE compress/decompress |
+| `canhuffmancompressu16.go` / `canhuffmandecompressu16.go` | Canonical Huffman |
+| `fse2state.go` / `fse4state.go` | Multi-state FSE decoders (ILP) |
+| `rans8state.go` | 8-state rANS decoder |
+| `multiframe.go` / `multiframecompress.go` | MIC2 container |
+| `wsiformat.go` / `wsicompress.go` / `wsipyramid.go` | MIC3 WSI container |
+| `ycocgr.go` | YCoCg-R reversible color transform |
+| `temporaldelta.go` | Inter-frame ZigZag temporal delta |
+| `asm_amd64.go` / `asm_amd64.s` | amd64 assembly optimizations |
+| `asm_arm64.go` / `asm_arm64.s` | arm64 assembly optimizations |
+| `asm_generic.go` | Pure-Go fallbacks |
+
+---
+
+## Test Data
+
+Test images in `testdata/`:
+
+| Image | Dimensions | Modality | Notes |
+|-------|-----------|----------|-------|
+| MR | 256×256 | Brain/cardiac MRI | 8–12 bit effective depth |
+| CT | 512×512 | Computed tomography | Full 16-bit range |
+| CR | 2140×1760 | Computed radiography | — |
+| XR | 2048×2577 | X-ray | — |
+| MG1–MG4 | Various large | Mammography | Best compression ratios |
+| MG_TOMO | 2457×1890, 69 frames | Breast Tomosynthesis | 10-bit, multiframe DICOM |
+| wsi_tissue_512x384.rgb | 512×384 | H&E pathology | Synthetic tissue, RGB 8-bit |
+| wsi_background_256x256.rgb | 256×256 | WSI background | White background, RGB 8-bit |
+
+All greyscale images are raw little-endian uint16. RGB images are packed 3-byte-per-pixel (R, G, B).
+
+---
+
+## Developer Guide
+
+For optimization details, performance-sensitive code paths, common gotchas, and a complete test/benchmark command reference, see:
+
+**[docs/developer-guide.md](./docs/developer-guide.md)**
+
+Quick summary of the six applied optimizations:
+
+1. **FSE decode loop inlining** — state transitions inlined with local `dt` reference to avoid function call overhead
+2. **Dual-buffer histogram** — even/odd pixel interleaving avoids store-to-load forwarding stalls
+3. **Adaptive `tableLog`** — auto-raised 11→12 for dense symbol distributions (+4–7% ratio on CR/MG)
+4. **Branch-free delta decompression** — separate loops for corner/edge/interior pixels eliminate per-pixel boundary checks
+5. **RLE same-run fast-path** — most common case returns without touching the input slice
+6. **Dynamic table sizing** — `symbolTT`/`stateTable` sized to actual symbol range (8-bit: ~2 KB vs 512 KB)
 
 ---
 
