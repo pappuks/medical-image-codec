@@ -427,3 +427,249 @@ fse4_done:
     // Return produced.
     MOVD R11, 48(RSP)
     RET
+
+
+// func rans8StateDecompNEON(dt, br, states, out unsafe.Pointer, count int) int
+//
+// 8-state rANS decode kernel for ARM64.
+//
+// ABI0 stack layout ($16 frame, so args are at frame+8, frame+16, ...):
+//   (frame=16)
+//   24(RSP) = dt      — *decSymbolU16
+//   32(RSP) = br      — *bitReader
+//   40(RSP) = states  — *[8]uint32
+//   48(RSP) = out     — *uint16
+//   56(RSP) = count   int
+//   64(RSP) = ret     int (return value slot)
+//
+// Register allocation:
+//   R0  = decTable base
+//   R1  = scratch / 64-constant
+//   R2  = br.off
+//   R3  = br.value
+//   R4  = br.bitsRead
+//   R5  = sA, R6 = sB, R7 = sC, R8 = sD
+//   R9  = out pointer
+//   R10 = remaining count
+//   R11 = produced count
+//   R12 = byte offset (state × 8)
+//   R13 = nbBits scratch
+//   R14 = symbol/lowBits scratch
+//   R15 = br.in.ptr
+//   R16 = sE  (IP0, caller-saved — no save needed)
+//   R17 = sF  (IP1, caller-saved)
+//   R19 = sG  (callee-saved — saved in frame)
+//   R20 = sH  (callee-saved — saved in frame)
+//
+TEXT ·rans8StateDecompNEON(SB),NOSPLIT,$16-48
+    // Save callee-saved registers in local frame.
+    MOVD R19, 0(RSP)
+    MOVD R20, 8(RSP)
+
+    // Load args (base offset = frame_size + 8 = 16 + 8 = 24).
+    MOVD 24(RSP), R0   // dt
+    MOVD 32(RSP), R1   // br (temp)
+    MOVD 40(RSP), R2   // states (temp — will reload later)
+    MOVD 48(RSP), R9   // out
+    MOVD 56(RSP), R10  // count
+
+    // Load bitReader fields.
+    MOVD  0(R1),  R15   // br.in.ptr
+    MOVD  24(R1), R2    // br.off
+    MOVD  32(R1), R3    // br.value
+    MOVBU 40(R1), R4    // br.bitsRead
+
+    // Load all 8 states.
+    MOVD  40(RSP), R1   // reload states ptr
+    MOVWU 0(R1),   R5   // sA
+    MOVWU 4(R1),   R6   // sB
+    MOVWU 8(R1),   R7   // sC
+    MOVWU 12(R1),  R8   // sD
+    MOVWU 16(R1),  R16  // sE
+    MOVWU 20(R1),  R17  // sF
+    MOVWU 24(R1),  R19  // sG
+    MOVWU 28(R1),  R20  // sH
+
+    MOVD $0, R11   // produced = 0
+
+rans8_loop:
+    CMP $8, R10
+    BLT rans8_done
+    CMP $16, R2         // need 16 bytes: up to 4 fillFast each consuming 4 bytes
+    BLT rans8_done
+
+    // fillFast 1: before symbols A-B.
+    CMP $32, R4
+    BLT rnf1
+    MOVWU -4(R15)(R2*1), R12
+    LSL  $32, R3, R3
+    ORR  R12, R3, R3
+    SUB  $32, R4, R4
+    SUB  $4,  R2, R2
+rnf1:
+
+    // Symbol A (state in R5)
+    LSL   $3, R5, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 0(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R5
+    ADD   R14, R5, R5
+
+    // Symbol B (state in R6)
+    LSL   $3, R6, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 2(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R6
+    ADD   R14, R6, R6
+
+    // fillFast 2: before symbols C-D.
+    CMP $32, R4
+    BLT rnf2
+    MOVWU -4(R15)(R2*1), R12
+    LSL  $32, R3, R3
+    ORR  R12, R3, R3
+    SUB  $32, R4, R4
+    SUB  $4,  R2, R2
+rnf2:
+
+    // Symbol C (state in R7)
+    LSL   $3, R7, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 4(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R7
+    ADD   R14, R7, R7
+
+    // Symbol D (state in R8)
+    LSL   $3, R8, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 6(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R8
+    ADD   R14, R8, R8
+
+    // fillFast 3: before symbols E-F.
+    CMP $32, R4
+    BLT rnf3
+    MOVWU -4(R15)(R2*1), R12
+    LSL  $32, R3, R3
+    ORR  R12, R3, R3
+    SUB  $32, R4, R4
+    SUB  $4,  R2, R2
+rnf3:
+
+    // Symbol E (state in R16)
+    LSL   $3, R16, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 8(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R16
+    ADD   R14, R16, R16
+
+    // Symbol F (state in R17)
+    LSL   $3, R17, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 10(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R17
+    ADD   R14, R17, R17
+
+    // fillFast 4: before symbols G-H.
+    CMP $32, R4
+    BLT rnf4
+    MOVWU -4(R15)(R2*1), R12
+    LSL  $32, R3, R3
+    ORR  R12, R3, R3
+    SUB  $32, R4, R4
+    SUB  $4,  R2, R2
+rnf4:
+
+    // Symbol G (state in R19)
+    LSL   $3, R19, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 12(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R19
+    ADD   R14, R19, R19
+
+    // Symbol H (state in R20)
+    LSL   $3, R20, R12
+    MOVBU 6(R0)(R12*1), R13
+    MOVHU 4(R0)(R12*1), R14
+    MOVH  R14, 14(R9)
+    LSLV  R4, R3, R14
+    ADD   R13, R4, R4
+    MOVD  $64, R1
+    SUB   R13, R1, R1
+    LSRV  R1, R14, R14
+    MOVWU 0(R0)(R12*1), R20
+    ADD   R14, R20, R20
+
+    ADD $16, R9,  R9    // out += 8 x 2 bytes
+    ADD $8,  R11, R11   // produced += 8
+    SUB $8,  R10, R10   // remaining -= 8
+    B   rans8_loop
+
+rans8_done:
+    // Write back bitReader fields.
+    MOVD  32(RSP), R1   // reload br ptr
+    MOVD  R15, 0(R1)    // br.in.ptr
+    MOVD  R2,  24(R1)   // br.off
+    MOVD  R3,  32(R1)   // br.value
+    MOVB  R4,  40(R1)   // br.bitsRead
+
+    // Write back all 8 states.
+    MOVD 40(RSP), R1
+    MOVW R5,  0(R1)
+    MOVW R6,  4(R1)
+    MOVW R7,  8(R1)
+    MOVW R8,  12(R1)
+    MOVW R16, 16(R1)
+    MOVW R17, 20(R1)
+    MOVW R19, 24(R1)
+    MOVW R20, 28(R1)
+
+    // Return produced count.
+    MOVD R11, 64(RSP)
+
+    // Restore callee-saved registers.
+    MOVD 0(RSP), R19
+    MOVD 8(RSP), R20
+    RET

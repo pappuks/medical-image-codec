@@ -94,10 +94,14 @@ func FSEDecompressU16TwoState(b []byte, s *ScratchU16) ([]uint16, error) {
 }
 
 // FSEDecompressU16Auto auto-detects the stream format based on the magic prefix:
+//   [0xFF, 0x08] → eight-state rANS decoder
 //   [0xFF, 0x04] → four-state decoder
 //   [0xFF, 0x02] → two-state decoder
 //   otherwise   → single-state decoder
 func FSEDecompressU16Auto(b []byte, s *ScratchU16) ([]uint16, error) {
+	if len(b) >= 2 && b[0] == eightStateMagic0 && b[1] == eightStateMagic1 {
+		return RANSDecompressU16EightState(b, s)
+	}
 	if len(b) >= 2 && b[0] == fourStateMagic0 && b[1] == fourStateMagic1 {
 		return FSEDecompressU16FourState(b, s)
 	}
