@@ -144,3 +144,112 @@ func WaveletInverse2D(data []int32, rows, cols int) {
 		wt53Inverse1D(data, y*cols, cols, 1)
 	}
 }
+
+// wt53Forward2DSeparated applies the 5/3 forward wavelet transform to the
+// rows×cols region in a buffer of fullCols width, producing the standard
+// Mallat subband layout:
+//
+//	[LL | HL]
+//	[LH | HH]
+//
+// where LL occupies top-left (nRowLow × nColLow), HL top-right,
+// LH bottom-left, HH bottom-right, with nRowLow=(rows+1)/2, nColLow=(cols+1)/2.
+//
+// This layout allows correct multi-level transforms: each subsequent level
+// is applied only to the contiguous LL region in the top-left corner.
+func wt53Forward2DSeparated(data []int32, rows, cols, fullCols int) {
+	nColLow := (cols + 1) / 2
+	nRowLow := (rows + 1) / 2
+	rowTmp := make([]int32, cols)
+	colTmp := make([]int32, rows)
+
+	// Horizontal 1D lifting to each row (interleaved output: even=low, odd=high)
+	for y := 0; y < rows; y++ {
+		wt53Forward1D(data, y*fullCols, cols, 1)
+	}
+	// De-interleave each row: even positions → first half, odd → second half
+	for y := 0; y < rows; y++ {
+		start := y * fullCols
+		copy(rowTmp, data[start:start+cols])
+		for i := 0; i < nColLow; i++ {
+			data[start+i] = rowTmp[2*i]
+		}
+		for i := 0; i < cols/2; i++ {
+			data[start+nColLow+i] = rowTmp[2*i+1]
+		}
+	}
+	// Vertical 1D lifting on left-half columns (x=0..nColLow-1), then de-interleave
+	for x := 0; x < nColLow; x++ {
+		wt53Forward1D(data, x, rows, fullCols)
+		for i := 0; i < rows; i++ {
+			colTmp[i] = data[i*fullCols+x]
+		}
+		for i := 0; i < nRowLow; i++ {
+			data[i*fullCols+x] = colTmp[2*i]
+		}
+		for i := 0; i < rows/2; i++ {
+			data[(nRowLow+i)*fullCols+x] = colTmp[2*i+1]
+		}
+	}
+	// Vertical 1D lifting on right-half columns (x=nColLow..cols-1), then de-interleave
+	for x := nColLow; x < cols; x++ {
+		wt53Forward1D(data, x, rows, fullCols)
+		for i := 0; i < rows; i++ {
+			colTmp[i] = data[i*fullCols+x]
+		}
+		for i := 0; i < nRowLow; i++ {
+			data[i*fullCols+x] = colTmp[2*i]
+		}
+		for i := 0; i < rows/2; i++ {
+			data[(nRowLow+i)*fullCols+x] = colTmp[2*i+1]
+		}
+	}
+}
+
+// wt53Inverse2DSeparated applies the 5/3 inverse wavelet transform to a region
+// stored in Mallat subband layout, restoring the original pixels in-place.
+func wt53Inverse2DSeparated(data []int32, rows, cols, fullCols int) {
+	nColLow := (cols + 1) / 2
+	nRowLow := (rows + 1) / 2
+	colTmp := make([]int32, rows)
+	rowTmp := make([]int32, cols)
+
+	// Re-interleave vertically + inverse vertical lifting: left-half columns
+	for x := 0; x < nColLow; x++ {
+		for i := 0; i < nRowLow; i++ {
+			colTmp[2*i] = data[i*fullCols+x]
+		}
+		for i := 0; i < rows/2; i++ {
+			colTmp[2*i+1] = data[(nRowLow+i)*fullCols+x]
+		}
+		for i := 0; i < rows; i++ {
+			data[i*fullCols+x] = colTmp[i]
+		}
+		wt53Inverse1D(data, x, rows, fullCols)
+	}
+	// Re-interleave vertically + inverse vertical lifting: right-half columns
+	for x := nColLow; x < cols; x++ {
+		for i := 0; i < nRowLow; i++ {
+			colTmp[2*i] = data[i*fullCols+x]
+		}
+		for i := 0; i < rows/2; i++ {
+			colTmp[2*i+1] = data[(nRowLow+i)*fullCols+x]
+		}
+		for i := 0; i < rows; i++ {
+			data[i*fullCols+x] = colTmp[i]
+		}
+		wt53Inverse1D(data, x, rows, fullCols)
+	}
+	// Re-interleave horizontally + inverse horizontal lifting: each row
+	for y := 0; y < rows; y++ {
+		start := y * fullCols
+		copy(rowTmp, data[start:start+cols])
+		for i := 0; i < nColLow; i++ {
+			data[start+2*i] = rowTmp[i]
+		}
+		for i := 0; i < cols/2; i++ {
+			data[start+2*i+1] = rowTmp[nColLow+i]
+		}
+		wt53Inverse1D(data, start, cols, 1)
+	}
+}
