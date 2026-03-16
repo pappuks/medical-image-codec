@@ -23,6 +23,9 @@ go test -run TestWSITileCompress -v       # WSI tile compression (white, tissue,
 go test -run TestWSICompress -v           # Full WSI compress/decompress roundtrip
 go test -run TestWSIPyramidLevels -v      # Pyramid level generation
 go test -run TestWSIRegion -v             # Cross-tile region decompression
+go test -run TestWaveletSIMD2DRoundTrip -v      # SIMD 2D wavelet lossless roundtrip
+go test -run TestWaveletSIMDMatchesScalar -v    # SIMD vs scalar bit-exact comparison
+go test -run TestWaveletV2SIMDRLEFSECompress -v # SIMD wavelet end-to-end pipeline
 
 # Run benchmarks (decompression speed + compression ratio)
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
@@ -31,6 +34,9 @@ go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEHuffCompress$ 
 # WSI benchmarks
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkWSITileCompressTissue$ mic
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkWSICompress mic
+
+# Wavelet SIMD vs scalar comparison
+go test -benchmem -run=^$ -benchtime=5x -bench "^(BenchmarkWaveletV2RLEFSECompress|BenchmarkWaveletV2SIMDRLEFSECompress)$" mic
 
 # Run all benchmarks
 go test -bench=. -benchtime=10x
@@ -71,6 +77,31 @@ Raw 16-bit pixels
 | `multiframecompress.go` | Multi-frame compress/decompress orchestration (single + multi) |
 | `multiframe_test.go` | Multi-frame roundtrip tests (independent + temporal + real DICOM) |
 | `fseu16_test.go` | All single-frame tests and benchmarks |
+| `waveletu16.go` | 5/3 integer wavelet: 1D lifting, 2D separated transform, scalar helpers |
+| `waveletfsecompressu16.go` | Wavelet V1/V2/SIMD compress/decompress pipelines, subband ordering |
+| `wavelet_simd_amd64.go` | AMD64 dispatch: AVX2 gate for predict/update kernel calls |
+| `wavelet_simd_amd64.s` | AVX2 kernels: `wt53PredictAVX2`, `wt53UpdateAVX2` and inverses |
+| `wavelet_simd_arm64.go` | ARM64 dispatch: scalar fallback (blocked layout still improves cache) |
+| `wavelet_simd_generic.go` | Generic fallback for non-AMD64/ARM64 targets |
+| `waveletu16_test.go` | Wavelet tests: roundtrip, SIMD correctness, benchmarks |
+
+### Wavelet Pipeline (WaveletV2 / SIMD)
+
+An alternative lossless pipeline using the Le Gall 5/3 integer wavelet (same as JPEG 2000 lossless):
+
+```
+Raw 16-bit pixels
+    -> 5/3 wavelet forward transform (multi-level, separated Mallat layout)
+    -> Subband-order coefficient scan
+    -> ZigZag encode signed coefficients → uint16 (with escape for overflow)
+    -> RLE
+    -> FSE
+    -> Compressed byte stream
+```
+
+The 2D transform applies horizontal rows first, then vertical columns, storing coefficients in the Mallat layout (LL subband top-left, detail subbands in remaining quadrants). Five levels are used by default.
+
+**SIMD variant** (`WaveletV2SIMDRLEFSECompressU16`): uses `wt53Forward2DSeparatedSIMD` which combines two optimizations — blocked column access (8 columns per cache-line) and AVX2 predict/update kernels — for +14–47% throughput on AMD64 (Haswell+). Compressed output is bit-identical to the scalar variant.
 
 ### Multi-Frame / MIC2 Format
 
@@ -131,12 +162,20 @@ The codec handles all bit depths (8-16 bit) dynamically using `bits.Len16(maxVal
 
 6. **Dynamic table sizing** (`fsecompressu16.go:allocCtable`, `fsedecompressu16.go:allocDtable`): symbolTT and stateTable are sized to actual symbol range instead of always 65536. For 8-bit images this reduces working set from 512KB to ~2KB.
 
+7. **Blocked column transform + AVX2 kernels** (`waveletu16.go:wt53Forward2DSeparatedSIMD`, `wavelet_simd_amd64.s`): Two complementary improvements for the 2D wavelet transform:
+   - *Blocked column pass*: processes 8 consecutive columns per loop iteration so each 32-byte cache-line load serves all 8 columns, reducing cache misses ~8× versus the per-column scalar loop. Gain is largest on wide images (CR: +47% throughput).
+   - *AVX2 predict/update kernels*: `wt53PredictAVX2`/`wt53UpdateAVX2` and their inverses process 8 `int32` values per cycle using `VPADDD`/`VPSUBD`/`VPSRAD`; dispatched via `cpuHasAVX2` (Haswell+). The kernels operate on contiguous arrays produced by the blocked layout — no gather/scatter needed.
+   - Overall decompression speedup: +14–47% across modalities (single-threaded, 5-level transform).
+   - Compressed stream is **bit-identical** to scalar V2; only the transform kernel differs.
+
 ### Performance-Sensitive Areas
 
 - `decompress()` in `fsedecompressu16.go` — the innermost FSE decode loop; any change here affects all decompression throughput
 - `DecodeNext2()` in `rledecompressu16.go` — called once per output symbol during RLE decompression
 - `DeltaDecompressU16()` / `DecodeNextSymbolNC()` — called once per pixel during delta decompression
 - `countSimple()` in `fsecompressu16.go` — histogram building; memory-bandwidth limited on large images
+- `wt53Forward2DSeparatedSIMD()` / `wt53Inverse2DSeparatedSIMD()` — blocked SIMD wavelet transform; column pass is cache-bandwidth limited on large images
+- `wt53PredictAVX2()` / `wt53UpdateAVX2()` in `wavelet_simd_amd64.s` — AVX2 inner loops for predict and update steps
 
 ### Things to Watch Out For
 
@@ -146,6 +185,8 @@ The codec handles all bit depths (8-16 bit) dynamically using `bits.Len16(maxVal
 - Huffman and FSE use **different** bit reader/writer implementations (forward vs reverse)
 - The `cumul` array in `buildCTable` has size `maxSymbolValue + 2` (65537 entries) due to the sentinel
 - RLE midCount protocol: same runs count DOWN from midCount, diff runs count DOWN from above midCount. `c == midCount` is the sentinel for diff-run completion
+- Wavelet column de-interleave is done in a separate scalar pass after all column blocks; in-place de-interleave for low-pass rows is safe (source row `2i` is always ahead of destination row `i`), but high-pass must use a temp buffer to avoid overwriting source rows before reading them
+- The SIMD wavelet functions (`wt53Forward2DSeparatedSIMD`, `wt53Inverse2DSeparatedSIMD`) produce the same Mallat subband layout as the scalar equivalents; the compressed stream is interchangeable between `WaveletV2RLEFSECompressU16` and `WaveletV2SIMDRLEFSECompressU16`
 
 ### WSI / MIC3 Format (Whole Slide Imaging)
 
