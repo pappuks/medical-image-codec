@@ -25,16 +25,17 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 4. [Whole Slide Imaging (MIC3)](#whole-slide-imaging-mic3)
 5. [Algorithm Details](#algorithm-details)
 6. [Native Optimizations](#native-optimizations)
-7. [Compression Results](#compression-results)
-8. [Benchmark Results](#benchmark-results)
-9. [Browser Decoder](#browser-decoder)
-10. [CLI Reference](#cli-reference)
-11. [Comparison with HTJ2K](#comparison-with-htj2k)
-12. [Design Background](#design-background)
-13. [Source Files & Architecture](#source-files--architecture)
-14. [Test Data](#test-data)
-15. [Developer Guide](#developer-guide)
-16. [Roadmap](#roadmap)
+7. [Wavelet SIMD Transform](#wavelet-simd-transform)
+8. [Compression Results](#compression-results)
+9. [Benchmark Results](#benchmark-results)
+10. [Browser Decoder](#browser-decoder)
+11. [CLI Reference](#cli-reference)
+12. [Comparison with HTJ2K](#comparison-with-htj2k)
+13. [Design Background](#design-background)
+14. [Source Files & Architecture](#source-files--architecture)
+15. [Test Data](#test-data)
+16. [Developer Guide](#developer-guide)
+17. [Roadmap](#roadmap)
 
 > **New:** [Delta+Zstandard comparison](#comparison-with-deltazstandard) and [MED predictor comparison](#med-predictor-comparison) added — see [Compression Results](#compression-results).
 
@@ -59,22 +60,29 @@ mic.CompressWSI(rgbPixels, width, height, 3, 8, mic.WSIOptions{})
 go test -v ./...
 
 # Run specific test suites
-go test -run TestDeltaRleFSECompress -v    # Delta+RLE+FSE pipeline
-go test -run TestDeltaRleHuffCompress -v   # Delta+RLE+Huffman pipeline
-go test -run TestFSECompress -v            # FSE only
-go test -run TestHuffCompress -v           # Huffman only
-go test -run TestTemporalDelta -v          # Temporal delta encode/decode
-go test -run TestMultiFrame -v             # Multi-frame roundtrip (both modes)
-go test -run TestMultiFrameTomo -v         # Real DICOM 69-frame tomo test
-go test -run TestYCoCgR -v                 # YCoCg-R color transform roundtrip
-go test -run TestWSITileCompress -v        # WSI tile compression
-go test -run TestWSICompress -v            # Full WSI compress/decompress roundtrip
-go test -run TestWSIPyramidLevels -v       # Pyramid level generation
-go test -run TestWSIRegion -v              # Cross-tile region decompression
+go test -run TestDeltaRleFSECompress -v         # Delta+RLE+FSE pipeline
+go test -run TestDeltaRleHuffCompress -v        # Delta+RLE+Huffman pipeline
+go test -run TestFSECompress -v                 # FSE only
+go test -run TestHuffCompress -v                # Huffman only
+go test -run TestTemporalDelta -v               # Temporal delta encode/decode
+go test -run TestMultiFrame -v                  # Multi-frame roundtrip (both modes)
+go test -run TestMultiFrameTomo -v              # Real DICOM 69-frame tomo test
+go test -run TestYCoCgR -v                      # YCoCg-R color transform roundtrip
+go test -run TestWSITileCompress -v             # WSI tile compression
+go test -run TestWSICompress -v                 # Full WSI compress/decompress roundtrip
+go test -run TestWSIPyramidLevels -v            # Pyramid level generation
+go test -run TestWSIRegion -v                   # Cross-tile region decompression
+go test -run TestWaveletSIMDMatchesScalar -v    # SIMD wavelet bit-exact vs scalar
+go test -run TestWaveletV2SIMDRLEFSECompress -v # SIMD wavelet end-to-end pipeline
 
 # Run benchmarks
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEHuffCompress$ mic
+
+# Wavelet SIMD vs scalar comparison
+go test -benchmem -run=^$ -benchtime=5x \
+  -bench "^(BenchmarkWaveletV2RLEFSECompress|BenchmarkWaveletV2SIMDRLEFSECompress)$" mic
+
 go test -bench=. -benchtime=10x
 ```
 
@@ -349,6 +357,61 @@ For full details, design decisions, and benchmark methodology see [`docs/native-
 
 ---
 
+## Wavelet SIMD Transform
+
+The 5/3 integer wavelet pipeline (`WaveletV2SIMDRLEFSECompressU16`) uses two complementary optimisations over the scalar baseline to improve decompression throughput by **14–47%** on AMD64 (single-threaded). The compressed stream is **bit-identical** to the scalar variant — the same file decompresses correctly through either path.
+
+### Two Optimisations
+
+**1. Blocked column pass (cache efficiency)**
+
+The scalar wavelet iterates one column at a time during the vertical pass. On a 2140×1760 image each step accesses elements separated by `cols × 4 = 8560 bytes` — nearly always a cache miss. The blocked version processes **8 consecutive columns per iteration** so one 32-byte cache-line read serves all 8 columns, reducing cache misses roughly 8×.
+
+```
+Scalar (per column):
+  col 0 → row 0 … row 1759   (8560-byte stride, ~1760 cache misses)
+  col 1 → row 0 … row 1759   (same)
+  …
+
+Blocked (8 columns at a time):
+  cols 0–7 → row 0   (one 32-byte load, 8 columns covered)
+  cols 0–7 → row 1   (one 32-byte load)
+  …
+```
+
+**2. AVX2 predict/update kernels (arithmetic throughput)**
+
+The two lifting steps — predict and update — are inner loops over contiguous `int32` arrays. The blocked layout produces exactly these contiguous arrays, enabling the AVX2 kernels to process **8 values per cycle** using `VPADDD`, `VPSUBD`, and `VPSRAD`. A `cpuHasAVX2` gate (set once via `CPUID` in `init()`) falls back to scalar on pre-Haswell CPUs with zero code changes.
+
+### Throughput on Intel Xeon @ 2.10 GHz (single-threaded, 5-level transform)
+
+| Modality | Scalar (MB/s) | SIMD (MB/s) | Speedup |
+|----------|:-------------:|:-----------:|:-------:|
+| MR   256×256 | 93 | 118 | **+27%** |
+| CT   512×512 | 136 | 159 | **+17%** |
+| CR   2140×1760 | 158 | **232** | **+47%** |
+| XR   2048×2577 | 183 | 241 | **+32%** |
+| MG1  2457×1996 | 212 | 257 | **+21%** |
+| MG2  2457×1996 | 221 | 255 | **+15%** |
+| MG3  4774×3064 | 141 | 171 | **+21%** |
+| MG4  4096×3328 | 175 | 201 | **+14%** |
+
+The CR image (2140×1760) shows the largest gain because its wide rows make the column pass most cache-bound.
+
+### API
+
+```go
+// Compress using the SIMD-accelerated wavelet transform
+compressed, err := mic.WaveletV2SIMDRLEFSECompressU16(pixels, rows, cols, maxValue, 5)
+
+// Decompress (also SIMD-accelerated; accepts streams from either variant)
+pixels, rows, cols, err := mic.WaveletV2SIMDRLEFSEDecompressU16(compressed)
+```
+
+For design details, assembly listings, and per-level profiling see **[docs/wavelet-simd.md](./docs/wavelet-simd.md)**.
+
+---
+
 ## Compression Results
 
 `Delta + RLE + FSE` — all images are 16-bit greyscale DICOM. CT has the widest dynamic range (max value 65 535).
@@ -422,7 +485,7 @@ go test -run TestMEDPredictorComparison -v
 
 ### Wavelet+FSE vs Delta+RLE+FSE
 
-A 5/3 integer wavelet transform was evaluated as an alternative decorrelation stage. **Delta+RLE+FSE wins on all DICOM modalities**, in both compression ratio and decompression speed. Full analysis: [docs/wavelet-fse-analysis.md](./docs/wavelet-fse-analysis.md).
+A 5/3 integer wavelet transform was evaluated as an alternative decorrelation stage. **Delta+RLE+FSE wins on all DICOM modalities**, in both compression ratio and decompression speed. The SIMD-accelerated wavelet (`WaveletV2SIMDRLEFSECompressU16`) narrows the speed gap by 14–47% but does not close it. Full analysis: [docs/wavelet-fse-analysis.md](./docs/wavelet-fse-analysis.md).
 
 #### Compression Ratio
 
@@ -649,9 +712,13 @@ Quick reference of the most important source files:
 | `wsiformat.go` / `wsicompress.go` / `wsipyramid.go` | MIC3 WSI container |
 | `ycocgr.go` | YCoCg-R reversible color transform |
 | `temporaldelta.go` | Inter-frame ZigZag temporal delta |
-| `asm_amd64.go` / `asm_amd64.s` | amd64 assembly optimizations |
-| `asm_arm64.go` / `asm_arm64.s` | arm64 assembly optimizations |
-| `asm_generic.go` | Pure-Go fallbacks |
+| `asm_amd64.go` / `asm_amd64.s` | amd64 assembly: FSE 4-state, histogram, YCoCg-R dispatch |
+| `asm_arm64.go` / `asm_arm64.s` | arm64 assembly: FSE 4-state, histogram |
+| `asm_generic.go` | Pure-Go fallbacks for non-amd64/arm64 |
+| `waveletu16.go` | 5/3 integer wavelet: 1D lifting, 2D transform, scalar helpers |
+| `waveletfsecompressu16.go` | Wavelet V1/V2/SIMD compress+decompress pipelines |
+| `wavelet_simd_amd64.go` / `wavelet_simd_amd64.s` | AVX2 predict/update kernels for blocked wavelet |
+| `wavelet_simd_arm64.go` / `wavelet_simd_generic.go` | ARM64/generic fallbacks |
 
 ---
 
@@ -697,6 +764,7 @@ Quick summary of the six applied optimizations:
 - [x] Browser-based decoding in JS and WASM — see [web decoder](./web/README.md)
 - [x] Multi-frame image support (Breast Tomosynthesis) — MIC2 container with independent and temporal modes, browser movie player
 - [x] Wavelet (5/3 integer) decorrelation stage — benchmarked; Delta+RLE+FSE wins for lossless; wavelet remains a candidate for a future lossy/progressive mode
+- [x] SIMD-accelerated wavelet transform — blocked column pass (8× fewer cache misses) + AVX2 predict/update kernels; +14–47% decompression throughput; see [docs/wavelet-simd.md](./docs/wavelet-simd.md)
 - [x] Whole Slide Imaging (WSI) — MIC3 tiled container with YCoCg-R color transform, pyramid levels, parallel tile compression, browser RGB viewer with level selector
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [x] Left+Up average predictor — implemented from [Klaus Post's feedback](https://github.com/pappuks/medical-image-codec/issues/1); avg(left, top) replaces pure-left prediction in the main Delta+RLE+FSE pipeline
