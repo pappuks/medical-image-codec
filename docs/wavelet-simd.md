@@ -227,36 +227,106 @@ which is the bottleneck — benefits from SIMD without any de-interleave complex
 
 ---
 
+## 4-State FSE Integration
+
+Since the SIMD wavelet transform commit, all wavelet pipelines
+(`WaveletV2RLEFSECompressU16`, `WaveletV2SIMDRLEFSECompressU16`, and variants) use
+**`FSECompressU16FourState` / `FSEDecompressU16FourState`** in place of the original
+single-state FSE. This is the second major performance lever in the pipeline, acting
+independently of the wavelet SIMD acceleration.
+
+### How 4-State FSE Works
+
+The standard FSE decode loop has a serial dependency chain: each state transition
+reads a table entry that depends on the previous transition's output state, limiting
+throughput to roughly one symbol per table-lookup latency (~4–6 cycles).
+
+The 4-state variant runs **four independent ANS state machines** (A, B, C, D) on
+interleaved symbol positions:
+
+```
+symbol[0] ← stateA    symbol[4] ← stateA    …
+symbol[1] ← stateB    symbol[5] ← stateB    …
+symbol[2] ← stateC    symbol[6] ← stateC    …
+symbol[3] ← stateD    symbol[7] ← stateD    …
+```
+
+Because the four chains are independent, the CPU's out-of-order engine can issue all
+four table lookups simultaneously. On AMD64, a BMI2 assembly kernel
+(`fse4StateDecompKernel` in `asm_amd64.s`) processes the bulk of the stream with
+inlined bit extraction via `SHLXQ`/`SHRXQ`, avoiding bounds checks and function call
+overhead.
+
+### Dispatch
+
+The same `cpuHasAVX2` gate used for the wavelet kernels controls the FSE 4-state
+assembly path — both are automatically active on Haswell+ (AVX2/BMI2) CPUs:
+
+```go
+// asm_amd64.go
+func fse4StateDecompNative(dt, br, states, out unsafe.Pointer, count int) int {
+    if cpuHasAVX2 {
+        return fse4StateDecompKernel(dt, br, states, out, count)
+    }
+    return 0  // Go fallback loop handles the stream
+}
+```
+
+On ARM64, `fse4StateDecompNEON` in `asm_arm64.s` provides the equivalent path.
+
+### Stream Format
+
+4-state compressed streams are prefixed with `[0xFF][0x04][count uint32 LE]` before
+the FSE header, allowing auto-detection via `FSEDecompressU16Auto`. The wavelet
+decompressors call `FSEDecompressU16FourState` directly (no auto-detect needed).
+
+---
+
 ## Benchmark Results
 
-**Platform**: Intel Xeon @ 2.10 GHz, single-threaded (`GOMAXPROCS=1` per
-goroutine), 5-level forward + inverse transform, measured with
-`BenchmarkWaveletV2RLEFSECompress` /
-`BenchmarkWaveletV2SIMDRLEFSECompress` (`-benchtime=5x`).
+**Platform**: Intel Xeon @ 2.80 GHz, 4 cores, `benchtime=10x` (10 concurrent
+goroutines per image). Full pipeline: FSE decode + RLE + ZigZag + inverse wavelet.
+Throughput is MB/s of **raw pixel data**.
 
-### Decompression throughput (MB/s of raw pixel data)
+### Decompression throughput (MB/s) and compression ratio
 
-| Modality | Dimensions | Scalar | SIMD | Speedup | Compression ratio |
-|----------|-----------|:------:|:----:|:-------:|:-----------------:|
-| MR   | 256×256     |  93 | 118 | **+27%** | 2.38× |
-| CT   | 512×512     | 136 | 159 | **+17%** | 1.67× |
-| CR   | 2140×1760   | 158 | 232 | **+47%** | 3.81× |
-| XR   | 2048×2577   | 183 | 241 | **+32%** | 1.76× |
-| MG1  | 2457×1996   | 212 | 257 | **+21%** | 8.67× |
-| MG2  | 2457×1996   | 221 | 255 | **+15%** | 8.65× |
-| MG3  | 4774×3064   | 141 | 171 | **+21%** | 2.37× |
-| MG4  | 4096×3328   | 175 | 201 | **+14%** | 3.59× |
+| Modality | Dimensions | Scalar+4FSE | SIMD+4FSE | Speedup | Ratio |
+|----------|-----------|:-----------:|:---------:|:-------:|:-----:|
+| MR   | 256×256     | 150 | 165 | **+10%** | 2.38× |
+| CT   | 512×512     | 152 | 190 | **+25%** | 1.67× |
+| CR   | 2140×1760   | 166 | 210 | **+27%** | 3.81× |
+| XR   | 2048×2577   | 193 | 214 | **+11%** | 1.76× |
+| MG1  | 2457×1996   | 182 | 227 | **+25%** | 8.67× |
+| MG2  | 2457×1996   | 193 | 241 | **+25%** | 8.65× |
+| MG3  | 4774×3064   | 118 | 112 | — †     | 2.32× |
+| MG4  | 4096×3328   | 144 | 198 | **+38%** | 3.59× |
 
-**Why CR shows the largest gain (+47%)**:
-CR (2140×1760) has the widest row width in the test set relative to L2 cache. Its
-column pass accesses rows 8560 bytes apart. The blocked layout converts that pattern
-from 3.77 M individual cache misses to ~472 K block loads, and the AVX2 kernels
-eliminate the per-element branch overhead in the tight inner loop.
+† MG3 difference is within measurement noise; both paths are memory-bandwidth bound.
 
-**Why MG4 shows the smallest gain (+14%)**:
-MG4 at 4096×3328 is large enough that even the blocked pass is memory-bandwidth
-bound. The AVX2 kernels help but the bottleneck shifts to DRAM bandwidth rather than
-cache-miss count.
+**Why CR and MG4 show large gains**: their column passes are the most cache-bound
+(wide images, large L2 miss count) so the blocked layout and AVX2 kernels deliver
+the biggest relative improvement.
+
+**Why MR and XR gains are smaller**: smaller images fit in L2 cache; the column pass
+is less bottlenecked, so the gain shifts towards the AVX2 arithmetic throughput
+improvement only.
+
+### Delta+RLE+FSE vs Wavelet SIMD+4FSE (full pipeline)
+
+| Modality | Delta+RLE+FSE (MB/s) | Wavelet SIMD+4FSE (MB/s) | Delta ratio | Wavelet ratio |
+|----------|:--------------------:|:------------------------:|:-----------:|:-------------:|
+| MR  | **186** | 165 | 2.35× | **2.38×** |
+| CT  | **281** | 190 | **2.24×** | 1.67× |
+| CR  | **302** | 210 | 3.63× | **3.81×** |
+| XR  | **513** | 214 | 1.74× | **1.76×** |
+| MG1 | **860** | 227 | 8.57× | **8.67×** |
+| MG2 | **729** | 241 | 8.55× | **8.65×** |
+| MG3 | **466** | 112 | 2.24× | **2.32×** |
+| MG4 | **826** | 198 | 3.47× | **3.59×** |
+
+The wavelet pipeline achieves better *compression ratios* on 7 of 8 modalities, but
+Delta+RLE+FSE is 1.1×–3.8× faster to decompress due to its single-pass memory
+access pattern and `uint16` working set.
 
 ---
 
@@ -318,14 +388,16 @@ go test -benchmem -run=^$ -benchtime=5x \
   -bench "^(BenchmarkWaveletV2RLEFSECompress|BenchmarkWaveletV2SIMDRLEFSECompress)$" mic
 ```
 
-Sample output (Intel Xeon @ 2.10 GHz, `GOMAXPROCS=4`):
+Sample output (Intel Xeon @ 2.80 GHz, `GOMAXPROCS=4`, `benchtime=10x`):
 
 ```
-BenchmarkWaveletV2RLEFSECompress/CR-4      158 MB/s   3.811 ratio
-BenchmarkWaveletV2SIMDRLEFSECompress/CR-4  232 MB/s   3.811 ratio   ← +47%
+BenchmarkWaveletV2RLEFSECompress/CR-4          166 MB/s   3.811 ratio
+BenchmarkWaveletV2SIMDRLEFSECompress/CR-4      210 MB/s   3.811 ratio   ← +27%
 
-BenchmarkWaveletV2RLEFSECompress/MG1-4     212 MB/s   8.666 ratio
-BenchmarkWaveletV2SIMDRLEFSECompress/MG1-4 257 MB/s   8.666 ratio   ← +21%
+BenchmarkWaveletV2RLEFSECompress/MG1-4         182 MB/s   8.665 ratio
+BenchmarkWaveletV2SIMDRLEFSECompress/MG1-4     227 MB/s   8.665 ratio   ← +25%
+
+BenchmarkDeltaRLEFSECompress/MG1-4             860 MB/s   8.566 ratio   ← Delta baseline
 ```
 
 ---

@@ -37,7 +37,7 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 16. [Developer Guide](#developer-guide)
 17. [Roadmap](#roadmap)
 
-> **New:** [Delta+Zstandard comparison](#comparison-with-deltazstandard) and [MED predictor comparison](#med-predictor-comparison) added — see [Compression Results](#compression-results).
+> **New:** Wavelet V2 SIMD pipeline now uses **4-state FSE** (4 independent ANS states + BMI2 assembly on AMD64), achieving better compression ratios than Delta+RLE+FSE on 7/8 modalities and matching or beating HTJ2K on 7/8 — see [Wavelet V2 SIMD vs Delta+RLE+FSE](#wavelet-v2-simd--4-state-fse-vs-deltarlefse) and [HTJ2K comparison](#comparison-with-htj2k). [Delta+Zstandard](#comparison-with-deltazstandard) and [MED predictor](#med-predictor-comparison) comparisons also available.
 
 ---
 
@@ -383,20 +383,20 @@ Blocked (8 columns at a time):
 
 The two lifting steps — predict and update — are inner loops over contiguous `int32` arrays. The blocked layout produces exactly these contiguous arrays, enabling the AVX2 kernels to process **8 values per cycle** using `VPADDD`, `VPSUBD`, and `VPSRAD`. A `cpuHasAVX2` gate (set once via `CPUID` in `init()`) falls back to scalar on pre-Haswell CPUs with zero code changes.
 
-### Throughput on Intel Xeon @ 2.10 GHz (single-threaded, 5-level transform)
+### Throughput on Intel Xeon @ 2.80 GHz (10 concurrent goroutines, 5-level transform, 4-state FSE)
 
-| Modality | Scalar (MB/s) | SIMD (MB/s) | Speedup |
-|----------|:-------------:|:-----------:|:-------:|
-| MR   256×256 | 93 | 118 | **+27%** |
-| CT   512×512 | 136 | 159 | **+17%** |
-| CR   2140×1760 | 158 | **232** | **+47%** |
-| XR   2048×2577 | 183 | 241 | **+32%** |
-| MG1  2457×1996 | 212 | 257 | **+21%** |
-| MG2  2457×1996 | 221 | 255 | **+15%** |
-| MG3  4774×3064 | 141 | 171 | **+21%** |
-| MG4  4096×3328 | 175 | 201 | **+14%** |
+| Modality | Scalar+4FSE (MB/s) | SIMD+4FSE (MB/s) | Speedup | Ratio |
+|----------|--------------------|-------------------|:-------:|:-----:|
+| MR   256×256   | 150 | 165 | **+10%** | 2.38× |
+| CT   512×512   | 152 | 190 | **+25%** | 1.67× |
+| CR   2140×1760 | 166 | **210** | **+27%** | 3.81× |
+| XR   2048×2577 | 193 | 214 | **+11%** | 1.76× |
+| MG1  2457×1996 | 182 | 227 | **+25%** | 8.67× |
+| MG2  2457×1996 | 193 | 241 | **+25%** | 8.65× |
+| MG3  4774×3064 | 118 | 112 | — | 2.32× |
+| MG4  4096×3328 | 144 | **198** | **+38%** | 3.59× |
 
-The CR image (2140×1760) shows the largest gain because its wide rows make the column pass most cache-bound.
+The CR and MG4 images show the largest gains as their column passes are most cache-bound (wide rows, large L2 miss count). MG3 is memory-bandwidth bound on this configuration.
 
 ### API
 
@@ -483,35 +483,47 @@ The JPEG-LS MED (Median Edge Detector) predictor `median(left, top, left+top-dia
 go test -run TestMEDPredictorComparison -v
 ```
 
-### Wavelet+FSE vs Delta+RLE+FSE
+### Wavelet V2 SIMD + 4-State FSE vs Delta+RLE+FSE
 
-A 5/3 integer wavelet transform was evaluated as an alternative decorrelation stage. **Delta+RLE+FSE wins on all DICOM modalities**, in both compression ratio and decompression speed. The SIMD-accelerated wavelet (`WaveletV2SIMDRLEFSECompressU16`) narrows the speed gap by 14–47% but does not close it. Full analysis: [docs/wavelet-fse-analysis.md](./docs/wavelet-fse-analysis.md).
+The 5/3 integer wavelet pipeline with 5-level decomposition, SIMD acceleration, and
+4-state FSE achieves **better compression ratios than Delta+RLE+FSE on 7 of 8
+modalities** — matching or exceeding HTJ2K (High Throughput JPEG 2000) on the same
+set. Delta+RLE+FSE remains faster to decompress due to its single-pass memory access
+pattern. Full analysis: [docs/wavelet-fse-analysis.md](./docs/wavelet-fse-analysis.md).
+
+Benchmarks on **Intel Xeon @ 2.80 GHz, 4 cores, 10 concurrent goroutines**.
 
 #### Compression Ratio
 
-| Modality | Delta+RLE+FSE | Wavelet+FSE | Wavelet+RLE+FSE |
+| Modality | Delta+RLE+FSE | Wavelet V2 SIMD+4FSE | HTJ2K (OpenJPH) |
 |----------|:---:|:---:|:---:|
-| MR (256×256) | **2.35×** | 2.09× | 2.09× |
-| CT (512×512) | **2.24×** | 1.48× | 1.48× |
-| CR (2140×1760) | **3.63×** | 2.59× | 2.59× |
-| XR (2048×2577) | **1.74×** | 1.53× | 1.53× |
-| MG1 (2457×1996) | **8.57×** | 4.91× | 7.28× |
-| MG2 (2457×1996) | **8.55×** | 4.90× | 7.27× |
-| MG3 (4774×3064) | **2.29×** | 1.90× | 1.93× |
-| MG4 (4096×3328) | **3.47×** | 2.63× | 3.11× |
+| MR (256×256) | 2.35× | **2.38×** | 2.38× |
+| CT (512×512) | **2.24×** | 1.67× | 1.77× |
+| CR (2140×1760) | 3.63× | **3.81×** | 3.77× |
+| XR (2048×2577) | 1.74× | **1.76×** | 1.67× |
+| MG1 (2457×1996) | 8.57× | **8.67×** | 8.25× |
+| MG2 (2457×1996) | 8.55× | **8.65×** | 8.24× |
+| MG3 (4774×3064) | 2.24× | **2.32×** | 2.22× |
+| MG4 (4096×3328) | 3.47× | **3.59×** | 3.51× |
+
+The wavelet pipeline matches HTJ2K on MR, beats it on CR/XR/MG1/MG2/MG3/MG4 (+1–5%),
+and falls short only on CT (−6%, due to 16-bit escape encoding in low-pass bands).
 
 #### Decompression Speed (MB/s)
 
-| Modality | Delta+RLE+FSE | Wavelet+FSE | Wavelet+RLE+FSE |
-|----------|:---:|:---:|:---:|
-| MR | 116 | **146** | 122 |
-| CT | 165 | **168** | 142 |
-| CR | **543** | 418 | 371 |
-| XR | **605** | 576 | 486 |
-| MG1 | **1 530** | 592 | 680 |
-| MG2 | **1 493** | 618 | 644 |
-| MG3 | **606** | 387 | 352 |
-| MG4 | **1 054** | 480 | 579 |
+| Modality | Delta+RLE+FSE | Wavelet V2 scalar+4FSE | Wavelet V2 SIMD+4FSE | SIMD speedup |
+|----------|:---:|:---:|:---:|:---:|
+| MR | **186** | 150 | 165 | +10% |
+| CT | **281** | 152 | 190 | +25% |
+| CR | **302** | 166 | 210 | +27% |
+| XR | **513** | 193 | 214 | +11% |
+| MG1 | **860** | 182 | 227 | +25% |
+| MG2 | **729** | 193 | 241 | +25% |
+| MG3 | **466** | 118 | 112 | — |
+| MG4 | **826** | 144 | 198 | +38% |
+
+Use **Delta+RLE+FSE** for production lossless rendering. Use **WaveletV2SIMDRLEFSECompressU16**
+when compression ratio is the priority, or as the foundation for a future lossy/progressive mode.
 
 ---
 
@@ -649,10 +661,20 @@ go build -o mic-compress ./cmd/mic-compress/
 
 ## Comparison with HTJ2K
 
-MIC is compared against lossless HTJ2K using [OpenJPH](https://github.com/aous72/OpenJPH) v0.15 (`ojph_compress -reversible true`), the leading open-source HTJ2K implementation. Measurements are single-threaded on Apple M2 Max. MIC uses the two-state FSE decoder. MIC timings are **in-process** (pure library calls); HTJ2K timings include subprocess launch + file I/O overhead (~6 ms).
+MIC offers two pipelines for comparison against lossless HTJ2K:
 
-| Image | Raw (MB) | MIC ratio | HTJ2K ratio | MIC decomp (MB/s) | HTJ2K decomp (MB/s) | MIC speedup |
-|-------|:--------:|:---------:|:-----------:|:-----------------:|:-------------------:|:-----------:|
+- **Delta+RLE+FSE** — MIC's primary pipeline, optimised for decompression speed
+- **WaveletV2SIMDRLEFSECompressU16** — 5-level 5/3 integer wavelet + SIMD + 4-state FSE, the same transform family as HTJ2K
+
+HTJ2K reference: [OpenJPH](https://github.com/aous72/OpenJPH) v0.15
+(`ojph_compress -reversible true`). Speed measurements are single-threaded on
+Apple M2 Max. MIC in-process timings are pure library calls; HTJ2K timings include
+subprocess launch + file I/O overhead (~6 ms).
+
+### Delta+RLE+FSE vs HTJ2K
+
+| Image | Raw (MB) | MIC (Delta) ratio | HTJ2K ratio | MIC decomp (MB/s) | HTJ2K decomp (MB/s) | MIC speedup |
+|-------|:--------:|:-----------------:|:-----------:|:-----------------:|:-------------------:|:-----------:|
 | MR    | 0.13 | 2.35× | **2.38×** | 133 | 20 † | — |
 | CT    | 0.50 | **2.24×** | 1.77× | 164 | 82 † | — |
 | CR    | 7.18 | 3.63× | **3.77×** | **287** | 215 | **1.33×** |
@@ -662,18 +684,44 @@ MIC is compared against lossless HTJ2K using [OpenJPH](https://github.com/aous72
 | MG3   | 27.3 | **2.24×** | 2.22× | **297** | 225 | **1.32×** |
 | MG4   | 26.0 | 3.47× | **3.51×** | **399** | 307 | **1.30×** |
 
-† MR and CT HTJ2K throughput is dominated by the ~6 ms process startup cost; the comparison is not meaningful for these small images. For images ≥ 7 MB the startup overhead is < 7% of total time.
+† MR and CT HTJ2K throughput is dominated by the ~6 ms process startup cost. For images ≥ 7 MB the startup overhead is < 7% of total time.
+
+### Wavelet V2 SIMD + 4-State FSE vs HTJ2K (ratio comparison)
+
+MIC's wavelet pipeline uses the **same 5/3 integer wavelet** as HTJ2K. Ratio
+differences reflect entropy coding strategy (MIC: 16-bit RLE + 4-state FSE;
+HTJ2K: context-adaptive arithmetic coder).
+
+| Image | Raw (MB) | MIC Wavelet V2 SIMD | HTJ2K | Δ ratio |
+|-------|:--------:|:-------------------:|:-----:|:-------:|
+| MR    | 0.13 | **2.38×** | 2.38× | tied |
+| CT    | 0.50 | 1.67× | **1.77×** | −6% |
+| CR    | 7.18 | **3.81×** | 3.77× | **+1%** |
+| XR    | 10.1 | **1.76×** | 1.67× | **+5%** |
+| MG1   | 9.35 | **8.67×** | 8.25× | **+5%** |
+| MG2   | 9.35 | **8.65×** | 8.24× | **+5%** |
+| MG3   | 27.3 | **2.32×** | 2.22× | **+4%** |
+| MG4   | 26.0 | **3.59×** | 3.51× | **+2%** |
+
+MIC's wavelet V2 pipeline **matches or exceeds HTJ2K compression ratios on 7 of 8
+modalities**. The advantage is largest on mammography (+5%) where MIC's 16-bit-native
+RLE efficiently encodes long runs of near-zero subband coefficients. CT is the
+exception (−6%) because full 16-bit dynamic range forces an escape-encoding path
+for low-pass coefficients that HTJ2K's arithmetic coder handles without overhead.
 
 **Key takeaways:**
-- Compression ratios are within 4% across all modalities; MIC wins on CT (+27%), XR (+4%), MG1/MG2 (+4%).
-- MIC decompresses **1.3–1.5× faster** on large images in single-threaded use (up from 1.1–1.2× with single-state FSE).
-- At 64 cores (AWS c7g.metal), MIC reaches up to **16 GB/s** on mammography (best case; geometric mean ~7.5 GB/s across modalities) while OpenJPH's single-process CLI scales to ~2–4 GB/s.
-- MIC is a pure Go library with no subprocess overhead — decompress any frame with a function call.
+- For **decompression speed**: Delta+RLE+FSE is 1.3–1.5× faster than HTJ2K (single-threaded, large images); at 64 cores MIC reaches up to 16 GB/s vs ~2–4 GB/s for OpenJPH's single-process CLI.
+- For **compression ratio**: Wavelet V2 SIMD matches or beats HTJ2K on 7/8 modalities using the same transform, while Delta+RLE+FSE wins on CT.
+- MIC is a **pure Go library** — no subprocess overhead, no file I/O, decompress any frame with a single function call.
 
 Reproduce the comparison:
 
 ```bash
+# HTJ2K comparison (requires OpenJPH installed as ojph_compress / ojph_expand)
 go test -run TestHTJ2KComparison -v -timeout 300s
+
+# Wavelet V2 SIMD ratios
+go test -run TestWaveletV2SIMDRLEFSECompress -v
 ```
 
 ---
@@ -764,7 +812,8 @@ Quick summary of the six applied optimizations:
 - [x] Browser-based decoding in JS and WASM — see [web decoder](./web/README.md)
 - [x] Multi-frame image support (Breast Tomosynthesis) — MIC2 container with independent and temporal modes, browser movie player
 - [x] Wavelet (5/3 integer) decorrelation stage — benchmarked; Delta+RLE+FSE wins for lossless; wavelet remains a candidate for a future lossy/progressive mode
-- [x] SIMD-accelerated wavelet transform — blocked column pass (8× fewer cache misses) + AVX2 predict/update kernels; +14–47% decompression throughput; see [docs/wavelet-simd.md](./docs/wavelet-simd.md)
+- [x] SIMD-accelerated wavelet transform — blocked column pass (8× fewer cache misses) + AVX2 predict/update kernels; +10–38% decompression throughput; see [docs/wavelet-simd.md](./docs/wavelet-simd.md)
+- [x] 4-state FSE in wavelet pipeline — `FSECompressU16FourState` / `FSEDecompressU16FourState` with BMI2 assembly decoder; all wavelet compress/decompress functions updated; wavelet V2 SIMD now beats HTJ2K ratio on 7/8 modalities
 - [x] Whole Slide Imaging (WSI) — MIC3 tiled container with YCoCg-R color transform, pyramid levels, parallel tile compression, browser RGB viewer with level selector
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [x] Left+Up average predictor — implemented from [Klaus Post's feedback](https://github.com/pappuks/medical-image-codec/issues/1); avg(left, top) replaces pure-left prediction in the main Delta+RLE+FSE pipeline
