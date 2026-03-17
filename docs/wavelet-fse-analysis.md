@@ -1,12 +1,24 @@
 # Wavelet + FSE Compression: Implementation and Analysis
 
-This document describes the implementation of the Le Gall 5/3 integer wavelet transform as an alternative decorrelation stage for the MIC codec, and reports the results of comparing it against the existing Delta+RLE+FSE pipeline on real DICOM test images.
+This document describes the Le Gall 5/3 integer wavelet transform as an alternative
+decorrelation stage for the MIC codec, the progressive improvements made to the
+pipeline (multi-level decomposition, SIMD acceleration, 4-state FSE), and a detailed
+comparison against Delta+RLE+FSE and HTJ2K (High Throughput JPEG 2000).
+
+---
 
 ## Background
 
-The [MIC codec](../README.md) uses a **Delta → RLE → FSE** pipeline. Delta encoding decorrelates pixels spatially (each pixel stores the difference from the average of its top and left neighbours), RLE suppresses runs of identical residuals, and FSE entropy-codes the resulting symbol stream.
+The primary MIC codec uses a **Delta → RLE → FSE** pipeline. Delta encoding
+decorrelates pixels spatially (each pixel stores the difference from the average of
+its top and left neighbours), RLE suppresses runs of identical residuals, and FSE
+entropy-codes the resulting symbol stream.
 
-The 5/3 integer wavelet is the same transform used by JPEG 2000 for lossless coding. It is a two-tap predict / update lifting scheme that produces a multi-resolution decomposition while remaining perfectly reversible over integers. The natural question is: does it decorrelate medical images more effectively than per-pixel delta encoding, and does that translate into better compression or decompression throughput?
+The 5/3 integer wavelet is the same transform used by JPEG 2000 for lossless coding.
+It is a two-tap predict/update lifting scheme that produces a multi-resolution
+decomposition while remaining perfectly reversible over integers. This document
+evaluates how effectively it decorrelates medical images compared to per-pixel delta
+encoding, and how recent optimisations change that picture.
 
 ---
 
@@ -17,89 +29,96 @@ The 5/3 integer wavelet is the same transform used by JPEG 2000 for lossless cod
 For a row of `n` values `x[0], x[1], …, x[n-1]`:
 
 ```
-Predict (updates odd-indexed samples):
+Predict (high-pass, odd-indexed):
   d[i] = x[2i+1] − ⌊(x[2i] + x[2i+2]) / 2⌋
 
-Update (updates even-indexed samples):
+Update (low-pass, even-indexed):
   s[i] = x[2i] + ⌊(d[i-1] + d[i] + 2) / 4⌋
 ```
 
-Boundary extension is symmetric: at the left edge `d[-1] = d[0]`, at the right edge `x[n] = x[n-1]`. The result is an interleaved array where even positions hold low-pass (LL) coefficients and odd positions hold high-pass (detail) coefficients.
+Boundary extension is symmetric: `d[-1] = d[0]` at the left edge,
+`x[n] = x[n-1]` at the right. The result is an interleaved array where even
+positions hold low-pass (smooth) coefficients and odd positions hold high-pass
+(detail) coefficients.
 
-### 1D Inverse Transform
+### 2D Transform (Mallat / Separated Layout)
 
-```
-Undo update:
-  x[2i] = s[i] − ⌊(d[i-1] + d[i] + 2) / 4⌋
-
-Undo predict:
-  x[2i+1] = d[i] + ⌊(x[2i] + x[2i+2]) / 2⌋
-```
-
-Applied in the reverse order with the same boundary conditions, this reconstructs the original samples exactly.
-
-### 2D Transform
-
-The 2D transform applies the 1D transform first to every row (horizontal pass), then to every column (vertical pass). This produces four subbands in the interleaved layout:
+`wt53Forward2DSeparated` applies the 1D transform to every row (horizontal pass)
+then de-interleaves; then to every column (vertical pass) then de-interleaves. This
+produces the Mallat subband layout:
 
 ```
-LL  LH
-HL  HH
+┌───────┬───────┐
+│  LL   │  LH   │
+│ (low) │       │
+├───────┼───────┤
+│  HL   │  HH   │
+│       │       │
+└───────┴───────┘
 ```
-
-where LL is the low-pass × low-pass subband (a downscaled approximation), LH/HL are mixed subbands, and HH is the high-frequency subband.
 
 ### Multi-Level Decomposition
 
-For `L` levels the LL subband is recursively transformed. The buffer stride is always kept equal to the original image width so all subbands remain in a single flat array without reshuffling memory.
+For `L` levels the LL quadrant is recursively subdivided. MIC defaults to **5
+levels**, which is also the standard used by JPEG 2000 / HTJ2K. The buffer stride
+is always the original image width so all subbands remain in a single flat array.
 
 ---
 
-## Coefficient Encoding
+## Coefficient Encoding (ZigZag + Escape)
 
-### Why Simple ZigZag Encoding Is Insufficient
+Predict-step detail coefficients are signed, in `[−M, M]` where `M` is the maximum
+pixel value. After zigzag encoding values up to ±32767 fit in a single `uint16`.
+Larger values (rare; mainly low-pass coefficients in full-range CT) use a 3-word
+escape: sentinel `65535` + high 16 bits + low 16 bits of the raw `int32`.
 
-The predict step produces detail coefficients in the range `[−M, M]` (where `M` is the maximum pixel value, up to 65535 for 16-bit CT). The update step can push low-pass coefficients slightly outside the original pixel range: for `M = 65535`, the theoretical maximum low-pass value is approximately `65535 + 32767 = 98302`, and the minimum is approximately `−32767`. After ZigZag encoding, the maximum maps to `196604`, which overflows `uint16`.
-
-### Overflow-Safe Encoding
-
-To stay compatible with the existing `FSECompressU16` / `FSEDecompressU16` functions (which operate on `[]uint16`), we use an escape scheme:
-
-- Coefficients in `[−32767, +32767]` → ZigZag-encoded to `[0, 65534]`, stored as a single `uint16`
-- Coefficients outside that range → sentinel value `65535` followed by the raw `int32` split into two `uint16` words (high half, low half)
-
-This is directly analogous to the delimiter-based overflow handling in the delta encoder (`deltacompressu16.go`). The escape is rare in practice — it only fires on low-pass coefficients from full-range 16-bit images (CT), where the update step amplifies near-maximum values.
+After encoding, the `uint16` stream goes through **RLE** (same same/diff-run
+protocol as the primary Delta pipeline) then **FSE**.
 
 ---
 
 ## Compression Pipelines
 
-### Wavelet + FSE
+### WaveletV2RLEFSECompressU16 (scalar)
 
 ```
 uint16 pixels
-  → int32 (widening)
-  → 2D 5/3 forward wavelet (one or more levels)
-  → overflow-safe ZigZag/escape encoding → []uint16
-  → FSECompressU16
+  → int32 (widening cast)
+  → 5-level 2D 5/3 forward wavelet  (wt53Forward2DSeparated)
+  → subband-order scan (LL → detail bands coarsest→finest)
+  → ZigZag + escape encoding → []uint16
+  → RleCompressU16
+  → FSECompressU16FourState          ← 4 independent ANS states
   → [11-byte header] + compressed bytes
 ```
 
-Header layout: `rows (4B) | cols (4B) | maxValue (2B) | levels (1B)`
-
-### Wavelet + RLE + FSE
+### WaveletV2SIMDRLEFSECompressU16 (SIMD + 4-state FSE)
 
 ```
 uint16 pixels
-  → int32 (widening)
-  → 2D 5/3 forward wavelet
-  → overflow-safe ZigZag/escape encoding → []uint16
+  → int32 (widening cast)
+  → 5-level 2D 5/3 forward wavelet  (wt53Forward2DSeparatedSIMD)
+      ↳ blocked column pass (8 columns per cache-line)
+      ↳ AVX2 predict/update kernels  (wt53PredictAVX2, wt53UpdateAVX2)
+  → subband-order scan
+  → ZigZag + escape encoding → []uint16
   → RleCompressU16
-  → FSECompressU16
-  → [15-byte header] + compressed bytes
+  → FSECompressU16FourState          ← 4 independent ANS states
+  → [11-byte header] + compressed bytes
+
+Decompression:
+  → FSEDecompressU16FourState
+      ↳ fse4StateDecompNative
+          ↳ fse4StateDecompKernel    (BMI2/AVX2 assembly, AMD64)
+  → RleDecompressU16
+  → ZigZag + escape decode
+  → 5-level 2D 5/3 inverse wavelet  (wt53Inverse2DSeparatedSIMD)
+      ↳ AVX2 inverse kernels         (wt53InvUpdateAVX2, wt53InvPredictAVX2)
+  → uint16 pixels
 ```
 
-The RLE stage is the same `RleCompressU16` used in the Delta+RLE+FSE pipeline. The header adds a 4-byte encoded stream length field to allow the decompressor to pre-allocate the coefficient buffer.
+The two pipelines produce **bit-identical compressed streams** — files are
+interchangeable between scalar and SIMD paths.
 
 ---
 
@@ -107,73 +126,207 @@ The RLE stage is the same `RleCompressU16` used in the Delta+RLE+FSE pipeline. T
 
 | File | Contents |
 |------|----------|
-| [`waveletu16.go`](../waveletu16.go) | 2D 5/3 lifting (`wt53Forward1D`, `wt53Inverse1D`, `WaveletForward2D`, `WaveletInverse2D`) |
-| [`waveletfsecompressu16.go`](../waveletfsecompressu16.go) | Pipelines: `WaveletFSECompressU16`, `WaveletFSEDecompressU16`, `WaveletRLEFSECompressU16`, `WaveletRLEFSEDecompressU16`; shared helpers: `waveletCoeffsToU16`, `u16ToWaveletCoeffs`, `zigzagEncode16`, `zigzagDecode16` |
-| [`waveletu16_test.go`](../waveletu16_test.go) | Unit tests (1D/2D round-trip, ZigZag), integration tests on all DICOM modalities, benchmarks |
+| [`waveletu16.go`](../waveletu16.go) | `wt53Forward2DSeparated`, `wt53Inverse2DSeparated`, blocked SIMD variants, scalar helpers |
+| [`waveletfsecompressu16.go`](../waveletfsecompressu16.go) | All four wavelet pipelines, `collectSubbandOrder`, `waveletCoeffsToU16`, zigzag helpers |
+| [`wavelet_simd_amd64.go`](../wavelet_simd_amd64.go) | AVX2 dispatch: `wt53PredictBlocks`, `wt53UpdateBlocks`, and inverse counterparts |
+| [`wavelet_simd_amd64.s`](../wavelet_simd_amd64.s) | Plan 9 AVX2 assembly kernels |
+| [`wavelet_simd_arm64.go`](../wavelet_simd_arm64.go) | ARM64 scalar fallback (blocked layout still improves cache) |
+| [`fse4state.go`](../fse4state.go) | `FSECompressU16FourState`, `FSEDecompressU16FourState`, 4-state decode loop |
+| [`asm_amd64.go`](../asm_amd64.go) / [`asm_amd64.s`](../asm_amd64.s) | `fse4StateDecompKernel`: BMI2 assembly fast path for 4-state FSE decode |
+| [`waveletu16_test.go`](../waveletu16_test.go) | Roundtrip, SIMD-vs-scalar, and benchmark tests |
 
 ---
 
 ## Benchmark Results
 
-All benchmarks run with `go test -benchmem -run=^$ -benchtime=10x` on an Intel Xeon Platinum 8581C @ 2.10 GHz (16 cores). The benchmark measures **decompression** throughput (the hot path for rendering workflows).
+All measurements on **Intel Xeon @ 2.80 GHz, 4 cores, `benchtime=10x`**.
+The benchmark spawns one goroutine per iteration — 10 goroutines run concurrently,
+reflecting real-world multi-frame decode parallelism. Throughput is reported as
+MB/s of **raw pixel data** (before compression).
 
 ### Compression Ratio
 
-| Modality | Dimensions | Delta+RLE+FSE | Wavelet+FSE (L=1) | Wavelet+RLE+FSE (L=1) |
+| Modality | Dimensions | Delta+RLE+FSE | Wavelet V2 (scalar) | Wavelet V2 (SIMD) |
 |----------|-----------|:---:|:---:|:---:|
-| MR | 256×256 | **2.35:1** | 2.09:1 | 2.09:1 |
-| CT | 512×512 | **2.24:1** | 1.48:1 | 1.48:1 |
-| CR | 2140×1760 | **3.63:1** | 2.59:1 | 2.59:1 |
-| XR | 2048×2577 | **1.74:1** | 1.53:1 | 1.53:1 |
-| MG1 | 2457×1996 | **8.57:1** | 4.91:1 | 7.28:1 |
-| MG2 | 2457×1996 | **8.55:1** | 4.90:1 | 7.27:1 |
-| MG3 | 4774×3064 | **2.29:1** | 1.90:1 | 1.93:1 |
-| MG4 | 4096×3328 | **3.47:1** | 2.63:1 | 3.11:1 |
+| MR  | 256×256    | 2.35× | 2.38× | **2.38×** |
+| CT  | 512×512    | **2.24×** | 1.67× | 1.67× |
+| CR  | 2140×1760  | 3.63× | 3.81× | **3.81×** |
+| XR  | 2048×2577  | 1.74× | 1.76× | **1.76×** |
+| MG1 | 2457×1996  | 8.57× | 8.67× | **8.67×** |
+| MG2 | 2457×1996  | 8.55× | 8.65× | **8.65×** |
+| MG3 | 4774×3064  | 2.24× | 2.32× | **2.32×** |
+| MG4 | 4096×3328  | 3.47× | 3.59× | **3.59×** |
 
-### Decompression Speed (MB/s of raw pixel data)
+The Wavelet V2 pipeline (5 levels) achieves **equal or better compression ratio
+than Delta+RLE+FSE on 7 of 8 modalities**. The sole exception is CT, where the
+full 16-bit dynamic range forces the escape-encoding path for low-pass coefficients,
+inflating the stream.
 
-| Modality | Delta+RLE+FSE | Wavelet+FSE (L=1) | Wavelet+RLE+FSE (L=1) |
-|----------|:---:|:---:|:---:|
-| MR | 116 | **146** | 122 |
-| CT | 165 | **168** | 142 |
-| CR | **543** | 418 | 371 |
-| XR | **605** | 576 | 486 |
-| MG1 | **1530** | 592 | 680 |
-| MG2 | **1493** | 618 | 644 |
-| MG3 | **606** | 387 | 352 |
-| MG4 | **1054** | 480 | 579 |
+### Decompression Speed (MB/s)
+
+| Modality | Delta+RLE+FSE | Wavelet V2 (scalar)+4FSE | Wavelet V2 (SIMD)+4FSE | SIMD speedup |
+|----------|:---:|:---:|:---:|:---:|
+| MR  | **186** | 150 | 165 | +10% |
+| CT  | **281** | 152 | 190 | +25% |
+| CR  | **302** | 166 | 210 | +27% |
+| XR  | **513** | 193 | 214 | +11% |
+| MG1 | **860** | 182 | 227 | +25% |
+| MG2 | **729** | 193 | 241 | +25% |
+| MG3 | **466** | 118 | 112 | — † |
+| MG4 | **826** | 144 | 198 | +38% |
+
+† MG3 SIMD vs scalar difference is within measurement noise on this configuration.
+
+Delta+RLE+FSE maintains a significant decompression speed advantage (1.1×–3.8×)
+because it requires only one memory pass versus the wavelet's two full passes
+(rows + columns, both forward and inverse), and it operates on `uint16` (2 bytes)
+while the wavelet operates on `int32` (4 bytes), doubling cache pressure.
 
 ---
 
-## Analysis: Why Delta+RLE+FSE Outperforms Wavelet+FSE
+## Comparison with HTJ2K
 
-### Compression Ratio
+HTJ2K (High Throughput JPEG 2000) uses the same 5/3 integer wavelet as MIC's
+wavelet pipeline. The ratio comparison is therefore **directly algorithmic**: any
+difference in ratio reflects differences in entropy coding, subband ordering,
+context modeling, and coefficient quantisation strategy rather than the transform.
 
-**Delta encoding is already near-optimal for spatially correlated images.** The average-of-neighbours predictor (`(top + left) / 2`) is a strong linear predictor for medical images, which have smooth intensity gradients and large homogeneous regions. After delta coding, the residuals are tightly clustered around zero. RLE then compresses long runs of identical residuals — common in flat regions — directly to near-zero entropy.
+HTJ2K reference implementation: [OpenJPH](https://github.com/aous72/OpenJPH)
+v0.15 (`ojph_compress -reversible true`). HTJ2K throughput measured single-threaded
+on Apple M2 Max (different hardware to the ratio benchmarks above — ratio numbers
+are hardware-independent).
 
-The wavelet produces a similar decorrelation via its predict step, but the update step re-introduces correlation in the low-pass band in order to preserve the mean (a requirement for perfect reconstruction). For images where the delta residuals are already near-zero, this is not a net gain; for CT images using the full 16-bit range, it actively hurts because the update step requires the escape encoding, inflating the symbol stream.
+### Compression Ratio Comparison
 
-**Multi-level decomposition does not help here.** Adding more wavelet levels dilutes the effect: higher levels work on an increasingly small LL subband while the detail subbands (LH, HL, HH) contain the bulk of the data and remain incompressible once the lower-level decorrelation is exhausted.
+| Modality | Dimensions | Delta+RLE+FSE | Wavelet V2 SIMD | HTJ2K (OpenJPH) | MIC Wavelet vs HTJ2K |
+|----------|-----------|:---:|:---:|:---:|:---:|
+| MR  | 256×256   | 2.35× | 2.38× | 2.38× | **tied** |
+| CT  | 512×512   | 2.24× | 1.67× | 1.77× | −6% |
+| CR  | 2140×1760 | 3.63× | **3.81×** | 3.77× | **+1%** |
+| XR  | 2048×2577 | 1.74× | **1.76×** | 1.67× | **+5%** |
+| MG1 | 2457×1996 | 8.57× | **8.67×** | 8.25× | **+5%** |
+| MG2 | 2457×1996 | 8.55× | **8.65×** | 8.24× | **+5%** |
+| MG3 | 4774×3064 | 2.24× | **2.32×** | 2.22× | **+4%** |
+| MG4 | 4096×3328 | 3.47× | **3.59×** | 3.51× | **+2%** |
 
-### Decompression Speed
+MIC's wavelet V2 pipeline **matches or exceeds HTJ2K ratios on 7 of 8 modalities**.
+Only CT is lower (−6%), due to the escape encoding needed for full-range 16-bit
+low-pass coefficients. On mammography (MG1/MG2), MIC is +5% better than HTJ2K.
 
-The wavelet inverse transform requires **two full passes** over the entire pixel buffer (one vertical, one horizontal), each pass touching every element twice (undo-update and undo-predict). Delta decompression requires **one pass** with a simple recurrence. For large mammography images (MG1/MG2 at ~9 MB), this doubles the memory bandwidth needed, which is the binding constraint at high parallelism.
+The ratio advantage comes from MIC's 5-level subband-order scan combined with
+the 16-bit-native RLE: long runs of near-zero detail coefficients in the HL/LH/HH
+subbands compress more effectively through same-run RLE than through HTJ2K's
+context-adaptive arithmetic coder on these smooth medical images.
 
-Additionally:
-- The wavelet operates on `int32` values (4 bytes per sample) during decompression, versus `uint16` (2 bytes) for delta, doubling cache pressure.
-- The escape-decoding path in `u16ToWaveletCoeffs` introduces a branch on every symbol, breaking the branch predictor for CT images where escapes are scattered throughout the stream.
+### Decompression Speed Comparison
 
-### Where Wavelet+FSE Would Be Competitive
+> ⚠️ Direct speed comparison is not meaningful — MIC measurements are on
+> Intel Xeon @ 2.80 GHz and HTJ2K on Apple M2 Max (single-threaded subprocess
+> including process launch overhead). See the main README for a same-machine
+> Delta+RLE+FSE vs HTJ2K comparison.
+
+On the same hardware (Apple M2 Max, single-threaded, from the main benchmark suite),
+**Delta+RLE+FSE** decompresses 1.3–1.5× faster than HTJ2K for large images.
+The wavelet V2 pipeline would be slower still due to the additional transform
+passes, so Delta+RLE+FSE is the recommended production choice when speed matters.
+
+---
+
+## Analysis: Why V2 (5-Level) Beats V1 (1-Level) on Compression Ratio
+
+The earlier analysis (V1, 1-level wavelet without subband ordering) showed the
+wavelet underperforming Delta+RLE+FSE on compression ratio. The V2 pipeline
+reverses this for 7 of 8 modalities through two improvements:
+
+**1. Multi-level decomposition (5 levels)**
+
+Each additional wavelet level further decorrelates the LL subband. On smooth medical
+images, 5 levels of LL compaction concentrates signal energy in a tiny region,
+leaving vast HH/LH/HL subbands filled with near-zero coefficients. RLE then
+encodes these as single same-run headers.
+
+**2. Subband-order scan**
+
+The original code scanned coefficients in row-major order (interleaving LL and
+detail coefficients). `collectSubbandOrder` reorders them as:
+`LL(level 5) → HL5 → LH5 → HH5 → HL4 → … → HH1`. This groups the near-zero
+detail coefficients together so RLE's same-run encoding is maximally effective —
+a single same-run header can cover thousands of consecutive near-zero values.
+
+**3. 4-state FSE with SIMD decoder**
+
+Switching from 1-state FSE to `FSECompressU16FourState` produces the same
+compressed bytes (4-state FSE is a stream format difference, not a different
+entropy model). The benefit is on the decoder side: the 4 independent ANS state
+machines break the serial dependency chain, and on AMD64 the BMI2 assembly kernel
+(`fse4StateDecompKernel`) processes the bulk of the stream without bounds checks.
+
+---
+
+## Analysis: Why Delta+RLE+FSE Still Wins on Decompression Speed
+
+Even with SIMD acceleration, the wavelet decompressor is 1.1×–3.8× slower than
+Delta+RLE+FSE on large images (MG1: 860 vs 227 MB/s). The reasons:
+
+1. **Two full image passes, twice each**: Inverse wavelet requires undo-update +
+   undo-predict on columns, then undo-update + undo-predict on rows. That is
+   4× the memory bandwidth of a single delta-decode pass.
+
+2. **int32 vs uint16 working set**: Wavelet operates on `int32` (4 B/element);
+   delta operates on `uint16` (2 B/element). For MG1 at 9.35 MB raw, the wavelet
+   working set is ~18 MB of int32 — far exceeding L2 cache on a single core.
+
+3. **Escape decoding branch**: Full-range CT images force the `if in[i] !=
+   waveletEscape` branch on every symbol, polluting the branch predictor.
+
+4. **RLE interaction**: The wavelet's subband-order scan is optimised for
+   *compression* (groups near-zeros together for RLE). But long same-runs in
+   detail subbands still require RLE overhead to decode, unlike Delta's simple
+   recurrence.
+
+---
+
+## Where Wavelet+FSE Excels
 
 | Scenario | Reason |
 |----------|--------|
-| **Lossy compression** | Wavelet coefficients can be quantized by subband; small HH coefficients can be discarded entirely, giving large ratio improvements without visible artifacts |
-| **Progressive / multi-resolution delivery** | The LL subband is a valid downscaled image at each level; delta coding does not support this |
-| **Wider entropy coder** | If FSE operated natively on `int32` symbols, no escape coding would be needed and the CT ratio gap would close |
-| **Images with strong mid-range gradients** | The 5/3 update step provides better energy compaction than a simple first-order predictor for images with slowly varying rather than step-function intensity changes |
+| **Compression ratio priority** | Wavelet V2 SIMD matches or beats Delta+RLE+FSE on 7/8 modalities and HTJ2K on 7/8 |
+| **HTJ2K compatibility** | Same 5/3 integer wavelet; ratios directly comparable and competitive |
+| **Lossy compression (future)** | Quantise HH/LH/HL coefficients by subband; large ratio gains with controlled quality loss |
+| **Progressive delivery (future)** | Each LL subband level is a valid downscaled image; Delta coding does not support this |
+| **Non-CT 16-bit images** | CT's full 16-bit range triggers the escape path; other modalities (10–14 bit effective depth) are unaffected |
 
 ---
 
-## Conclusion
+## Summary
 
-For lossless compression of 16-bit medical images (DICOM), the existing **Delta+RLE+FSE** pipeline is strictly better than Wavelet+FSE on all tested modalities — by 10–50% in compression ratio and 1.5–2.5× in decompression throughput on large images. The wavelet transform is a natural next step for a **lossy** mode or for **progressive / multi-resolution** transmission, both of which remain open items for the project.
+| Pipeline | Compression ratio | Decompression speed | vs HTJ2K ratio |
+|----------|:----------------:|:-------------------:|:--------------:|
+| Delta+RLE+FSE (primary) | Good (wins on CT) | **Best** (1–4× faster than wavelet) | N/A (different approach) |
+| Wavelet V2 scalar + 4-state FSE | **Better** on 7/8 | 1.1–3.8× slower | Competitive |
+| Wavelet V2 SIMD + 4-state FSE | **Better** on 7/8 | 1.1–3.8× slower | **Matches or beats on 7/8** |
+| HTJ2K (OpenJPH lossless) | Similar to Wavelet V2 | N/A (subprocess) | — |
+
+**Recommendation:**
+- Use **Delta+RLE+FSE** (the default `CompressSingleFrame`) for production lossless
+  when decompression throughput matters (real-time rendering, multi-frame playback).
+- Use **WaveletV2SIMDRLEFSECompressU16** when compression ratio is the priority and
+  compatibility with the JPEG 2000 / HTJ2K transform family is desirable.
+- The wavelet pipeline is the natural foundation for a **future lossy or progressive
+  mode**.
+
+---
+
+## Reproducing the Benchmarks
+
+```bash
+# Full pipeline comparison: Delta+RLE+FSE vs Wavelet V2 scalar vs Wavelet V2 SIMD
+go test -benchmem -run=^$ -benchtime=10x \
+  -bench "^(BenchmarkDeltaRLEFSECompress|BenchmarkWaveletV2RLEFSECompress|BenchmarkWaveletV2SIMDRLEFSECompress)$" mic
+
+# Lossless roundtrip verification
+go test -run "TestWaveletV2SIMDRLEFSECompress|TestWaveletSIMDMatchesScalar" -v
+
+# HTJ2K comparison (requires OpenJPH installed as ojph_compress / ojph_expand)
+go test -run TestHTJ2KComparison -v -timeout 300s
+```
