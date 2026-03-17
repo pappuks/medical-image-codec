@@ -57,10 +57,7 @@ int ojph_compress_u16(const uint16_t *pixels, int width, int height,
         codestream.flush();
 
         // Read size before closing codestream (close may reset pointers).
-        size_t compressed_size = mem_out.get_used_size();
-        if (compressed_size == 0) {
-            compressed_size = (size_t)mem_out.tell();
-        }
+        size_t compressed_size = (size_t)mem_out.tell();
 
         codestream.close();
         if (compressed_size > out_buf_size) {

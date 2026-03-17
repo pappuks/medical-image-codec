@@ -777,6 +777,120 @@ static void delta_decode_simd(const uint16_t *deltas, int delta_len,
 #endif
 
 // ---------------------------------------------------------------------------
+// FSE four-state decompress
+// ---------------------------------------------------------------------------
+static int fse_decompress_four_state(const uint8_t *data, size_t data_len,
+                                     uint16_t *out, int count,
+                                     dec_symbol_t *dt, uint8_t table_log,
+                                     int zero_bits) {
+    bit_reader_t br;
+    if (bit_reader_init(&br, data, data_len) != 0) return -1;
+
+    // Read initial states: A, B, (fill), C, (fill), D — mirrors Go decompress4State.
+    uint32_t stateA = bit_reader_get_bits_fast(&br, table_log);
+    uint32_t stateB = bit_reader_get_bits_fast(&br, table_log);
+    bit_reader_fill(&br);
+    uint32_t stateC = bit_reader_get_bits_fast(&br, table_log);
+    bit_reader_fill(&br);
+    uint32_t stateD = bit_reader_get_bits_fast(&br, table_log);
+
+    int remaining = count;
+    int off = 0;
+
+    if (!zero_bits) {
+        while (br.off >= 8 && remaining >= 4) {
+            bit_reader_fill_fast(&br);
+
+            dec_symbol_t nA = dt[stateA];
+            dec_symbol_t nB = dt[stateB];
+            uint32_t lowA = bit_reader_get_bits_fast(&br, nA.nb_bits);
+            uint32_t lowB = bit_reader_get_bits_fast(&br, nB.nb_bits);
+            stateA = nA.new_state + lowA;
+            stateB = nB.new_state + lowB;
+
+            bit_reader_fill_fast(&br);
+
+            dec_symbol_t nC = dt[stateC];
+            dec_symbol_t nD = dt[stateD];
+            uint32_t lowC = bit_reader_get_bits_fast(&br, nC.nb_bits);
+            uint32_t lowD = bit_reader_get_bits_fast(&br, nD.nb_bits);
+            stateC = nC.new_state + lowC;
+            stateD = nD.new_state + lowD;
+
+            out[off + 0] = nA.symbol;
+            out[off + 1] = nB.symbol;
+            out[off + 2] = nC.symbol;
+            out[off + 3] = nD.symbol;
+            off += 4;
+            remaining -= 4;
+        }
+    } else {
+        while (br.off >= 8 && remaining >= 4) {
+            bit_reader_fill_fast(&br);
+
+            dec_symbol_t nA = dt[stateA];
+            dec_symbol_t nB = dt[stateB];
+            uint32_t lowA = bit_reader_get_bits(&br, nA.nb_bits);
+            uint32_t lowB = bit_reader_get_bits(&br, nB.nb_bits);
+            stateA = nA.new_state + lowA;
+            stateB = nB.new_state + lowB;
+
+            bit_reader_fill_fast(&br);
+
+            dec_symbol_t nC = dt[stateC];
+            dec_symbol_t nD = dt[stateD];
+            uint32_t lowC = bit_reader_get_bits(&br, nC.nb_bits);
+            uint32_t lowD = bit_reader_get_bits(&br, nD.nb_bits);
+            stateC = nC.new_state + lowC;
+            stateD = nD.new_state + lowD;
+
+            out[off + 0] = nA.symbol;
+            out[off + 1] = nB.symbol;
+            out[off + 2] = nC.symbol;
+            out[off + 3] = nD.symbol;
+            off += 4;
+            remaining -= 4;
+        }
+    }
+
+    // Tail: drain remaining in A, B, C, D order.
+    while (remaining > 0) {
+        bit_reader_fill(&br);
+        dec_symbol_t nA = dt[stateA];
+        uint32_t lowA = bit_reader_get_bits(&br, nA.nb_bits);
+        stateA = nA.new_state + lowA;
+        out[off++] = nA.symbol;
+        remaining--;
+        if (remaining == 0) break;
+
+        bit_reader_fill(&br);
+        dec_symbol_t nB = dt[stateB];
+        uint32_t lowB = bit_reader_get_bits(&br, nB.nb_bits);
+        stateB = nB.new_state + lowB;
+        out[off++] = nB.symbol;
+        remaining--;
+        if (remaining == 0) break;
+
+        bit_reader_fill(&br);
+        dec_symbol_t nC = dt[stateC];
+        uint32_t lowC = bit_reader_get_bits(&br, nC.nb_bits);
+        stateC = nC.new_state + lowC;
+        out[off++] = nC.symbol;
+        remaining--;
+        if (remaining == 0) break;
+
+        bit_reader_fill(&br);
+        dec_symbol_t nD = dt[stateD];
+        uint32_t lowD = bit_reader_get_bits(&br, nD.nb_bits);
+        stateD = nD.new_state + lowD;
+        out[off++] = nD.symbol;
+        remaining--;
+    }
+
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Public API: full MIC two-state decompress
 // ---------------------------------------------------------------------------
 int mic_decompress_two_state(const uint8_t *compressed, size_t compressed_len,
@@ -914,6 +1028,127 @@ int mic_decompress_two_state_simd(const uint8_t *compressed, size_t compressed_l
     free(rle_out);
 
     // Pass 2: Delta decode with SIMD assistance
+    delta_decode_simd(delta_buf, max_delta, pixels_out, width, height);
+
+    free(delta_buf);
+    return 0;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper: parse header + FSE table for four-state streams.
+// Magic: [0xFF][0x04][count_u32_le][FSE header][bitstream]
+// ---------------------------------------------------------------------------
+static int parse_four_state_header(const uint8_t *compressed, size_t compressed_len,
+                                   uint32_t *symbol_count_out,
+                                   dec_symbol_t **dt_out, uint8_t *table_log_out,
+                                   int *zero_bits_out,
+                                   const uint8_t **bitstream_out, size_t *bitstream_len_out) {
+    if (compressed_len < 6) return -1;
+    if (compressed[0] != 0xFF || compressed[1] != 0x04) return -1;
+
+    *symbol_count_out = (uint32_t)compressed[2] |
+                        ((uint32_t)compressed[3] << 8) |
+                        ((uint32_t)compressed[4] << 16) |
+                        ((uint32_t)compressed[5] << 24);
+
+    const uint8_t *payload = compressed + 6;
+    size_t payload_len = compressed_len - 6;
+
+    int32_t norm[MAX_SYMBOL_VALUE + 1];
+    memset(norm, 0, sizeof(norm));
+    uint32_t symbol_len = 0;
+
+    byte_reader_t brd;
+    byte_reader_init(&brd, payload, payload_len);
+
+    if (read_ncount(&brd, norm, &symbol_len, table_log_out, zero_bits_out) != 0)
+        return -2;
+
+    uint32_t table_size = 1u << *table_log_out;
+    dec_symbol_t *dt = (dec_symbol_t *)malloc(table_size * sizeof(dec_symbol_t));
+    if (!dt) return -3;
+
+    if (build_dtable(norm, symbol_len, *table_log_out, dt) != 0) {
+        free(dt);
+        return -4;
+    }
+
+    *dt_out = dt;
+    *bitstream_out = payload + brd.off;
+    *bitstream_len_out = payload_len - (size_t)brd.off;
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: MIC four-state decompress (scalar)
+// ---------------------------------------------------------------------------
+int mic_decompress_four_state(const uint8_t *compressed, size_t compressed_len,
+                              uint16_t *pixels_out, int width, int height) {
+    uint32_t symbol_count = 0;
+    dec_symbol_t *dt = NULL;
+    uint8_t table_log = 0;
+    int zero_bits = 0;
+    const uint8_t *bitstream = NULL;
+    size_t bitstream_len = 0;
+
+    int rc = parse_four_state_header(compressed, compressed_len,
+                                     &symbol_count, &dt, &table_log, &zero_bits,
+                                     &bitstream, &bitstream_len);
+    if (rc != 0) return rc;
+
+    uint16_t *rle_out = (uint16_t *)malloc(symbol_count * sizeof(uint16_t));
+    if (!rle_out) { free(dt); return -5; }
+
+    rc = fse_decompress_four_state(bitstream, bitstream_len,
+                                   rle_out, (int)symbol_count,
+                                   dt, table_log, zero_bits);
+    free(dt);
+    if (rc != 0) { free(rle_out); return -6; }
+
+    rle_delta_decompress(rle_out, (int)symbol_count, pixels_out, width, height);
+
+    free(rle_out);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: MIC four-state decompress (SIMD RLE+delta on x86; scalar elsewhere)
+// ---------------------------------------------------------------------------
+int mic_decompress_four_state_simd(const uint8_t *compressed, size_t compressed_len,
+                                   uint16_t *pixels_out, int width, int height) {
+#if defined(NO_SIMD_AVAILABLE)
+    return mic_decompress_four_state(compressed, compressed_len,
+                                     pixels_out, width, height);
+#else
+    uint32_t symbol_count = 0;
+    dec_symbol_t *dt = NULL;
+    uint8_t table_log = 0;
+    int zero_bits = 0;
+    const uint8_t *bitstream = NULL;
+    size_t bitstream_len = 0;
+
+    int rc = parse_four_state_header(compressed, compressed_len,
+                                     &symbol_count, &dt, &table_log, &zero_bits,
+                                     &bitstream, &bitstream_len);
+    if (rc != 0) return rc;
+
+    uint16_t *rle_out = (uint16_t *)malloc(symbol_count * sizeof(uint16_t));
+    if (!rle_out) { free(dt); return -5; }
+
+    rc = fse_decompress_four_state(bitstream, bitstream_len,
+                                   rle_out, (int)symbol_count,
+                                   dt, table_log, zero_bits);
+    free(dt);
+    if (rc != 0) { free(rle_out); return -6; }
+
+    int max_delta = width * height * 2 + 1024;
+    uint16_t *delta_buf = (uint16_t *)malloc(max_delta * sizeof(uint16_t));
+    if (!delta_buf) { free(rle_out); return -7; }
+
+    rle_decode_simd(rle_out, (int)symbol_count, delta_buf, max_delta);
+    free(rle_out);
+
     delta_decode_simd(delta_buf, max_delta, pixels_out, width, height);
 
     free(delta_buf);

@@ -38,6 +38,19 @@ go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkWSICompress mic
 # Wavelet SIMD vs scalar comparison
 go test -benchmem -run=^$ -benchtime=5x -bench "^(BenchmarkWaveletV2RLEFSECompress|BenchmarkWaveletV2SIMDRLEFSECompress)$" mic
 
+# FSE 1-state vs 2-state vs 4-state isolated decompression
+go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkFSEDecompress4State$ mic
+
+# Fair in-process HTJ2K comparison (requires: go build -tags cgo_ojph)
+# Prereq: libopenjph installed in /usr/local/lib, headers in /usr/local/include/openjph
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkHTJ2KFairDecomp$ ./ojph/
+
+# Full multi-variant comparison: MIC-Go, MIC-4state, MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkThreeWay$ ./ojph/
+
+# Correctness tests for C 4-state implementation
+go test -tags cgo_ojph -run TestMICCorrectnessFourStateC -v ./ojph/
+
 # Run all benchmarks
 go test -bench=. -benchtime=10x
 ```

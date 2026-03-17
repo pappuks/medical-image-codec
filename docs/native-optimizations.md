@@ -317,6 +317,71 @@ BenchmarkFSEDecompress4State/MG3/2state-4    890 MB/s   (+55%)
 BenchmarkFSEDecompress4State/MG3/4state-4   1343 MB/s  (+133%)
 ```
 
+Sample output from `BenchmarkFSEDecompress4State` (Apple M2 Max, ARM64):
+
+```
+BenchmarkFSEDecompress4State/MR/1state     488 MB/s
+BenchmarkFSEDecompress4State/MR/2state     580 MB/s   (+19%)
+BenchmarkFSEDecompress4State/MR/4state     797 MB/s   (+63%)
+BenchmarkFSEDecompress4State/CR/1state     866 MB/s
+BenchmarkFSEDecompress4State/CR/2state    2873 MB/s  (+232%)
+BenchmarkFSEDecompress4State/CR/4state    3502 MB/s  (+304%)
+BenchmarkFSEDecompress4State/MG3/1state   1669 MB/s
+BenchmarkFSEDecompress4State/MG3/2state   3214 MB/s   (+93%)
+BenchmarkFSEDecompress4State/MG3/4state   4422 MB/s  (+165%)
+```
+
+---
+
+### 7. C Four-State FSE Decompressor (`ojph/mic_decompress_c.c`)
+
+**Motivation**: The Go 4-state implementation (`fse4state.go` + ARM64 NEON kernel) still
+incurs Go runtime overhead: heap allocations for the intermediate RLE buffer (~9 MB/op,
+9 allocs) and Go↔assembly boundary crossings. The C 4-state implementation (`mic_decompress_four_state`,
+`mic_decompress_four_state_simd`) eliminates all Go overhead:
+
+- **1 allocation** (output pixel buffer only, 128 KB–73 MB depending on image)
+- Single contiguous pass: FSE-4state → RLE → Delta, no intermediate buffer ownership transfer
+- SIMD variant adds SSE2/AVX2 acceleration for RLE fill and delta decode on x86
+
+**Format**: Input stream `[0xFF][0x04][count_u32_le][FSE header][bitstream]` — identical
+to the Go four-state format, so streams are interchangeable between all implementations.
+
+**Hot loop** (non-zeroBits path, mirrors Go/assembly logic in C):
+
+```c
+while (br.off >= 8 && remaining >= 4) {
+    bit_reader_fill_fast(&br);
+    dec_symbol_t nA = dt[stateA], nB = dt[stateB];
+    uint32_t lowA = bit_reader_get_bits_fast(&br, nA.nb_bits);
+    uint32_t lowB = bit_reader_get_bits_fast(&br, nB.nb_bits);
+    stateA = nA.new_state + lowA;
+    stateB = nB.new_state + lowB;
+
+    bit_reader_fill_fast(&br);
+    dec_symbol_t nC = dt[stateC], nD = dt[stateD];
+    uint32_t lowC = bit_reader_get_bits_fast(&br, nC.nb_bits);
+    uint32_t lowD = bit_reader_get_bits_fast(&br, nD.nb_bits);
+    stateC = nC.new_state + lowC;
+    stateD = nD.new_state + lowD;
+
+    out[off+0]=nA.symbol; out[off+1]=nB.symbol;
+    out[off+2]=nC.symbol; out[off+3]=nD.symbol;
+    off += 4; remaining -= 4;
+}
+```
+
+Four independent `dt[]` lookups in each iteration; C compiler's OOO scheduling and
+ARM64's 4-wide issue port fill the 4-cycle table-lookup latency with the other chain's
+load+add+store sequence.
+
+**Files**: `ojph/mic_decompress_c.h`, `ojph/mic_decompress_c.c`, `ojph/mic_c.go`
+
+**Build**: Requires `cgo_ojph` build tag and `libopenjph` installed:
+```bash
+go test -tags cgo_ojph -run TestMICCorrectnessFourStateC ./ojph/
+```
+
 ---
 
 ## Measured Performance
@@ -357,6 +422,34 @@ Measured with `BenchmarkDeltaRLEFSEDecompress` (FSE → RLE → Delta). MB/s is 
 The full-pipeline speedup is smaller than the isolated-FSE speedup because Delta decompression and RLE decompression are not affected and together dominate runtime on smaller images.
 
 *(Numbers vary run-to-run by ±10% on this virtualised Xeon; MG3/MG4 improvements are most stable.)*
+
+### Full Multi-Variant Decompression Comparison — Apple M2 Max (ARM64, single-threaded, in-process)
+
+`BenchmarkThreeWay` in `ojph/mic_c_test.go` — all variants measured under identical
+conditions (in-process, no file I/O, single-threaded). All in **MB/s** over uncompressed
+pixel bytes.
+
+| Image | MIC-Go (2-state) | MIC-4state (Go+NEON) | MIC-4state-C | MIC-4state-SIMD | MIC-C (2-state) | MIC-SIMD (2-state) | Wavelet+SIMD | HTJ2K |
+|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| MR (256×256)      | 145 | 209 | 350 | **385** | 343 | 343 | 464 | 261 |
+| CT (512×512)      | 181 | 228 | 370 | **375** | 291 | 283 | 538 | 292 |
+| CR (2140×1760)    | 290 | 339 | **532** | 530 | 458 | 453 | 784 | 358 |
+| XR (2048×2577)    | 301 | 330 | 519 | **529** | 451 | 455 | 878 | 317 |
+| MG1 (2457×1996)   | 472 | 500 | **684** | 678 | 634 | 629 | 1129 | 790 |
+| MG2 (2457×1996)   | 473 | 509 | **681** | 688 | 642 | 640 | 1069 | 794 |
+| MG3 (4774×3064)   | 304 | 342 | **534** | 533 | 453 | 441 | 716 | 334 |
+| MG4 (4096×3328)   | 415 | 447 | **627** | 610 | 567 | 573 | 827 | 551 |
+
+**Key findings:**
+- **MIC-4state-C** beats MIC-C (2-state) by **1.08–1.30×** — 4-state ILP gain transfers to C
+- **MIC-4state-C** beats HTJ2K on **6 of 8** images (CR, XR, MG3, MG4, and nears on CT/MR)
+- **Wavelet+SIMD** exceeds HTJ2K on **all 8** images despite including the inverse wavelet transform
+- MG1/MG2: HTJ2K's SIMD wavelet decoder (790/794 MB/s) remains the fastest single-threaded option
+
+```bash
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x \
+  -bench "^BenchmarkThreeWay$" ./ojph/
+```
 
 ---
 
@@ -412,3 +505,7 @@ The Go Plan 9 assembler does not support bitwise-NOT immediates (`$^N`). Two's c
 | `fsecompressu16.go` | `countSimple` delegates to `countSimpleNative` |
 | `ycocgr.go` | `YCoCgRForward`/`YCoCgRInverse` delegate to native dispatch |
 | `multiframecompress.go` | Use two-state FSE with single-state fallback |
+| `ojph/mic_decompress_c.c` | Added `fse_decompress_four_state`, `mic_decompress_four_state`, `mic_decompress_four_state_simd` |
+| `ojph/mic_decompress_c.h` | Added declarations for four-state C API |
+| `ojph/mic_c.go` | Added `MICDecompressFourStateC`, `MICDecompressFourStateSIMD` CGO bindings |
+| `ojph/mic_c_test.go` | Added `MIC-4state-C`, `MIC-4state-SIMD` to `BenchmarkThreeWay`; `TestMICCorrectnessFourStateC` |

@@ -342,29 +342,31 @@ nf4_1:
 
     // === Symbol A (state in R5) ===
     LSL  $3, R5, R12         // R12 = sA.state * 8 (byte offset)
-    MOVBU 6(R0)(R12),  R13   // R13 = nbBits_A
-    MOVHU 4(R0)(R12),  R14   // R14 = symbol_A
+    ADD  R0, R12, R12
+    MOVBU 6(R12),  R13   // R13 = nbBits_A
+    MOVHU 4(R12),  R14   // R14 = symbol_A
     MOVH  R14, 0(R9)         // store symbol_A
-    LSLV R4, R3, R14         // R14 = value << bitsRead  (variable shift)
+    LSL R4, R3, R14         // R14 = value << bitsRead  (variable shift)
     ADD  R13, R4, R4          // bitsRead += nbBits_A
     MOVD $64, R1
     SUB  R13, R1, R1          // R1 = 64 - nbBits_A
-    LSRV R1, R14, R14         // R14 = lowBits_A
-    MOVWU 0(R0)(R12), R5      // R5 = newState_A
+    LSR R1, R14, R14         // R14 = lowBits_A
+    MOVWU (R12), R5      // R5 = newState_A
     ADD  R14, R5, R5          // R5 = newState_A + lowBits_A  (new sA.state)
     // Mask to 32-bit: AND $0xFFFFFFFF, R5 — not needed, newState+lowBits fits in 32-bit
 
     // === Symbol B (state in R6) ===
     LSL  $3, R6, R12
-    MOVBU 6(R0)(R12), R13
-    MOVHU 4(R0)(R12), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 2(R9)
-    LSLV R4, R3, R14
+    LSL R4, R3, R14
     ADD  R13, R4, R4
     MOVD $64, R1
     SUB  R13, R1, R1
-    LSRV R1, R14, R14
-    MOVWU 0(R0)(R12), R6
+    LSR R1, R14, R14
+    MOVWU (R12), R6
     ADD  R14, R6, R6
 
     // === fillFast 2 ===
@@ -380,28 +382,30 @@ nf4_2:
 
     // === Symbol C (state in R7) ===
     LSL  $3, R7, R12
-    MOVBU 6(R0)(R12), R13
-    MOVHU 4(R0)(R12), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 4(R9)
-    LSLV R4, R3, R14
+    LSL R4, R3, R14
     ADD  R13, R4, R4
     MOVD $64, R1
     SUB  R13, R1, R1
-    LSRV R1, R14, R14
-    MOVWU 0(R0)(R12), R7
+    LSR R1, R14, R14
+    MOVWU (R12), R7
     ADD  R14, R7, R7
 
     // === Symbol D (state in R8) ===
     LSL  $3, R8, R12
-    MOVBU 6(R0)(R12), R13
-    MOVHU 4(R0)(R12), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 6(R9)
-    LSLV R4, R3, R14
+    LSL R4, R3, R14
     ADD  R13, R4, R4
     MOVD $64, R1
     SUB  R13, R1, R1
-    LSRV R1, R14, R14
-    MOVWU 0(R0)(R12), R8
+    LSR R1, R14, R14
+    MOVWU (R12), R8
     ADD  R14, R8, R8
 
     ADD  $8, R9,  R9    // out += 4 × 2 bytes
@@ -501,7 +505,8 @@ rans8_loop:
     // fillFast 1: before symbols A-B.
     CMP $32, R4
     BLT rnf1
-    MOVWU -4(R15)(R2*1), R12
+    SUB $4, R2, R13
+    MOVWU (R15)(R13), R12
     LSL  $32, R3, R3
     ORR  R12, R3, R3
     SUB  $32, R4, R4
@@ -510,34 +515,37 @@ rnf1:
 
     // Symbol A (state in R5)
     LSL   $3, R5, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 0(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R5
+    LSR  R1, R14, R14
+    MOVWU (R12), R5
     ADD   R14, R5, R5
 
     // Symbol B (state in R6)
     LSL   $3, R6, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 2(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R6
+    LSR  R1, R14, R14
+    MOVWU (R12), R6
     ADD   R14, R6, R6
 
     // fillFast 2: before symbols C-D.
     CMP $32, R4
     BLT rnf2
-    MOVWU -4(R15)(R2*1), R12
+    SUB $4, R2, R13
+    MOVWU (R15)(R13), R12
     LSL  $32, R3, R3
     ORR  R12, R3, R3
     SUB  $32, R4, R4
@@ -546,34 +554,37 @@ rnf2:
 
     // Symbol C (state in R7)
     LSL   $3, R7, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 4(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R7
+    LSR  R1, R14, R14
+    MOVWU (R12), R7
     ADD   R14, R7, R7
 
     // Symbol D (state in R8)
     LSL   $3, R8, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 6(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R8
+    LSR  R1, R14, R14
+    MOVWU (R12), R8
     ADD   R14, R8, R8
 
     // fillFast 3: before symbols E-F.
     CMP $32, R4
     BLT rnf3
-    MOVWU -4(R15)(R2*1), R12
+    SUB $4, R2, R13
+    MOVWU (R15)(R13), R12
     LSL  $32, R3, R3
     ORR  R12, R3, R3
     SUB  $32, R4, R4
@@ -582,34 +593,37 @@ rnf3:
 
     // Symbol E (state in R16)
     LSL   $3, R16, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 8(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R16
+    LSR  R1, R14, R14
+    MOVWU (R12), R16
     ADD   R14, R16, R16
 
     // Symbol F (state in R17)
     LSL   $3, R17, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 10(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R17
+    LSR  R1, R14, R14
+    MOVWU (R12), R17
     ADD   R14, R17, R17
 
     // fillFast 4: before symbols G-H.
     CMP $32, R4
     BLT rnf4
-    MOVWU -4(R15)(R2*1), R12
+    SUB $4, R2, R13
+    MOVWU (R15)(R13), R12
     LSL  $32, R3, R3
     ORR  R12, R3, R3
     SUB  $32, R4, R4
@@ -618,28 +632,30 @@ rnf4:
 
     // Symbol G (state in R19)
     LSL   $3, R19, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 12(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R19
+    LSR  R1, R14, R14
+    MOVWU (R12), R19
     ADD   R14, R19, R19
 
     // Symbol H (state in R20)
     LSL   $3, R20, R12
-    MOVBU 6(R0)(R12*1), R13
-    MOVHU 4(R0)(R12*1), R14
+    ADD  R0, R12, R12
+    MOVBU 6(R12), R13
+    MOVHU 4(R12), R14
     MOVH  R14, 14(R9)
-    LSLV  R4, R3, R14
+    LSL  R4, R3, R14
     ADD   R13, R4, R4
     MOVD  $64, R1
     SUB   R13, R1, R1
-    LSRV  R1, R14, R14
-    MOVWU 0(R0)(R12*1), R20
+    LSR  R1, R14, R14
+    MOVWU (R12), R20
     ADD   R14, R20, R20
 
     ADD $16, R9,  R9    // out += 8 x 2 bytes

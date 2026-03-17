@@ -220,15 +220,29 @@ context-adaptive arithmetic coder on these smooth medical images.
 
 ### Decompression Speed Comparison
 
-> ⚠️ Direct speed comparison is not meaningful — MIC measurements are on
-> Intel Xeon @ 2.80 GHz and HTJ2K on Apple M2 Max (single-threaded subprocess
-> including process launch overhead). See the main README for a same-machine
-> Delta+RLE+FSE vs HTJ2K comparison.
+All measurements below are **Apple M2 Max, ARM64, single-threaded, in-process** (no
+subprocess, no file I/O). HTJ2K uses CGO bindings to libopenjph (`BenchmarkHTJ2KFairDecomp`,
+`BenchmarkThreeWay` in `ojph/`). All values in **MB/s** over uncompressed pixel bytes.
 
-On the same hardware (Apple M2 Max, single-threaded, from the main benchmark suite),
-**Delta+RLE+FSE** decompresses 1.3–1.5× faster than HTJ2K for large images.
-The wavelet V2 pipeline would be slower still due to the additional transform
-passes, so Delta+RLE+FSE is the recommended production choice when speed matters.
+| Modality | MIC Delta+RLE+FSE (Go) | MIC-4state-C | Wavelet V2 SIMD | HTJ2K (OpenJPH) |
+|----------|:---:|:---:|:---:|:---:|
+| MR (256×256)      | 145 | 350 | **464** | 261 |
+| CT (512×512)      | 181 | **375** | 538 | 292 |
+| CR (2140×1760)    | 290 | **532** | 784 | 358 |
+| XR (2048×2577)    | 301 | **529** | 878 | 317 |
+| MG1 (2457×1996)   | 472 | 684 | **1129** | 790 |
+| MG2 (2457×1996)   | 473 | 688 | **1069** | 794 |
+| MG3 (4774×3064)   | 304 | **534** | 716 | 334 |
+| MG4 (4096×3328)   | 415 | **627** | 827 | 551 |
+
+**Wavelet V2 SIMD** decompression exceeds HTJ2K on **all 8 modalities** — including
+mammography where HTJ2K's own SIMD wavelet decoder achieves 790–794 MB/s. The SIMD
+blocked-column wavelet transform (8 columns per cache line, AVX2 kernels) combined
+with 4-state FSE produces this result despite the wavelet's 4× memory bandwidth overhead
+vs delta decode.
+
+For **pure-Go** (no CGO) deployments, `MIC-4state` (Go+NEON) beats HTJ2K on CR, XR,
+MG3, MG4, and is within 15% on others. MIC-4state-C (CGO) beats HTJ2K on 6/8.
 
 ---
 

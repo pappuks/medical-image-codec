@@ -173,6 +173,48 @@ func TestMICCorrectnessC(t *testing.T) {
 	}
 }
 
+// TestMICCorrectnessFourStateC verifies four-state C decompression matches original pixels.
+func TestMICCorrectnessFourStateC(t *testing.T) {
+	for _, ti := range testImages {
+		t.Run(ti.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := loadTestImage(ti)
+			if len(shortData) == 0 {
+				t.Skip("could not load image")
+			}
+
+			var drc mic.DeltaRleCompressU16
+			deltaComp, err := drc.Compress(shortData, cols, rows, maxShort)
+			if err != nil {
+				t.Fatalf("compress: %v", err)
+			}
+			var s mic.ScratchU16
+			fse4Comp, err := mic.FSECompressU16FourState(deltaComp, &s)
+			if err != nil {
+				t.Fatalf("FSE4 compress: %v", err)
+			}
+
+			cPixels, err := MICDecompressFourStateC(fse4Comp, cols, rows)
+			if err != nil {
+				t.Fatalf("C 4-state decompress: %v", err)
+			}
+			simdPixels, err := MICDecompressFourStateSIMD(fse4Comp, cols, rows)
+			if err != nil {
+				t.Fatalf("C 4-state SIMD decompress: %v", err)
+			}
+
+			for i := range shortData {
+				if cPixels[i] != shortData[i] {
+					t.Fatalf("C pixel %d: got %d, want %d", i, cPixels[i], shortData[i])
+				}
+				if simdPixels[i] != shortData[i] {
+					t.Fatalf("SIMD pixel %d: got %d, want %d", i, simdPixels[i], shortData[i])
+				}
+			}
+			t.Logf("OK: %s (%dx%d) — all %d pixels match", ti.name, cols, rows, len(shortData))
+		})
+	}
+}
+
 // TestFourWayComparison prints a side-by-side comparison table: MIC-Go vs MIC-C vs MIC-SIMD vs HTJ2K.
 func TestFourWayComparison(t *testing.T) {
 	const decompRuns = 10
@@ -323,7 +365,7 @@ func TestFourWayComparison(t *testing.T) {
 	}
 }
 
-// BenchmarkThreeWay runs Go benchmarks for all three decompressors.
+// BenchmarkThreeWay runs Go benchmarks for all decompressors including MIC 4-state.
 func BenchmarkThreeWay(b *testing.B) {
 	for _, ti := range testImages {
 		byteData, shortData, maxShort, cols, rows := loadTestImage(ti)
@@ -340,6 +382,8 @@ func BenchmarkThreeWay(b *testing.B) {
 		deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
 		var s mic.ScratchU16
 		fseComp, _ := mic.FSECompressU16TwoState(deltaComp, &s)
+		var s4 mic.ScratchU16
+		fse4Comp, _ := mic.FSECompressU16FourState(deltaComp, &s4)
 
 		htj2kComp, err := CompressU16(shortData, cols, rows, bitDepth)
 		if err != nil {
@@ -347,6 +391,7 @@ func BenchmarkThreeWay(b *testing.B) {
 		}
 
 		micRatio := float64(origBytes) / float64(len(fseComp))
+		mic4Ratio := float64(origBytes) / float64(len(fse4Comp))
 		htj2kRatio := float64(origBytes) / float64(len(htj2kComp))
 
 		b.Run("MIC-Go/"+ti.name, func(b *testing.B) {
@@ -359,6 +404,36 @@ func BenchmarkThreeWay(b *testing.B) {
 				drd.Decompress(rleData, cols, rows)
 			}
 			b.ReportMetric(micRatio, "ratio")
+		})
+
+		b.Run("MIC-4state/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var sd mic.ScratchU16
+				rleData, _ := mic.FSEDecompressU16FourState(fse4Comp, &sd)
+				var drd mic.DeltaRleDecompressU16
+				drd.Decompress(rleData, cols, rows)
+			}
+			b.ReportMetric(mic4Ratio, "ratio")
+		})
+
+		b.Run("MIC-4state-C/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				MICDecompressFourStateC(fse4Comp, cols, rows)
+			}
+			b.ReportMetric(mic4Ratio, "ratio")
+		})
+
+		b.Run("MIC-4state-SIMD/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				MICDecompressFourStateSIMD(fse4Comp, cols, rows)
+			}
+			b.ReportMetric(mic4Ratio, "ratio")
 		})
 
 		b.Run("MIC-C/"+ti.name, func(b *testing.B) {

@@ -13,7 +13,7 @@ package ojph
 
 /*
 #cgo CXXFLAGS: -O2 -I/usr/local/include
-#cgo LDFLAGS: -L/usr/local/lib -lopenjph -lstdc++
+#cgo LDFLAGS: -L/usr/local/lib -lopenjph -lstdc++ -Wl,-rpath,/usr/local/lib
 #include <stdint.h>
 #include <stddef.h>
 

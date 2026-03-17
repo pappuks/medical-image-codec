@@ -29,6 +29,15 @@ int mic_decompress_two_state(const uint8_t *compressed, size_t compressed_len,
 int mic_decompress_two_state_simd(const uint8_t *compressed, size_t compressed_len,
                                    uint16_t *pixels_out, int width, int height);
 
+// mic_decompress_four_state decompresses a MIC four-state FSE compressed stream.
+// Input format: [0xFF][0x04][count_u32_le][FSE header][bitstream]
+int mic_decompress_four_state(const uint8_t *compressed, size_t compressed_len,
+                              uint16_t *pixels_out, int width, int height);
+
+// SIMD-optimized four-state version (SSE2/AVX2 RLE+delta; scalar FSE).
+int mic_decompress_four_state_simd(const uint8_t *compressed, size_t compressed_len,
+                                   uint16_t *pixels_out, int width, int height);
+
 #ifdef __cplusplus
 }
 #endif
