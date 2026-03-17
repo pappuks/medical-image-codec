@@ -100,9 +100,9 @@ func WaveletFSECompressU16(pixels []uint16, rows, cols int, maxValue uint16, lev
 	// Encode coefficients to uint16 stream with overflow escape
 	encoded := waveletCoeffsToU16(data)
 
-	// FSE compress
+	// FSE compress (4-state for better decompression throughput)
 	var s ScratchU16
-	fseOut, err := FSECompressU16(encoded, &s)
+	fseOut, err := FSECompressU16FourState(encoded, &s)
 	if err != nil {
 		return nil, err
 	}
@@ -131,9 +131,9 @@ func WaveletFSEDecompressU16(compressed []byte) ([]uint16, int, int, error) {
 	_ = binary.LittleEndian.Uint16(compressed[8:10]) // maxValue (for future use)
 	levels := int(compressed[10])
 
-	// FSE decompress
+	// FSE decompress (4-state)
 	var s ScratchU16
-	encoded, err := FSEDecompressU16(compressed[11:], &s)
+	encoded, err := FSEDecompressU16FourState(compressed[11:], &s)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -351,9 +351,9 @@ func WaveletV2RLEFSECompressU16(pixels []uint16, rows, cols int, maxValue uint16
 	rleC.Init(len(encoded), 1, rleMaxVal)
 	rleOut := rleC.Compress(encoded)
 
-	// FSE compress
+	// FSE compress (4-state for better decompression throughput)
 	var s ScratchU16
-	fseOut, err := FSECompressU16(rleOut, &s)
+	fseOut, err := FSECompressU16FourState(rleOut, &s)
 	if err != nil {
 		return nil, err
 	}
@@ -381,9 +381,9 @@ func WaveletV2RLEFSEDecompressU16(compressed []byte) ([]uint16, int, int, error)
 	_ = binary.LittleEndian.Uint16(compressed[8:10]) // maxValue
 	levels := int(compressed[10])
 
-	// FSE decompress
+	// FSE decompress (4-state)
 	var s ScratchU16
-	fseOut, err := FSEDecompressU16(compressed[11:], &s)
+	fseOut, err := FSEDecompressU16FourState(compressed[11:], &s)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -470,7 +470,7 @@ func WaveletV2SIMDRLEFSECompressU16(pixels []uint16, rows, cols int, maxValue ui
 	rleOut := rleC.Compress(encoded)
 
 	var s ScratchU16
-	fseOut, err := FSECompressU16(rleOut, &s)
+	fseOut, err := FSECompressU16FourState(rleOut, &s)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +501,7 @@ func WaveletV2SIMDRLEFSEDecompressU16(compressed []byte) ([]uint16, int, int, er
 	levels := int(compressed[10])
 
 	var s ScratchU16
-	fseOut, err := FSEDecompressU16(compressed[11:], &s)
+	fseOut, err := FSEDecompressU16FourState(compressed[11:], &s)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -598,9 +598,9 @@ func WaveletRLEFSECompressU16(pixels []uint16, rows, cols int, maxValue uint16, 
 	rleC.Init(len(encoded), 1, rleMaxVal)
 	rleOut := rleC.Compress(encoded)
 
-	// FSE compress
+	// FSE compress (4-state for better decompression throughput)
 	var s ScratchU16
-	fseOut, err := FSECompressU16(rleOut, &s)
+	fseOut, err := FSECompressU16FourState(rleOut, &s)
 	if err != nil {
 		return nil, err
 	}
@@ -632,9 +632,9 @@ func WaveletRLEFSEDecompressU16(compressed []byte) ([]uint16, int, int, error) {
 	levels := int(compressed[10])
 	_ = int(binary.LittleEndian.Uint32(compressed[11:15])) // encodedLen (RLE handles its own length)
 
-	// FSE decompress
+	// FSE decompress (4-state)
 	var s ScratchU16
-	fseOut, err := FSEDecompressU16(compressed[15:], &s)
+	fseOut, err := FSEDecompressU16FourState(compressed[15:], &s)
 	if err != nil {
 		return nil, 0, 0, err
 	}
