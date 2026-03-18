@@ -45,6 +45,11 @@ go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkFSEDecompress4State$ m
 # Prereq: libopenjph installed in /usr/local/lib, headers in /usr/local/include/openjph
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkHTJ2KFairDecomp$ ./ojph/
 
+# Fair in-process JPEG-LS comparison (requires: go build -tags cgo_ojph)
+# Prereq: libcharls installed in /usr/local/lib, headers in /usr/local/include/charls
+go test -tags cgo_ojph -run TestJPEGLSComparison -v ./ojph/
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkJPEGLSDecomp$ ./ojph/
+
 # Full multi-variant comparison: MIC-Go, MIC-4state, MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkThreeWay$ ./ojph/
 
