@@ -31,13 +31,14 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 10. [Browser Decoder](#browser-decoder)
 11. [CLI Reference](#cli-reference)
 12. [Comparison with HTJ2K](#comparison-with-htj2k)
-13. [Design Background](#design-background)
-14. [Source Files & Architecture](#source-files--architecture)
-15. [Test Data](#test-data)
-16. [Developer Guide](#developer-guide)
-17. [Roadmap](#roadmap)
+13. [Comparison with JPEG-LS](#comparison-with-jpeg-ls)
+14. [Design Background](#design-background)
+15. [Source Files & Architecture](#source-files--architecture)
+16. [Test Data](#test-data)
+17. [Developer Guide](#developer-guide)
+18. [Roadmap](#roadmap)
 
-> **New:** Wavelet V2 SIMD pipeline now uses **4-state FSE** (4 independent ANS states + BMI2 assembly on AMD64), achieving better compression ratios than Delta+RLE+FSE on 7/8 modalities and matching or beating HTJ2K on 7/8 — see [Wavelet V2 SIMD vs Delta+RLE+FSE](#wavelet-v2-simd--4-state-fse-vs-deltarlefse) and [HTJ2K comparison](#comparison-with-htj2k). [Delta+Zstandard](#comparison-with-deltazstandard) and [MED predictor](#med-predictor-comparison) comparisons also available.
+> **New:** Wavelet V2 SIMD pipeline now uses **4-state FSE** (4 independent ANS states + BMI2 assembly on AMD64), achieving better compression ratios than Delta+RLE+FSE on 7/8 modalities and matching or beating HTJ2K on 7/8 — see [Wavelet V2 SIMD vs Delta+RLE+FSE](#wavelet-v2-simd--4-state-fse-vs-deltarlefse) and [HTJ2K comparison](#comparison-with-htj2k). [JPEG-LS (CharLS)](#comparison-with-jpeg-ls), [Delta+Zstandard](#comparison-with-deltazstandard), and [MED predictor](#med-predictor-comparison) comparisons also available.
 
 ---
 
@@ -762,6 +763,59 @@ go test -benchmem -run=^$ -benchtime=10x \
 - **Single-threaded speed**: MIC-4state-C/SIMD beats HTJ2K on 6/8 modalities; MIC-Go (4-state) beats HTJ2K on CR, XR, MG3, MG4 with no CGO.
 - **Multi-core**: At 64 cores MIC reaches up to **16 GB/s** (mammography) vs OpenJPH's single-threaded CLI — MIC's frame-parallel architecture is its primary speed advantage.
 - **Simplicity**: MIC is a pure Go library for the Delta+RLE+FSE path — no subprocess, no file I/O, no CGO required.
+
+---
+
+## Comparison with JPEG-LS
+
+JPEG-LS (ISO 14495-1) is a first-class DICOM lossless transfer syntax and a natural competitor for MIC. We benchmark against [CharLS](https://github.com/team-charls/charls) v2.4.2, the most widely used optimized JPEG-LS implementation. All timings are **single-threaded, in-process** via CGO — no subprocess, no file I/O, identical conditions to the HTJ2K comparison.
+
+### Compression Ratio
+
+| Modality | MIC (Delta+RLE+FSE) | JPEG-LS (CharLS) | JPEG-LS advantage |
+|----------|:---:|:---:|:---:|
+| MR (256×256) | 2.35× | **2.38×** | +1.3% |
+| CT (512×512) | **2.24×** | 2.31× | +3.1% |
+| CR (2140×1760) | 3.63× | **3.63×** | +0.1% |
+| XR (2048×2577) | 1.74× | **1.73×** | −0.2% |
+| MG1 (2457×1996) | 8.57× | **8.69×** | +1.5% |
+| MG2 (2457×1996) | 8.55× | **8.68×** | +1.5% |
+| MG3 (4774×3064) | 2.24× | **2.36×** | +5.2% |
+| MG4 (4096×3328) | 3.47× | **3.42×** | −1.7% |
+
+JPEG-LS achieves 1–5% better compression on most modalities due to its adaptive MED (Median Edge Detector) predictor, which selects between horizontal, vertical, and diagonal prediction per-pixel. MIC's simpler `avg(left, top)` predictor trades a small ratio loss for significantly faster decompression (see below).
+
+### Decompression Speed
+
+| Modality | MIC (MB/s) | JPEG-LS (MB/s) | MIC speedup |
+|----------|:---:|:---:|:---:|
+| MR (256×256) | 215 | 155 | **1.4×** |
+| CT (512×512) | 135 | 95 | **1.4×** |
+| CR (2140×1760) | 185 | 70 | **2.6×** |
+| XR (2048×2577) | 185 | 85 | **2.2×** |
+| MG1 (2457×1996) | 305 | 280 | **1.1×** |
+| MG2 (2457×1996) | 310 | 275 | **1.1×** |
+| MG3 (4774×3064) | 175 | 105 | **1.7×** |
+| MG4 (4096×3328) | 265 | 165 | **1.6×** |
+
+MIC decompresses **1.1–2.6× faster** than JPEG-LS on all modalities. The speed advantage is largest on CR (2.6×) and XR (2.2×) where MIC's branch-free delta decode loop and table-driven FSE decoder outperform JPEG-LS's per-pixel context modeling and Golomb-Rice coding.
+
+### Key Takeaways
+
+- **JPEG-LS wins on ratio** (1–5% better on most modalities) due to MED predictor adaptivity.
+- **MIC wins on speed** (1.1–2.6× faster decompression) due to branch-free decode and table-driven FSE.
+- MIC's wavelet pipeline (`WaveletV2SIMDRLEFSECompressU16`) closes the ratio gap and matches or exceeds JPEG-LS on most modalities while maintaining the speed advantage.
+- For clinical PACS deployment where decompression throughput matters more than 1–5% storage savings, MIC is the better choice.
+
+```bash
+# Run JPEG-LS comparison
+go test -tags cgo_ojph -v -run TestJPEGLSComparison ./ojph/ -timeout 300s
+
+# Benchmark JPEG-LS decompression
+go test -tags cgo_ojph -run=^$ -bench=BenchmarkJPEGLSDecomp ./ojph/ -benchtime=10x
+```
+
+Full methodology and detailed results: [docs/jpegls-comparison.md](./docs/jpegls-comparison.md)
 
 ---
 
