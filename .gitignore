@@ -3,3 +3,4 @@ testdata/mg-mf-dcm.dcm
 testdata/Series*/
 testdata/0acbebb*/
 *.so
+*.o
