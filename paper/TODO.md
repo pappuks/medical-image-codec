@@ -55,7 +55,9 @@ The paper makes a clear, well-scoped contribution: a practical, open-source loss
   | MG4   | 273       | 403      | 462          | 1.5× | 0.83×   |
   | **Geo mean** | | | | **1.56×** | **0.87×** |
 
-- [ ] **Wavelet implementation details** *(Section 6)* — The wavelet pipeline is described in ~one paragraph. State: (a) number of decomposition levels applied, (b) subband scan order for RLE input (standard LL, HL, LH, HH?), (c) whether it received comparable optimization effort to the delta pipeline. The result that wavelet+RLE+FSE underperforms delta+RLE+FSE on compression ratio is surprising — JPEG 2000 routinely beats simple delta coders. If only one decomposition level is used, this would explain the gap and must be stated explicitly.
+- [x] **Wavelet implementation details** *(Section 6)* — The wavelet pipeline is described in ~one paragraph. State: (a) number of decomposition levels applied, (b) subband scan order for RLE input (standard LL, HL, LH, HH?), (c) whether it received comparable optimization effort to the delta pipeline. The result that wavelet+RLE+FSE underperforms delta+RLE+FSE on compression ratio is surprising — JPEG 2000 routinely beats simple delta coders. If only one decomposition level is used, this would explain the gap and must be stated explicitly.
+
+  *(Done: Paper Section 6 now fully specifies 5 decomposition levels, subband-order scan (LL5→HL5→LH5→HH5→...→HH1), ZigZag+escape encoding, SIMD blocked column pass, and AVX2 kernels. Updated with Wavelet V2 results showing it matches/exceeds HTJ2K on 7/8 modalities. The original V1 (1-level) underperformance is explained as the baseline.)*
 
 ---
 
@@ -63,7 +65,9 @@ The paper makes a clear, well-scoped contribution: a practical, open-source loss
 
 - [x] **Qualify the "16 GB/s" headline** — 16 GB/s is achieved on MG1/MG2 specifically (mammography, 8.5× ratio). CT achieves 4.4 GB/s; MR achieves 2.3 GB/s. The abstract and conclusion should either report a cross-modality geometric mean or label 16 GB/s explicitly as "best-case on mammography."
 
-- [ ] **Add JPEG-LS comparison** — JPEG-LS is a first-class DICOM transfer syntax and the closest practical competitor to MIC. Its absence is a gap reviewers will notice. Use CharLS (optimized JPEG-LS library) for both compression ratio and decompression speed benchmarks.
+- [x] **Add JPEG-LS comparison** — JPEG-LS is a first-class DICOM transfer syntax and the closest practical competitor to MIC. Its absence is a gap reviewers will notice. Use CharLS (optimized JPEG-LS library) for both compression ratio and decompression speed benchmarks.
+
+  *(Done: Added in-process JPEG-LS comparison using CharLS via CGO. JPEG-LS achieves 1-16% better compression ratios on all modalities due to adaptive MED predictor. MIC decompresses 1.4-2.6× faster on 6/8 modalities, tied on mammography. See `ojph/charls_wrapper.cpp`, `ojph/charls.go`, `ojph/jpegls_comparison_test.go`, and paper Section 5.6.)*
 
 - [x] **Temporal mode: show a win case** *(Section 5.3)* — Independent mode (13.3×) beats temporal mode (12.9×) on the DBT dataset. Add at least one dataset where temporal mode wins (e.g., cardiac cine MRI, fluoroscopy, or a synthetic high-inter-frame-correlation sequence), or explicitly state temporal mode is a design provision for those use cases and has not been benchmarked favorably here.
 
@@ -80,6 +84,16 @@ The paper makes a clear, well-scoped contribution: a practical, open-source loss
 - [x] **MED predictor comparison** — The JPEG-LS MED predictor (`median(left, top, left+top-diag)`) is a well-known improvement over avg-of-neighbors. Either benchmark it or cite a reason why the simpler predictor was chosen (simplicity, decompression speed). If avg-of-neighbors produces similar ratios, that is worth noting. *(Done: MED yields ~0.9% mean improvement at 1.5–2× decompression speed penalty. Avg predictor retained. See `TestMEDPredictorComparison` and paper Section 9.)*
 
 - [ ] **Browser decoder methodology** — "10–30 M pixels/s in V8" is unverifiable as stated. Add: browser version, platform, which image(s), and how it was measured.
+
+---
+
+## Completed in Latest Update
+
+- [x] **HTJ2K claims corrected** — Paper Section 5.5 now uses fair in-process CGO benchmarks. Old subprocess-based "1.3-1.5× faster" claim retracted. New results show HTJ2K is ~1.8× faster than MIC-Go, but MIC-4state-C closes to 0.87×. Methodology note added to paper.
+- [x] **Four-state FSE decoder** — Paper Section 4.6 updated from two-state to four-state FSE with BMI2/ARM64 assembly kernels. Table updated with 1/2/4-state comparison data.
+- [x] **JPEG-LS comparison added** — New Section 5.6 with CharLS in-process benchmarks. Table with ratio and speed comparison across all 8 modalities.
+- [x] **Wavelet V2 (5-level) results** — Section 6 completely rewritten with V2 implementation details (5 levels, subband ordering, SIMD, ZigZag+escape), V2 ratio comparison including HTJ2K, V2 SIMD speed comparison.
+- [x] **Abstract and conclusion updated** — Corrected HTJ2K claims, added JPEG-LS findings, added 4-state FSE and wavelet V2 SIMD results.
 
 ---
 
