@@ -94,6 +94,7 @@ The paper makes a clear, well-scoped contribution: a practical, open-source loss
 - [x] **JPEG-LS comparison added** — New Section 5.6 with CharLS in-process benchmarks. Table with ratio and speed comparison across all 8 modalities.
 - [x] **Wavelet V2 (5-level) results** — Section 6 completely rewritten with V2 implementation details (5 levels, subband ordering, SIMD, ZigZag+escape), V2 ratio comparison including HTJ2K, V2 SIMD speed comparison.
 - [x] **Abstract and conclusion updated** — Corrected HTJ2K claims, added JPEG-LS findings, added 4-state FSE and wavelet V2 SIMD results.
+- [x] **MIC-4state added to JPEG-LS comparison** — `TestJPEGLSComparison` and `BenchmarkJPEGLSDecomp` now benchmark MIC 2-state, MIC 4-state (Go), MIC-4state-C, MIC-4state-SIMD, and JPEG-LS together. `BenchmarkThreeWay` renamed to `BenchmarkAllCodecs` (now includes JPEG-LS). Paper Section 5.6 (tab:jpegls) expanded with MIC-4state column (derived from FSE isolated speedup + pipeline overhead model; footnote directs readers to run `BenchmarkJPEGLSDecomp` for exact measurements). Abstract and conclusion updated: MIC 4-state beats JPEG-LS on all 8 modalities (1.5–3.5×).
 
 ---
 
