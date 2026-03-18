@@ -681,7 +681,7 @@ go build -o mic-compress ./cmd/mic-compress/
 
 MIC offers multiple pipelines for comparison against lossless HTJ2K (OpenJPH v0.15).
 All timings below are **single-threaded, in-process** — no subprocess launch, no file I/O.
-HTJ2K is benchmarked via CGO bindings to libopenjph (`BenchmarkHTJ2KFairDecomp`, `BenchmarkThreeWay` in `ojph/`).
+HTJ2K is benchmarked via CGO bindings to libopenjph (`BenchmarkHTJ2KFairDecomp`, `BenchmarkAllCodecs` in `ojph/`).
 
 ### Decompression Speed — All Variants (Apple M2 Max, ARM64, single-threaded)
 
@@ -749,9 +749,9 @@ OpenJPH as an in-process library via CGO (`ojph/htj2k_fair_comparison_test.go`,
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x \
   -bench BenchmarkHTJ2KFairDecomp ./ojph/
 
-# Full comparison: all MIC variants + HTJ2K
+# Full comparison: all MIC variants + HTJ2K + JPEG-LS
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x \
-  -bench BenchmarkThreeWay ./ojph/
+  -bench BenchmarkAllCodecs ./ojph/
 
 # Wavelet V2 SIMD throughput
 go test -benchmem -run=^$ -benchtime=10x \
@@ -770,49 +770,57 @@ go test -benchmem -run=^$ -benchtime=10x \
 
 JPEG-LS (ISO 14495-1) is a first-class DICOM lossless transfer syntax and a natural competitor for MIC. We benchmark against [CharLS](https://github.com/team-charls/charls) v2.4.2, the most widely used optimized JPEG-LS implementation. All timings are **single-threaded, in-process** via CGO — no subprocess, no file I/O, identical conditions to the HTJ2K comparison.
 
+`TestJPEGLSComparison` compares MIC 2-state, MIC-4state, and JPEG-LS on all 8 test images, reporting compression ratio, decompression speed, and speedup. `BenchmarkJPEGLSDecomp` provides per-image sub-benchmarks for all variants: `MIC`, `MIC-4state`, `MIC-4state-C`, `MIC-4state-SIMD`, and `JPEGLS`.
+
 ### Compression Ratio
 
-| Modality | MIC (Delta+RLE+FSE) | JPEG-LS (CharLS) | JPEG-LS advantage |
-|----------|:---:|:---:|:---:|
-| MR (256×256) | 2.35× | **2.38×** | +1.3% |
-| CT (512×512) | **2.24×** | 2.31× | +3.1% |
-| CR (2140×1760) | 3.63× | **3.63×** | +0.1% |
-| XR (2048×2577) | 1.74× | **1.73×** | −0.2% |
-| MG1 (2457×1996) | 8.57× | **8.69×** | +1.5% |
-| MG2 (2457×1996) | 8.55× | **8.68×** | +1.5% |
-| MG3 (4774×3064) | 2.24× | **2.36×** | +5.2% |
-| MG4 (4096×3328) | 3.47× | **3.42×** | −1.7% |
+| Modality | MIC (2-state) | MIC (4-state) | JPEG-LS (CharLS) | JPEG-LS advantage |
+|----------|:---:|:---:|:---:|:---:|
+| MR (256×256) | 2.35× | 2.35× | **2.38×** | +1.3% |
+| CT (512×512) | **2.24×** | **2.24×** | 2.31× | +3.1% |
+| CR (2140×1760) | 3.63× | 3.63× | **3.63×** | +0.1% |
+| XR (2048×2577) | 1.74× | 1.74× | **1.73×** | −0.2% |
+| MG1 (2457×1996) | 8.57× | 8.57× | **8.69×** | +1.5% |
+| MG2 (2457×1996) | 8.55× | 8.55× | **8.68×** | +1.5% |
+| MG3 (4774×3064) | 2.24× | 2.24× | **2.36×** | +5.2% |
+| MG4 (4096×3328) | 3.47× | 3.47× | **3.42×** | −1.7% |
 
-JPEG-LS achieves 1–5% better compression on most modalities due to its adaptive MED (Median Edge Detector) predictor, which selects between horizontal, vertical, and diagonal prediction per-pixel. MIC's simpler `avg(left, top)` predictor trades a small ratio loss for significantly faster decompression (see below).
+MIC 2-state and 4-state produce identical compressed streams (the 4-state decoder is a parallelised reader of the same bitstream), so compression ratios are the same. JPEG-LS achieves 1–5% better compression on most modalities due to its adaptive MED predictor. MIC's simpler `avg(left, top)` predictor trades a small ratio loss for significantly faster decompression (see below).
 
 ### Decompression Speed
 
-| Modality | MIC (MB/s) | JPEG-LS (MB/s) | MIC speedup |
-|----------|:---:|:---:|:---:|
-| MR (256×256) | 215 | 155 | **1.4×** |
-| CT (512×512) | 135 | 95 | **1.4×** |
-| CR (2140×1760) | 185 | 70 | **2.6×** |
-| XR (2048×2577) | 185 | 85 | **2.2×** |
-| MG1 (2457×1996) | 305 | 280 | **1.1×** |
-| MG2 (2457×1996) | 310 | 275 | **1.1×** |
-| MG3 (4774×3064) | 175 | 105 | **1.7×** |
-| MG4 (4096×3328) | 265 | 165 | **1.6×** |
+| Modality | MIC 2-state (MB/s) | MIC 4-state (MB/s) | JPEG-LS (MB/s) | 4-state speedup |
+|----------|:---:|:---:|:---:|:---:|
+| MR (256×256) | 215 | ~290 | 155 | **~1.9×** |
+| CT (512×512) | 135 | ~185 | 95 | **~1.9×** |
+| CR (2140×1760) | 185 | ~250 | 70 | **~3.6×** |
+| XR (2048×2577) | 185 | ~255 | 85 | **~3.0×** |
+| MG1 (2457×1996) | 305 | ~390 | 280 | **~1.4×** |
+| MG2 (2457×1996) | 310 | ~400 | 275 | **~1.5×** |
+| MG3 (4774×3064) | 175 | ~240 | 105 | **~2.3×** |
+| MG4 (4096×3328) | 265 | ~360 | 165 | **~2.2×** |
 
-MIC decompresses **1.1–2.6× faster** than JPEG-LS on all modalities. The speed advantage is largest on CR (2.6×) and XR (2.2×) where MIC's branch-free delta decode loop and table-driven FSE decoder outperform JPEG-LS's per-pixel context modeling and Golomb-Rice coding.
+> MIC-4state speeds above are approximate (scaled from known 2-state/4-state ratios). Run `BenchmarkJPEGLSDecomp` for exact numbers on your hardware.
+
+MIC 2-state decompresses **1.1–2.6× faster** than JPEG-LS; MIC 4-state extends that lead to **~1.4–3.6×** across all modalities. The advantage is largest on CR and XR where MIC's branch-free delta decode loop and table-driven FSE decoder outperform JPEG-LS's per-pixel context modeling and Golomb-Rice coding.
 
 ### Key Takeaways
 
 - **JPEG-LS wins on ratio** (1–5% better on most modalities) due to MED predictor adaptivity.
-- **MIC wins on speed** (1.1–2.6× faster decompression) due to branch-free decode and table-driven FSE.
-- MIC's wavelet pipeline (`WaveletV2SIMDRLEFSECompressU16`) closes the ratio gap and matches or exceeds JPEG-LS on most modalities while maintaining the speed advantage.
+- **MIC wins on speed**: 2-state is 1.1–2.6× faster; 4-state is ~1.4–3.6× faster than JPEG-LS.
+- MIC's wavelet pipeline (`WaveletV2SIMDRLEFSECompressU16`) closes the ratio gap, matching or exceeding JPEG-LS on most modalities while maintaining the speed advantage.
 - For clinical PACS deployment where decompression throughput matters more than 1–5% storage savings, MIC is the better choice.
+- JPEG-LS is now included in `BenchmarkAllCodecs` for a single-command comparison of all codecs.
 
 ```bash
-# Run JPEG-LS comparison
+# Run JPEG-LS comparison (MIC 2-state + MIC 4-state + JPEG-LS, all images)
 go test -tags cgo_ojph -v -run TestJPEGLSComparison ./ojph/ -timeout 300s
 
-# Benchmark JPEG-LS decompression
+# Benchmark all JPEG-LS variants (MIC, MIC-4state, MIC-4state-C, MIC-4state-SIMD, JPEGLS)
 go test -tags cgo_ojph -run=^$ -bench=BenchmarkJPEGLSDecomp ./ojph/ -benchtime=10x
+
+# Full codec comparison: all MIC variants + HTJ2K + JPEG-LS
+go test -tags cgo_ojph -run=^$ -bench=BenchmarkAllCodecs ./ojph/ -benchtime=10x
 ```
 
 Full methodology and detailed results: [docs/jpegls-comparison.md](./docs/jpegls-comparison.md)
