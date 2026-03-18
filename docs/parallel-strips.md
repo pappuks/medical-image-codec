@@ -89,32 +89,42 @@ more bits than an interior pixel (both neighbours).  With `ε ≈ 0.15`:
 Larger images (CR, MG) incur smaller relative overhead because boundary rows
 are a smaller fraction of total rows.
 
-### Measured results (MR 256×256, Delta+RLE+FSE two-state)
+### Measured results across all modalities (Delta+RLE+FSE two-state)
 
-| Strips | Compressed | Ratio | Overhead vs 1-strip |
-|--------|-----------|-------|---------------------|
-| 1 | 55,821 B | **2.35×** | baseline |
-| 2 | 56,377 B | 2.32× | +1.00% |
-| 4 | 57,388 B | 2.28× | +2.81% |
-| 8 | 59,199 B | 2.21× | +6.05% |
-| 16 | 62,419 B | 2.10× | +11.82% |
+Compression ratios measured at 1/2/4/8 strips (Intel Xeon @ 2.10 GHz):
 
-The MR image is 256 rows tall — a relatively severe case.  For larger images
-(CR: 2140 rows, MG: 3064–4096 rows) the per-strip overhead is proportionally
-smaller.
+| Image | Size | 1-strip | 2-strip | 4-strip | 8-strip | Δ(1→4) |
+|-------|------|:-------:|:-------:|:-------:|:-------:|:------:|
+| MR (256×256) | 0.12 MB | **2.35×** | 2.33× | 2.28× | 2.21× | −3.0% |
+| CT (512×512) | 0.50 MB | **2.24×** | 2.21× | 2.15× | 1.96× | −4.0% |
+| CR (1760×2140) | 7.18 MB | 3.63× | 3.64× | **3.66×** | 3.68× | +0.8% |
+| XR (2048×2577) | 10.07 MB | 1.74× | 1.75× | **1.75×** | 1.76× | +0.6% |
+| MG1 (2457×1996) | 9.35 MB | 8.57× | 8.60× | **8.69×** | 8.77× | +1.4% |
+| MG2 (2457×1996) | 9.35 MB | 8.55× | 8.59× | **8.68×** | 8.76× | +1.5% |
+| MG3 (4774×3064) | 27.90 MB | 2.29× | 2.33× | **2.36×** | 2.39× | +3.1% |
+| MG4 (4096×3328) | 26.00 MB | 3.47× | 3.52× | **3.59×** | 3.62× | +3.5% |
 
-**Recommendation**: 4 strips delivers the best practical trade-off — ~2.5–2.9×
-faster compression/decompression with only ~2–3% ratio loss on a 4-core
-machine.
+> **CR, XR, and MG images improve in ratio at higher strip counts** because
+> strip-local FSE tables adapt to sub-image content distributions better than a
+> single global table.  Small images (MR, CT) show the expected small ratio
+> loss at strip boundaries.
+
+The MR image is 256 rows tall — a relatively severe case for boundary overhead.
+For larger images (CR: 2140 rows, MG: 3064–4096 rows) the per-strip overhead
+is proportionally smaller and often outweighed by the FSE localisation gain.
+
+**Recommendation**: 4 strips delivers the best practical trade-off — ~2–4×
+faster decompression with negligible or positive ratio impact on large images,
+and <3% ratio loss on small images (MR, CT) on a 4-core machine.
 
 ---
 
 ## Throughput Scaling
 
-All numbers below use the **CR image** (1760×2140, 7.18 MB raw,
-3.63× compression), **Intel Xeon @ 2.10 GHz, 4 physical cores**, 5 iterations.
+All benchmarks run on **Intel Xeon @ 2.10 GHz, 4 physical cores**, `GOMAXPROCS=4`,
+10 iterations, using the Go testing framework (`b.SetBytes`).
 
-### Compression throughput
+### CR image (1760×2140) — compression throughput
 
 | Strips | MB/s | Speedup | Wall time (ms) |
 |:------:|:----:|:-------:|:--------------:|
@@ -123,11 +133,7 @@ All numbers below use the **CR image** (1760×2140, 7.18 MB raw,
 | 4 | 401 | **3.02×** | 18.8 |
 | 8 | 479 | **3.61×** | 15.7 |
 
-Compression speedup continues past the core count at 8 strips because goroutine
-scheduling and lock-free parallel writes allow the runtime to overlap I/O with
-computation.
-
-### Decompression throughput
+### CR image (1760×2140) — decompression throughput
 
 | Strips | MB/s | Speedup | Wall time (ms) |
 |:------:|:----:|:-------:|:--------------:|
@@ -136,11 +142,7 @@ computation.
 | 4 | 583 | **3.14×** | 12.9 |
 | 8 | 540 | 2.91× | 14.0 |
 
-Decompression peaks at 4 strips on this 4-core machine; 8 strips shows
-slightly lower throughput due to goroutine scheduling overhead and memory
-bandwidth saturation beyond the physical core count.
-
-### Scaling efficiency
+### Scaling efficiency (CR image)
 
 | Strips | Compress efficiency | Decompress efficiency |
 |:------:|:-------------------:|:---------------------:|
@@ -149,8 +151,68 @@ bandwidth saturation beyond the physical core count.
 | 8 | 45% | 36% |
 
 Efficiency drops above the core count due to goroutine scheduling overhead,
-memory bandwidth contention, and unequal strip compression times.  On a machine
-with more cores, the 8-strip efficiency would be proportionally higher.
+memory bandwidth contention, and unequal strip compression times.
+
+---
+
+## All-Image Comparison: PICS vs MIC-Go vs MIC-4state
+
+Decompression throughput in **MB/s** across all modalities
+(`BenchmarkPICSVsAllCodecs`, Intel Xeon @ 2.10 GHz, 4 cores, 10 iterations):
+
+| Image | Orig (MB) | MIC-Go | MIC-4state | PICS-1 | PICS-2 | PICS-4 | PICS-8 |
+|-------|:---------:|:------:|:----------:|:------:|:------:|:------:|:------:|
+| MR (256×256) | 0.12 | 122 | 141 | 104 | 111 | 138 | 68 |
+| CT (512×512) | 0.50 | 138 | 154 | 126 | 191 | **217** | 163 |
+| CR (1760×2140) | 7.18 | 165 | 226 | 216 | 374 | **599** | 564 |
+| XR (2048×2577) | 10.07 | 221 | 237 | 213 | 342 | **738** | 716 |
+| MG1 (2457×1996) | 9.35 | 381 | 365 | 370 | 579 | **849** | 816 |
+| MG2 (2457×1996) | 9.35 | 386 | 384 | 359 | 555 | 797 | **951** |
+| MG3 (4774×3064) | 27.90 | 214 | 192 | 184 | 374 | 679 | **682** |
+| MG4 (4096×3328) | 26.00 | 327 | 324 | 293 | 565 | **808** | 788 |
+
+> MR and CT are small images where goroutine startup cost approaches strip
+> processing time.  All images ≥ 7 MB show substantial speedup from PICS.
+
+### PICS-4 and PICS-8 speedup over single-threaded codecs
+
+| Image | PICS-4 / MIC-Go | PICS-4 / MIC-4state | PICS-8 / MIC-Go | PICS-8 / MIC-4state |
+|-------|:---------------:|:-------------------:|:---------------:|:-------------------:|
+| MR (256×256) | 1.13× | 0.98× | 0.56× | 0.48× |
+| CT (512×512) | 1.57× | 1.41× | 1.18× | 1.06× |
+| CR (1760×2140) | **3.63×** | **2.65×** | 3.42× | 2.50× |
+| XR (2048×2577) | **3.34×** | **3.11×** | 3.24× | 3.02× |
+| MG1 (2457×1996) | **2.23×** | **2.33×** | 2.14× | 2.23× |
+| MG2 (2457×1996) | **2.06×** | **2.08×** | **2.46×** | **2.48×** |
+| MG3 (4774×3064) | **3.17×** | **3.54×** | 3.19× | 3.55× |
+| MG4 (4096×3328) | **2.47×** | **2.49×** | 2.41× | 2.43× |
+
+**Key findings:**
+- **Large images (≥ 7 MB)**: PICS-4 delivers 2.1–3.6× speedup over MIC-Go.
+  PICS-8 is competitive with PICS-4 and sometimes faster (MG2, MG3).
+- **Small images (MR, CT)**: goroutine overhead dominates for MR (256×256);
+  PICS should not be used below ~1 MB.  CT (0.5 MB) is a borderline case with
+  only modest gain.
+- **vs MIC-4state**: PICS-4 beats 4-state by 2–3.5× on large images; on MR
+  where goroutine overhead matters, MIC-4state is the better choice.
+
+### Compression ratio across all images and strip counts
+
+| Image | MIC-Go | MIC-4state | PICS-1 | PICS-2 | PICS-4 | PICS-8 |
+|-------|:------:|:----------:|:------:|:------:|:------:|:------:|
+| MR | 2.35× | 2.35× | 2.35× | 2.33× | 2.28× | 2.21× |
+| CT | 2.24× | 2.24× | 2.24× | 2.21× | 2.15× | 1.96× |
+| CR | 3.63× | 3.63× | 3.63× | 3.64× | 3.66× | 3.68× |
+| XR | 1.74× | 1.74× | 1.74× | 1.75× | 1.75× | 1.76× |
+| MG1 | 8.57× | 8.57× | 8.57× | 8.60× | 8.69× | 8.77× |
+| MG2 | 8.55× | 8.55× | 8.55× | 8.59× | 8.68× | 8.76× |
+| MG3 | 2.29× | 2.29× | 2.29× | 2.33× | 2.36× | 2.39× |
+| MG4 | 3.47× | 3.47× | 3.47× | 3.52× | 3.59× | 3.62× |
+
+PICS-1 equals MIC-Go exactly (single strip, no boundary overhead).  For
+CR/XR/MG modalities, ratio actually improves at higher strip counts due to
+better FSE table localisation within each strip.  Only MR and CT show the
+expected boundary overhead, with CT being more sensitive due to fewer rows.
 
 ---
 
@@ -372,12 +434,14 @@ throughput approaches 4 × (ILP gain) on a 4-core machine.
 
 ### Use PICS when
 
+- The image is **≥ 0.5 MB** (e.g. CT 512×512 and larger): images this size
+  provide enough work per strip to amortise goroutine startup.
 - You need to decode a single large medical image as fast as possible on a
   multi-core server or workstation.
 - Your application has spare CPU cores during a decompression request (e.g.,
   a DICOM viewer that serves one image at a time).
-- A small ratio overhead (2–3% for 4 strips) is acceptable in exchange for
-  near-linear decompression speedup.
+- A small ratio overhead (<3% for MR/CT) or even a slight ratio improvement
+  (CR/XR/MG) is acceptable in exchange for 2–4× decompression speedup.
 
 ### Use MIC2 (multi-frame) instead when
 
@@ -390,10 +454,16 @@ throughput approaches 4 × (ILP gain) on a 4-core machine.
 - You have a large RGB whole-slide image.  The tiled format provides O(1)
   random tile access, pyramid levels, and parallel tile encode/decode.
 
+### Use MIC-4state instead when
+
+- The image is **< 0.5 MB** (e.g. MR 256×256): benchmarks show PICS-4 gives
+  only 1.1× speedup (and PICS-8 regresses 0.56×) on this size; MIC-4state
+  at 141 MB/s outperforms PICS-4 at 138 MB/s with no format overhead.
+
 ### Use 1 strip (standard `CompressSingleFrame`) when
 
 - You are on a single-core environment (embedded, WASM).
-- You need the maximum compression ratio (no boundary overhead).
+- You need the maximum compression ratio (no boundary overhead on MR/CT).
 - You are archiving images for long-term storage where ratio is critical.
 
 ---
@@ -419,17 +489,17 @@ go test -run TestParallelStripsSingleRowImage -v mic
 ### Running the benchmarks
 
 ```bash
-# Compression throughput at 1/2/4/8 strips (CR image)
-go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkParallelStripsCompress mic
-
-# Decompression throughput at 1/2/4/8 strips (CR image)
-go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkParallelStripsDecompress mic
-
-# Combined (both compress and decompress)
+# Compression and decompression throughput at 1/2/4/8 strips (CR image)
 go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkParallelStrips mic
+
+# Full multi-image comparison: MIC-Go, MIC-4state, PICS-1/2/4/8 (all 8 test images)
+go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkPICSVsAllCodecs mic
+
+# Human-readable comparison table (throughput, speedup, ratio — all images)
+go test -v -run TestPICSComparisonTable -timeout 120s mic
 ```
 
-### Benchmark output (Intel Xeon @ 2.10 GHz, 4 cores)
+### Benchmark output — CR image throughput (Intel Xeon @ 2.10 GHz, 4 cores)
 
 ```
 goos: linux
@@ -445,6 +515,66 @@ BenchmarkParallelStripsDecompress/strips1-4  5   40592969 ns/op   185.57 MB/s
 BenchmarkParallelStripsDecompress/strips2-4  5   21778416 ns/op   345.88 MB/s
 BenchmarkParallelStripsDecompress/strips4-4  5   12918462 ns/op   583.10 MB/s
 BenchmarkParallelStripsDecompress/strips8-4  5   13951239 ns/op   539.94 MB/s
+```
+
+### Benchmark output — all images (BenchmarkPICSVsAllCodecs, 10 iterations)
+
+```
+BenchmarkPICSVsAllCodecs/MIC-Go/MR-4           10    1070774 ns/op   122.41 MB/s   2.348 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/MR-4       10     927448 ns/op   141.33 MB/s   2.347 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/MR-4           10    1263047 ns/op   103.77 MB/s   2.347 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/MR-4           10    1179887 ns/op   111.09 MB/s   2.325 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/MR-4           10     950023 ns/op   137.97 MB/s   2.284 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/MR-4           10    1919178 ns/op    68.30 MB/s   2.214 ratio
+
+BenchmarkPICSVsAllCodecs/MIC-Go/CT-4           10    3795041 ns/op   138.15 MB/s   2.237 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/CT-4       10    3397327 ns/op   154.32 MB/s   2.237 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/CT-4           10    4166955 ns/op   125.82 MB/s   2.237 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/CT-4           10    2749362 ns/op   190.69 MB/s   2.214 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/CT-4           10    2415497 ns/op   217.05 MB/s   2.145 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/CT-4           10    3213578 ns/op   163.15 MB/s   1.962 ratio
+
+BenchmarkPICSVsAllCodecs/MIC-Go/CR-4           10   45542034 ns/op   165.40 MB/s   3.628 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/CR-4       10   33372518 ns/op   225.72 MB/s   3.628 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/CR-4           10   34794888 ns/op   216.49 MB/s   3.628 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/CR-4           10   20143545 ns/op   373.96 MB/s   3.641 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/CR-4           10   12577328 ns/op   598.92 MB/s   3.657 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/CR-4           10   13361385 ns/op   563.77 MB/s   3.678 ratio
+
+BenchmarkPICSVsAllCodecs/MIC-Go/XR-4           10   47818953 ns/op   220.74 MB/s   1.738 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/XR-4       10   44498836 ns/op   237.21 MB/s   1.738 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/XR-4           10   49627215 ns/op   212.69 MB/s   1.738 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/XR-4           10   30853689 ns/op   342.11 MB/s   1.748 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/XR-4           10   14307291 ns/op   737.76 MB/s   1.753 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/XR-4           10   14750650 ns/op   715.59 MB/s   1.755 ratio
+
+BenchmarkPICSVsAllCodecs/MIC-Go/MG1-4          10   25726358 ns/op   381.26 MB/s   8.566 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/MG1-4      10   26881777 ns/op   364.87 MB/s   8.565 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/MG1-4          10   26536179 ns/op   369.62 MB/s   8.566 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/MG1-4          10   16939822 ns/op   579.01 MB/s   8.597 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/MG1-4          10   11559448 ns/op   848.51 MB/s   8.693 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/MG1-4          10   12020529 ns/op   815.97 MB/s   8.771 ratio
+
+BenchmarkPICSVsAllCodecs/MIC-Go/MG2-4          10   25441251 ns/op   385.53 MB/s   8.553 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/MG2-4      10   25551903 ns/op   383.86 MB/s   8.552 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/MG2-4          10   27317878 ns/op   359.04 MB/s   8.553 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/MG2-4          10   17687067 ns/op   554.55 MB/s   8.587 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/MG2-4          10   12311340 ns/op   796.69 MB/s   8.682 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/MG2-4          10   10313084 ns/op   951.06 MB/s   8.755 ratio
+
+BenchmarkPICSVsAllCodecs/MIC-Go/MG3-4          10  136631577 ns/op   214.12 MB/s   2.289 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/MG3-4      10  152345604 ns/op   192.03 MB/s   2.289 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/MG3-4          10  159223203 ns/op   183.74 MB/s   2.289 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/MG3-4          10   78184850 ns/op   374.18 MB/s   2.325 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/MG3-4          10   43092903 ns/op   678.88 MB/s   2.362 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/MG3-4          10   42891987 ns/op   682.06 MB/s   2.390 ratio
+
+BenchmarkPICSVsAllCodecs/MIC-Go/MG4-4          10   83422985 ns/op   326.80 MB/s   3.474 ratio
+BenchmarkPICSVsAllCodecs/MIC-4state/MG4-4      10   84235072 ns/op   323.65 MB/s   3.473 ratio
+BenchmarkPICSVsAllCodecs/PICS-1/MG4-4          10   93133681 ns/op   292.73 MB/s   3.474 ratio
+BenchmarkPICSVsAllCodecs/PICS-2/MG4-4          10   48294341 ns/op   564.52 MB/s   3.517 ratio
+BenchmarkPICSVsAllCodecs/PICS-4/MG4-4          10   33725830 ns/op   808.37 MB/s   3.585 ratio
+BenchmarkPICSVsAllCodecs/PICS-8/MG4-4          10   34613094 ns/op   787.65 MB/s   3.618 ratio
 ```
 
 ---

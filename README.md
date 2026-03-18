@@ -315,17 +315,21 @@ The Delta+RLE+FSE pipeline has a hard sequential dependency: each pixel's delta 
 
 The only cost: the **first row of each non-zero strip** loses its top-neighbour predictor (top=0 instead of actual top row), slightly reducing compression ratio.
 
-### Compression Ratio Impact (MR 256×256, measured)
+### Compression Ratio Impact (all modalities, measured)
 
-| Strips | Compressed | Ratio | Overhead vs 1-strip |
-|--------|-----------|-------|---------------------|
-| 1 | 55,821 B | **2.35×** | baseline |
-| 2 | 56,377 B | 2.32× | +1.0% |
-| 4 | 57,388 B | 2.28× | +2.8% |
-| 8 | 59,199 B | 2.21× | +6.1% |
-| 16 | 62,419 B | 2.10× | +11.8% |
+For CR/XR/MG modalities, strip-local FSE table adaptation at higher strip
+counts actually **improves** ratio.  Only small images (MR, CT) show boundary
+overhead:
 
-For 4 strips: **<3% ratio loss, ~3.0× faster compression, ~3.1× faster decompression** on a 4-core machine.
+| Image | 1-strip | 4-strip | 8-strip | Δ(1→4) |
+|-------|:-------:|:-------:|:-------:|:------:|
+| MR (256×256) | 2.35× | 2.28× | 2.21× | −3.0% |
+| CT (512×512) | 2.24× | 2.15× | 1.96× | −4.0% |
+| CR (1760×2140) | 3.63× | **3.66×** | 3.68× | +0.8% |
+| XR (2048×2577) | 1.74× | **1.75×** | 1.76× | +0.6% |
+| MG1 (2457×1996) | 8.57× | **8.69×** | 8.77× | +1.4% |
+| MG3 (4774×3064) | 2.29× | **2.36×** | 2.39× | +3.1% |
+| MG4 (4096×3328) | 3.47× | **3.59×** | 3.62× | +3.5% |
 
 ### Throughput Scaling (CR 1760×2140, Intel Xeon @ 2.10 GHz, 4 cores)
 
@@ -336,7 +340,23 @@ For 4 strips: **<3% ratio loss, ~3.0× faster compression, ~3.1× faster decompr
 | 4 | 401 | **3.0×** | 583 | **3.1×** |
 | 8 | 479 | **3.6×** | 540 | 2.9× |
 
-> Decompression peaks at 4 strips on this 4-core machine; 8 strips shows slightly lower throughput due to goroutine scheduling overhead beyond the physical core count. Compression continues to scale at 8 strips.
+### All-image decompression: PICS-4 and PICS-8 vs MIC-Go (MB/s)
+
+| Image | MIC-Go | MIC-4state | PICS-4 | PICS-8 | Speedup (PICS-4) |
+|-------|:------:|:----------:|:------:|:------:|:----------------:|
+| MR (256×256) | 122 | 141 | 138 | 68 | 1.1× ⚠ |
+| CT (512×512) | 138 | 154 | 217 | 163 | **1.6×** |
+| CR (1760×2140) | 165 | 226 | 599 | 564 | **3.6×** |
+| XR (2048×2577) | 221 | 237 | 738 | 716 | **3.3×** |
+| MG1 (2457×1996) | 381 | 365 | 849 | 816 | **2.2×** |
+| MG2 (2457×1996) | 386 | 384 | 797 | **951** | **2.1×** |
+| MG3 (4774×3064) | 214 | 192 | 679 | **682** | **3.2×** |
+| MG4 (4096×3328) | 327 | 324 | **808** | 788 | **2.5×** |
+
+> ⚠ MR (256×256) is too small for PICS — goroutine overhead exceeds the
+> workload.  For images ≥ 0.5 MB, PICS-4 delivers 1.6–3.6× speedup.
+> PICS-8 is competitive with PICS-4 and sometimes faster on very large images
+> (MG2, MG3).
 
 ### PICS Format
 
@@ -401,11 +421,12 @@ gcc -O3 -pthread mic_decompress_c.c mic_parallel.c -o …
 
 | Scenario | Recommendation |
 |----------|---------------|
-| Single image, real-time display on multi-core server | **PICS, 4–8 strips** |
+| Large image (≥ 0.5 MB), real-time display on multi-core server | **PICS, 4–8 strips** |
+| Small image (< 0.5 MB, e.g. MR 256×256) | **MIC-4state** — goroutine overhead exceeds benefit |
 | Multi-frame DICOM (Tomosynthesis, Cine) | MIC2 — each frame is already independent |
 | WSI pathology tiles | MIC3 — tiles already parallel |
 | Storage-optimal archival | 1 strip (minimal ratio overhead) |
-| Low-latency streaming on a single core | 1 strip (single-frame is faster on 1 core) |
+| Single core (embedded, WASM) | 1 strip or MIC-4state |
 
 For detailed design rationale, format specification, and per-modality benchmark tables, see **[docs/parallel-strips.md](./docs/parallel-strips.md)**.
 
