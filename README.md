@@ -23,20 +23,21 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 2. [Compression Pipeline](#compression-pipeline)
 3. [Multi-Frame Support (MIC2)](#multi-frame-support-mic2)
 4. [Whole Slide Imaging (MIC3)](#whole-slide-imaging-mic3)
-5. [Algorithm Details](#algorithm-details)
-6. [Native Optimizations](#native-optimizations)
-7. [Wavelet SIMD Transform](#wavelet-simd-transform)
-8. [Compression Results](#compression-results)
-9. [Benchmark Results](#benchmark-results)
-10. [Browser Decoder](#browser-decoder)
-11. [CLI Reference](#cli-reference)
-12. [Comparison with HTJ2K](#comparison-with-htj2k)
-13. [Comparison with JPEG-LS](#comparison-with-jpeg-ls)
-14. [Design Background](#design-background)
-15. [Source Files & Architecture](#source-files--architecture)
-16. [Test Data](#test-data)
-17. [Developer Guide](#developer-guide)
-18. [Roadmap](#roadmap)
+5. [Parallel Single-Image Compression (PICS)](#parallel-single-image-compression-pics)
+6. [Algorithm Details](#algorithm-details)
+7. [Native Optimizations](#native-optimizations)
+8. [Wavelet SIMD Transform](#wavelet-simd-transform)
+9. [Compression Results](#compression-results)
+10. [Benchmark Results](#benchmark-results)
+11. [Browser Decoder](#browser-decoder)
+12. [CLI Reference](#cli-reference)
+13. [Comparison with HTJ2K](#comparison-with-htj2k)
+14. [Comparison with JPEG-LS](#comparison-with-jpeg-ls)
+15. [Design Background](#design-background)
+16. [Source Files & Architecture](#source-files--architecture)
+17. [Test Data](#test-data)
+18. [Developer Guide](#developer-guide)
+19. [Roadmap](#roadmap)
 
 > **New:** Wavelet V2 SIMD pipeline now uses **4-state FSE** (4 independent ANS states + BMI2 assembly on AMD64), achieving better compression ratios than Delta+RLE+FSE on 7/8 modalities and matching or beating HTJ2K on 7/8 — see [Wavelet V2 SIMD vs Delta+RLE+FSE](#wavelet-v2-simd--4-state-fse-vs-deltarlefse) and [HTJ2K comparison](#comparison-with-htj2k). [JPEG-LS (CharLS)](#comparison-with-jpeg-ls), [Delta+Zstandard](#comparison-with-deltazstandard), and [MED predictor](#med-predictor-comparison) comparisons also available.
 
@@ -75,10 +76,14 @@ go test -run TestWSIPyramidLevels -v            # Pyramid level generation
 go test -run TestWSIRegion -v                   # Cross-tile region decompression
 go test -run TestWaveletSIMDMatchesScalar -v    # SIMD wavelet bit-exact vs scalar
 go test -run TestWaveletV2SIMDRLEFSECompress -v # SIMD wavelet end-to-end pipeline
+go test -run TestParallelStripsRoundtrip -v     # Parallel PICS round-trip (all modalities)
 
 # Run benchmarks
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEHuffCompress$ mic
+
+# Parallel single-image (PICS) benchmarks — compress and decompress at 1/2/4/8 strips
+go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkParallelStrips mic
 
 # Wavelet SIMD vs scalar comparison
 go test -benchmem -run=^$ -benchtime=5x \
@@ -281,6 +286,149 @@ MIC3 is designed to work with DICOM Supplement 145 (VL Whole Slide Microscopy Im
 - Tile grid matches DICOM's Dimension Organization
 - Pyramid levels can map to DICOM concatenation or separate instances
 - Sample WSI test images for validation: [jcupitt/dicom-wsi-sample](https://github.com/jcupitt/dicom-wsi-sample)
+
+---
+
+## Parallel Single-Image Compression (PICS)
+
+**PICS** (Parallel Image Compressed Strips) lets a single image use all CPU cores by dividing it into N horizontal strips, each compressed and decompressed independently.
+
+Unlike the existing multi-frame (`MIC2`) or tiled WSI (`MIC3`) formats — where parallelism comes from having many independent frames or tiles — PICS parallelises the compression of *one* ordinary medical image.
+
+### How It Works
+
+The Delta+RLE+FSE pipeline has a hard sequential dependency: each pixel's delta requires its left and top neighbours. But rows in one strip don't touch rows in another strip, so strips are completely independent:
+
+```
+┌─────────────────────────────┐
+│  Strip 0: rows   0 …  H/N  │  goroutine / pthread 0
+├─────────────────────────────┤
+│  Strip 1: rows H/N … 2H/N  │  goroutine / pthread 1
+├─────────────────────────────┤
+│           ⋮                  │  ⋮
+├─────────────────────────────┤
+│  Strip N: rows …  …     H  │  goroutine / pthread N
+└─────────────────────────────┘
+          ↓ concurrent compress / decompress ↓
+          PICS blob  →  pixel-exact output
+```
+
+The only cost: the **first row of each non-zero strip** loses its top-neighbour predictor (top=0 instead of actual top row), slightly reducing compression ratio.
+
+### Compression Ratio Impact (all modalities, measured)
+
+For CR/XR/MG modalities, strip-local FSE table adaptation at higher strip
+counts actually **improves** ratio.  Only small images (MR, CT) show boundary
+overhead:
+
+| Image | 1-strip | 4-strip | 8-strip | Δ(1→4) |
+|-------|:-------:|:-------:|:-------:|:------:|
+| MR (256×256) | 2.35× | 2.28× | 2.21× | −3.0% |
+| CT (512×512) | 2.24× | 2.15× | 1.96× | −4.0% |
+| CR (1760×2140) | 3.63× | **3.66×** | 3.68× | +0.8% |
+| XR (2048×2577) | 1.74× | **1.75×** | 1.76× | +0.6% |
+| MG1 (2457×1996) | 8.57× | **8.69×** | 8.77× | +1.4% |
+| MG3 (4774×3064) | 2.29× | **2.36×** | 2.39× | +3.1% |
+| MG4 (4096×3328) | 3.47× | **3.59×** | 3.62× | +3.5% |
+
+### Throughput Scaling (CR 1760×2140, Intel Xeon @ 2.10 GHz, 4 cores)
+
+| Strips | Compress (MB/s) | Speedup | Decompress (MB/s) | Speedup |
+|--------|:--------------:|:-------:|:----------------:|:-------:|
+| 1 | 133 | 1.0× | 186 | 1.0× |
+| 2 | 219 | **1.7×** | 346 | **1.9×** |
+| 4 | 401 | **3.0×** | 583 | **3.1×** |
+| 8 | 479 | **3.6×** | 540 | 2.9× |
+
+### All-image decompression: PICS-4 and PICS-8 vs MIC-Go (MB/s)
+
+| Image | MIC-Go | MIC-4state | PICS-4 | PICS-8 | Speedup (PICS-4) |
+|-------|:------:|:----------:|:------:|:------:|:----------------:|
+| MR (256×256) | 122 | 141 | 138 | 68 | 1.1× ⚠ |
+| CT (512×512) | 138 | 154 | 217 | 163 | **1.6×** |
+| CR (1760×2140) | 165 | 226 | 599 | 564 | **3.6×** |
+| XR (2048×2577) | 221 | 237 | 738 | 716 | **3.3×** |
+| MG1 (2457×1996) | 381 | 365 | 849 | 816 | **2.2×** |
+| MG2 (2457×1996) | 386 | 384 | 797 | **951** | **2.1×** |
+| MG3 (4774×3064) | 214 | 192 | 679 | **682** | **3.2×** |
+| MG4 (4096×3328) | 327 | 324 | **808** | 788 | **2.5×** |
+
+> ⚠ MR (256×256) is too small for PICS — goroutine overhead exceeds the
+> workload.  For images ≥ 0.5 MB, PICS-4 delivers 1.6–3.6× speedup.
+> PICS-8 is competitive with PICS-4 and sometimes faster on very large images
+> (MG2, MG3).
+
+### PICS Format
+
+```
+Bytes  0-3:  "PICS"
+Bytes  4-7:  Width           (uint32 LE)
+Bytes  8-11: Height          (uint32 LE)
+Bytes 12-15: NumStrips       (uint32 LE)
+Bytes 16-19: StripHeight     (uint32 LE) — rows per strip; last strip may be shorter
+Bytes 20+:   Offset table    (NumStrips × [offset_u32, length_u32])
+After table: Concatenated compressed strip blobs (each a valid MIC single-frame stream)
+```
+
+Each strip blob is a standard `CompressSingleFrame` output — auto-detected as 1-state, 2-state, or 4-state FSE. The PICS format is not a separate codec; it is a parallelism envelope around the existing MIC pipeline.
+
+### Go API
+
+```go
+// Compress with N goroutines (0 = auto, uses GOMAXPROCS)
+blob, err := mic.CompressParallelStrips(pixels, width, height, maxValue, 0)
+
+// Decompress (all strips run concurrently)
+pixels, width, height, err := mic.DecompressParallelStrips(blob)
+```
+
+### C API (pthreads — AMD64 and ARM64)
+
+The `ojph/mic_parallel.h` header exposes a C interface backed by POSIX pthreads:
+
+```c
+// Decompress a PICS blob using pthreads.
+// On AMD64 uses mic_decompress_four_state_simd (AVX2).
+// On ARM64 uses mic_decompress_four_state (scalar; NEON wiring planned).
+int mic_decompress_parallel(const uint8_t *compressed, size_t len,
+                            uint16_t *pixels_out, int width, int height,
+                            int max_threads);
+
+// Same but forces scalar inner decoder (for benchmarking thread vs SIMD gain separately).
+int mic_decompress_parallel_scalar(...);
+```
+
+CGO bindings:
+
+```go
+// C pthreads + best available SIMD inner decoder
+pixels, err := ojph.MICDecompressParallelC(pics, width, height, 4)
+
+// C pthreads + forced scalar decoder
+pixels, err := ojph.MICDecompressParallelScalarC(pics, width, height, 4)
+```
+
+Build:
+```bash
+# AMD64 (AVX2 inner decoder)
+gcc -O3 -msse2 -mavx2 -pthread mic_decompress_c.c mic_parallel.c -o …
+
+# ARM64 (scalar inner decoder, architecture-agnostic threading)
+gcc -O3 -pthread mic_decompress_c.c mic_parallel.c -o …
+```
+
+### When to Use
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Large image (≥ 0.5 MB), real-time display on multi-core server | **PICS, 4–8 strips** |
+| Small image (< 0.5 MB, e.g. MR 256×256) | **MIC-4state** — goroutine overhead exceeds benefit |
+| Multi-frame DICOM (Tomosynthesis, Cine) | MIC2 — each frame is already independent |
+| WSI pathology tiles | MIC3 — tiles already parallel |
+| Storage-optimal archival | 1 strip (minimal ratio overhead) |
+| Single core (embedded, WASM) | 1 strip or MIC-4state |
+
+For detailed design rationale, format specification, and per-modality benchmark tables, see **[docs/parallel-strips.md](./docs/parallel-strips.md)**.
 
 ---
 
@@ -811,6 +959,7 @@ MIC 2-state decompresses **1.1–2.6× faster** than JPEG-LS; MIC 4-state extend
 - MIC's wavelet pipeline (`WaveletV2SIMDRLEFSECompressU16`) closes the ratio gap, matching or exceeding JPEG-LS on most modalities while maintaining the speed advantage.
 - For clinical PACS deployment where decompression throughput matters more than 1–5% storage savings, MIC is the better choice.
 - JPEG-LS is now included in `BenchmarkAllCodecs` for a single-command comparison of all codecs.
+- `BenchmarkAllCodecs` also includes PICS-2, PICS-4, and PICS-8 parallel strip variants for end-to-end multi-core throughput comparison.
 
 ```bash
 # Run JPEG-LS comparison (MIC 2-state + MIC 4-state + JPEG-LS, all images)
@@ -819,7 +968,7 @@ go test -tags cgo_ojph -v -run TestJPEGLSComparison ./ojph/ -timeout 300s
 # Benchmark all JPEG-LS variants (MIC, MIC-4state, MIC-4state-C, MIC-4state-SIMD, JPEGLS)
 go test -tags cgo_ojph -run=^$ -bench=BenchmarkJPEGLSDecomp ./ojph/ -benchtime=10x
 
-# Full codec comparison: all MIC variants + HTJ2K + JPEG-LS
+# Full codec comparison: all MIC variants + HTJ2K + JPEG-LS + PICS-2/4/8
 go test -tags cgo_ojph -run=^$ -bench=BenchmarkAllCodecs ./ojph/ -benchtime=10x
 ```
 
@@ -859,6 +1008,8 @@ Quick reference of the most important source files:
 | `rans8state.go` | 8-state rANS decoder |
 | `multiframe.go` / `multiframecompress.go` | MIC2 container |
 | `wsiformat.go` / `wsicompress.go` / `wsipyramid.go` | MIC3 WSI container |
+| `parallelstrips.go` | PICS parallel strip compress/decompress (Go) |
+| `ojph/mic_parallel.h` / `ojph/mic_parallel.c` | PICS parallel decompressor in C + pthreads |
 | `ycocgr.go` | YCoCg-R reversible color transform |
 | `temporaldelta.go` | Inter-frame ZigZag temporal delta |
 | `asm_amd64.go` / `asm_amd64.s` | amd64 assembly: FSE 4-state, histogram, YCoCg-R dispatch |
@@ -916,6 +1067,7 @@ Quick summary of the six applied optimizations:
 - [x] SIMD-accelerated wavelet transform — blocked column pass (8× fewer cache misses) + AVX2 predict/update kernels; +10–38% decompression throughput; see [docs/wavelet-simd.md](./docs/wavelet-simd.md)
 - [x] 4-state FSE in wavelet pipeline — `FSECompressU16FourState` / `FSEDecompressU16FourState` with BMI2 assembly decoder; all wavelet compress/decompress functions updated; wavelet V2 SIMD now beats HTJ2K ratio on 7/8 modalities
 - [x] Whole Slide Imaging (WSI) — MIC3 tiled container with YCoCg-R color transform, pyramid levels, parallel tile compression, browser RGB viewer with level selector
+- [x] Parallel single-image compression (PICS) — horizontal strip partitioning; N goroutines / pthreads compress or decompress one image concurrently; <3% ratio overhead at 4 strips; Go + C (pthreads, AMD64 AVX2, ARM64 scalar) — see [`docs/parallel-strips.md`](./docs/parallel-strips.md)
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [x] Left+Up average predictor — implemented from [Klaus Post's feedback](https://github.com/pappuks/medical-image-codec/issues/1); avg(left, top) replaces pure-left prediction in the main Delta+RLE+FSE pipeline
 - [ ] Gap removal for sparse value distributions (XR images) — bitmap to collapse unused symbols before FSE; estimated 15–20% size reduction for XR modality
