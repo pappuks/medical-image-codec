@@ -26,10 +26,14 @@ go test -run TestWSIRegion -v             # Cross-tile region decompression
 go test -run TestWaveletSIMD2DRoundTrip -v      # SIMD 2D wavelet lossless roundtrip
 go test -run TestWaveletSIMDMatchesScalar -v    # SIMD vs scalar bit-exact comparison
 go test -run TestWaveletV2SIMDRLEFSECompress -v # SIMD wavelet end-to-end pipeline
+go test -run TestParallelStripsRoundtrip -v     # PICS parallel strip round-trip (all modalities)
 
 # Run benchmarks (decompression speed + compression ratio)
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSECompress$ mic
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEHuffCompress$ mic
+
+# Parallel single-image (PICS) benchmarks — strips 1/2/4/8
+go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkParallelStrips mic
 
 # WSI benchmarks
 go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkWSITileCompressTissue$ mic
@@ -94,6 +98,10 @@ Raw 16-bit pixels
 | `multiframe.go` | MIC2 container format: header, frame offset table, read/write |
 | `multiframecompress.go` | Multi-frame compress/decompress orchestration (single + multi) |
 | `multiframe_test.go` | Multi-frame roundtrip tests (independent + temporal + real DICOM) |
+| `parallelstrips.go` | PICS parallel strip compress/decompress (Go); `CompressParallelStrips`, `DecompressParallelStrips` |
+| `parallelstrips_test.go` | PICS roundtrip, ratio, format validation, and benchmark tests |
+| `ojph/mic_parallel.h` | C header for PICS parallel decompressor (pthreads, AMD64/ARM64) |
+| `ojph/mic_parallel.c` | C pthreads implementation; bounded thread pool; dispatches to SIMD or scalar inner decoder |
 | `fseu16_test.go` | All single-frame tests and benchmarks |
 | `waveletu16.go` | 5/3 integer wavelet: 1D lifting, 2D separated transform, scalar helpers |
 | `waveletfsecompressu16.go` | Wavelet V1/V2/SIMD compress/decompress pipelines, subband ordering |
