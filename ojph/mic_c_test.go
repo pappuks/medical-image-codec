@@ -365,8 +365,9 @@ func TestFourWayComparison(t *testing.T) {
 	}
 }
 
-// BenchmarkThreeWay runs Go benchmarks for all decompressors including MIC 4-state.
-func BenchmarkThreeWay(b *testing.B) {
+// BenchmarkAllCodecs runs Go benchmarks for all decompressors: MIC-Go, MIC-4state,
+// MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K, and JPEG-LS.
+func BenchmarkAllCodecs(b *testing.B) {
 	for _, ti := range testImages {
 		byteData, shortData, maxShort, cols, rows := loadTestImage(ti)
 		if len(shortData) == 0 {
@@ -374,8 +375,8 @@ func BenchmarkThreeWay(b *testing.B) {
 		}
 		origBytes := len(byteData)
 		bitDepth := bits.Len16(maxShort)
-		if bitDepth == 0 {
-			bitDepth = 1
+		if bitDepth < 2 {
+			bitDepth = 2
 		}
 
 		var drc mic.DeltaRleCompressU16
@@ -390,9 +391,15 @@ func BenchmarkThreeWay(b *testing.B) {
 			continue
 		}
 
+		jplsComp, err := CharlsCompressU16(shortData, cols, rows, bitDepth)
+		if err != nil {
+			continue
+		}
+
 		micRatio := float64(origBytes) / float64(len(fseComp))
 		mic4Ratio := float64(origBytes) / float64(len(fse4Comp))
 		htj2kRatio := float64(origBytes) / float64(len(htj2kComp))
+		jplsRatio := float64(origBytes) / float64(len(jplsComp))
 
 		b.Run("MIC-Go/"+ti.name, func(b *testing.B) {
 			b.SetBytes(int64(origBytes))
@@ -461,6 +468,15 @@ func BenchmarkThreeWay(b *testing.B) {
 				DecompressU16(htj2kComp, cols, rows)
 			}
 			b.ReportMetric(htj2kRatio, "ratio")
+		})
+
+		b.Run("JPEGLS/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				CharlsDecompressU16(jplsComp, cols, rows)
+			}
+			b.ReportMetric(jplsRatio, "ratio")
 		})
 	}
 }
