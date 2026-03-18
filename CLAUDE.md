@@ -54,7 +54,7 @@ go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkHTJ2KFa
 go test -tags cgo_ojph -run TestJPEGLSComparison -v ./ojph/
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkJPEGLSDecomp$ ./ojph/
 
-# Full multi-variant comparison: MIC-Go, MIC-4state, MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K, JPEG-LS
+# Full multi-variant comparison: MIC-Go, MIC-4state, MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K, JPEG-LS, PICS-2/4/8
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecs$ ./ojph/
 
 # Correctness tests for C 4-state implementation

@@ -325,18 +325,18 @@ The only cost: the **first row of each non-zero strip** loses its top-neighbour 
 | 8 | 59,199 B | 2.21× | +6.1% |
 | 16 | 62,419 B | 2.10× | +11.8% |
 
-For 4 strips: **<3% ratio loss, ~2.9× faster compression, ~2.4× faster decompression** on a 4-core machine.
+For 4 strips: **<3% ratio loss, ~3.0× faster compression, ~3.1× faster decompression** on a 4-core machine.
 
 ### Throughput Scaling (CR 1760×2140, Intel Xeon @ 2.10 GHz, 4 cores)
 
 | Strips | Compress (MB/s) | Speedup | Decompress (MB/s) | Speedup |
 |--------|:--------------:|:-------:|:----------------:|:-------:|
-| 1 | 177 | 1.0× | 207 | 1.0× |
-| 2 | 300 | **1.7×** | 363 | **1.8×** |
-| 4 | 509 | **2.9×** | 495 | **2.4×** |
-| 8 | 471 | 2.7× | 589 | **2.8×** |
+| 1 | 133 | 1.0× | 186 | 1.0× |
+| 2 | 219 | **1.7×** | 346 | **1.9×** |
+| 4 | 401 | **3.0×** | 583 | **3.1×** |
+| 8 | 479 | **3.6×** | 540 | 2.9× |
 
-> At 8 strips on a 4-core machine, compression saturates (more strips than cores). Decompress continues to scale because strip decompression times vary and the goroutine scheduler load-balances naturally.
+> Decompression peaks at 4 strips on this 4-core machine; 8 strips shows slightly lower throughput due to goroutine scheduling overhead beyond the physical core count. Compression continues to scale at 8 strips.
 
 ### PICS Format
 
@@ -938,6 +938,7 @@ MIC 2-state decompresses **1.1–2.6× faster** than JPEG-LS; MIC 4-state extend
 - MIC's wavelet pipeline (`WaveletV2SIMDRLEFSECompressU16`) closes the ratio gap, matching or exceeding JPEG-LS on most modalities while maintaining the speed advantage.
 - For clinical PACS deployment where decompression throughput matters more than 1–5% storage savings, MIC is the better choice.
 - JPEG-LS is now included in `BenchmarkAllCodecs` for a single-command comparison of all codecs.
+- `BenchmarkAllCodecs` also includes PICS-2, PICS-4, and PICS-8 parallel strip variants for end-to-end multi-core throughput comparison.
 
 ```bash
 # Run JPEG-LS comparison (MIC 2-state + MIC 4-state + JPEG-LS, all images)
@@ -946,7 +947,7 @@ go test -tags cgo_ojph -v -run TestJPEGLSComparison ./ojph/ -timeout 300s
 # Benchmark all JPEG-LS variants (MIC, MIC-4state, MIC-4state-C, MIC-4state-SIMD, JPEGLS)
 go test -tags cgo_ojph -run=^$ -bench=BenchmarkJPEGLSDecomp ./ojph/ -benchtime=10x
 
-# Full codec comparison: all MIC variants + HTJ2K + JPEG-LS
+# Full codec comparison: all MIC variants + HTJ2K + JPEG-LS + PICS-2/4/8
 go test -tags cgo_ojph -run=^$ -bench=BenchmarkAllCodecs ./ojph/ -benchtime=10x
 ```
 

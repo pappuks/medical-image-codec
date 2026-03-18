@@ -118,35 +118,35 @@ All numbers below use the **CR image** (1760×2140, 7.18 MB raw,
 
 | Strips | MB/s | Speedup | Wall time (ms) |
 |:------:|:----:|:-------:|:--------------:|
-| 1 | 177 | 1.00× | 40.6 |
-| 2 | 300 | **1.70×** | 23.9 |
-| 4 | 509 | **2.88×** | 14.1 |
-| 8 | 471 | 2.67× | 15.2 |
+| 1 | 133 | 1.00× | 56.7 |
+| 2 | 219 | **1.65×** | 34.4 |
+| 4 | 401 | **3.02×** | 18.8 |
+| 8 | 479 | **3.61×** | 15.7 |
 
-Compression at 8 strips saturates because the machine has only 4 physical
-cores; splitting further adds overhead without gaining parallelism.
+Compression speedup continues past the core count at 8 strips because goroutine
+scheduling and lock-free parallel writes allow the runtime to overlap I/O with
+computation.
 
 ### Decompression throughput
 
 | Strips | MB/s | Speedup | Wall time (ms) |
 |:------:|:----:|:-------:|:--------------:|
-| 1 | 207 | 1.00× | 34.7 |
-| 2 | 363 | **1.75×** | 19.8 |
-| 4 | 495 | **2.39×** | 14.5 |
-| 8 | 589 | **2.85×** | 12.2 |
+| 1 | 186 | 1.00× | 40.6 |
+| 2 | 346 | **1.86×** | 21.8 |
+| 4 | 583 | **3.14×** | 12.9 |
+| 8 | 540 | 2.91× | 14.0 |
 
-Decompression continues to scale at 8 strips even on a 4-core machine because
-strip decompression times vary (strips with more uniform content finish faster)
-and the Go scheduler naturally load-balances the goroutines across available
-hardware threads.
+Decompression peaks at 4 strips on this 4-core machine; 8 strips shows
+slightly lower throughput due to goroutine scheduling overhead and memory
+bandwidth saturation beyond the physical core count.
 
 ### Scaling efficiency
 
 | Strips | Compress efficiency | Decompress efficiency |
 |:------:|:-------------------:|:---------------------:|
-| 2 | 85% | 88% |
-| 4 | 72% | 60% |
-| 8 | 33% | 36% |
+| 2 | 82% | 93% |
+| 4 | 75% | 78% |
+| 8 | 45% | 36% |
 
 Efficiency drops above the core count due to goroutine scheduling overhead,
 memory bandwidth contention, and unequal strip compression times.  On a machine
@@ -432,15 +432,19 @@ go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkParallelStrips mic
 ### Benchmark output (Intel Xeon @ 2.10 GHz, 4 cores)
 
 ```
-BenchmarkParallelStripsCompress/strips1-4    5   42643487 ns/op   176.65 MB/s
-BenchmarkParallelStripsCompress/strips2-4    5   25084148 ns/op   300.30 MB/s
-BenchmarkParallelStripsCompress/strips4-4    5   14802925 ns/op   508.87 MB/s
-BenchmarkParallelStripsCompress/strips8-4    5   15986234 ns/op   471.21 MB/s
+goos: linux
+goarch: amd64
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
 
-BenchmarkParallelStripsDecompress/strips1-4  5   36380882 ns/op   207.05 MB/s
-BenchmarkParallelStripsDecompress/strips2-4  5   20741375 ns/op   363.18 MB/s
-BenchmarkParallelStripsDecompress/strips4-4  5   15212610 ns/op   495.17 MB/s
-BenchmarkParallelStripsDecompress/strips8-4  5   12778989 ns/op   589.47 MB/s
+BenchmarkParallelStripsCompress/strips1-4    5   56729052 ns/op   132.79 MB/s
+BenchmarkParallelStripsCompress/strips2-4    5   34415010 ns/op   218.88 MB/s
+BenchmarkParallelStripsCompress/strips4-4    5   18806517 ns/op   400.54 MB/s
+BenchmarkParallelStripsCompress/strips8-4    5   15734718 ns/op   478.74 MB/s
+
+BenchmarkParallelStripsDecompress/strips1-4  5   40592969 ns/op   185.57 MB/s
+BenchmarkParallelStripsDecompress/strips2-4  5   21778416 ns/op   345.88 MB/s
+BenchmarkParallelStripsDecompress/strips4-4  5   12918462 ns/op   583.10 MB/s
+BenchmarkParallelStripsDecompress/strips8-4  5   13951239 ns/op   539.94 MB/s
 ```
 
 ---

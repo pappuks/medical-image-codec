@@ -366,7 +366,8 @@ func TestFourWayComparison(t *testing.T) {
 }
 
 // BenchmarkAllCodecs runs Go benchmarks for all decompressors: MIC-Go, MIC-4state,
-// MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K, and JPEG-LS.
+// MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K, JPEG-LS, and PICS-N
+// (parallel strips with N=2/4/8).
 func BenchmarkAllCodecs(b *testing.B) {
 	for _, ti := range testImages {
 		byteData, shortData, maxShort, cols, rows := loadTestImage(ti)
@@ -478,5 +479,23 @@ func BenchmarkAllCodecs(b *testing.B) {
 			}
 			b.ReportMetric(jplsRatio, "ratio")
 		})
+
+		// PICS — Parallel Image Compressed Strips (2, 4, 8 strips)
+		for _, strips := range []int{2, 4, 8} {
+			strips := strips
+			picsComp, err := mic.CompressParallelStrips(shortData, cols, rows, maxShort, strips)
+			if err != nil {
+				continue
+			}
+			picsRatio := float64(origBytes) / float64(len(picsComp))
+			b.Run(fmt.Sprintf("PICS-%d/%s", strips, ti.name), func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					mic.DecompressParallelStrips(picsComp)
+				}
+				b.ReportMetric(picsRatio, "ratio")
+			})
+		}
 	}
 }
