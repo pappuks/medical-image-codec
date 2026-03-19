@@ -212,22 +212,22 @@ For predictor comparisons (MED, Zstandard), wavelet pipeline ratios, and WSI res
 
 ## Performance
 
-Benchmarks measure **decompression throughput** — the primary use case is real-time rendering of compressed DICOM.
+Benchmarks measure **decompression throughput** — the primary use case is real-time rendering of compressed DICOM. All timings below are **single-threaded, in-process** on Apple M2 Max (ARM64).
 
-### AWS c7g.metal — ARM64 | 64 cores
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | HTJ2K | JPEG-LS |
+|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:-----:|:-------:|
+| MR (256×256) | 0.13 | 145 | 209 | 350 | **385** | 464 | 261 | 155 |
+| CT (512×512) | 0.50 | 181 | 228 | 370 | **375** | 538 | 292 | 95 |
+| CR (2140×1760) | 7.18 | 290 | 339 | **532** | 530 | 784 | 358 | 70 |
+| XR (2048×2577) | 10.1 | 301 | 330 | 519 | **529** | 878 | 317 | 85 |
+| MG1 (2457×1996) | 9.35 | 472 | 500 | **684** | 678 | 1129 | 790 | 280 |
+| MG2 (2457×1996) | 9.35 | 473 | 509 | **681** | 688 | 1069 | 794 | 275 |
+| MG3 (4774×3064) | 27.3 | 304 | 342 | **534** | 533 | 716 | 334 | 105 |
+| MG4 (4096×3328) | 26.0 | 415 | 447 | **627** | 610 | 827 | 551 | 165 |
 
-| Modality | FPS | Speed |
-|----------|-----|-------|
-| MG1 (2457×1996) | 1 671 | **16 387 MB/s** |
-| CR (2140×1760) | 1 132 | 8 527 MB/s |
-| XR (2048×2577) | 892 | 9 411 MB/s |
-| CT (512×512) | 8 455 | 4 433 MB/s |
+All values in MB/s. MIC-4state-C/SIMD require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go.
 
-For per-machine benchmark tables (AMD64, ARM64 32-core, Apple M2), two-state FSE speedup numbers, wavelet SIMD results, and PICS parallel strip scaling, see [docs/benchmarks.md](./docs/benchmarks.md).
-
-For comparison with HTJ2K (OpenJPH), see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md).
-
-For comparison with JPEG-LS (CharLS), see [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
+For multi-core numbers (up to 16 GB/s at 64 cores), PICS parallel strip scaling, and wavelet SIMD detail, see [docs/benchmarks.md](./docs/benchmarks.md). For full comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
 
 ---
 
