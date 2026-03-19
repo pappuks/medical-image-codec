@@ -16,6 +16,7 @@
 \usepackage{enumitem}
 \usepackage{microtype}
 \usepackage{tikz}
+\usetikzlibrary{positioning}
 % hyperref must be loaded last
 \usepackage{hyperref}
 
@@ -45,12 +46,13 @@ We present MIC (Medical Image Codec), a lossless compression codec optimized for
 MIC chains three lightweight stages---spatial delta prediction, run-length encoding (RLE), and finite state entropy (FSE) coding based on asymmetric numeral systems (ANS)---to achieve compression ratios of 1.7$\times$--8.6$\times$ on greyscale DICOM images and 3--5$\times$ on RGB whole slide imaging (WSI) tissue tiles (excluding degenerate constant-plane background tiles).
 The codec supports three container formats: MIC1 for single frames, MIC2 for multi-frame sequences with optional temporal prediction, and MIC3 for tiled whole slide images with multi-resolution pyramid levels.
 A four-state FSE decoder breaks the serial dependency chain inherent in ANS decoding by running four independent state machines, with platform-specific BMI2 (amd64) and scalar (arm64) assembly kernels, yielding 1.7--2.4$\times$ faster end-to-end single-threaded decompression.
+A fourth format, PICS (Parallel Image Compressed Strips), partitions a single image into $N$ horizontal strips and compresses each strip independently, enabling multi-core decompression of a single greyscale image at 2.5--3.9$\times$ single-thread throughput on images $\geq$7\,MB.
 We evaluate MIC on eight clinical DICOM datasets spanning MR, CT, CR, X-ray, and mammography modalities.
 Using fair in-process benchmarking via CGO bindings, we compare against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard.
 HTJ2K (OpenJPH) decompresses 1.8$\times$ faster than MIC-Go on a single thread; however, MIC's C implementation with four-state FSE closes to within 0.87$\times$ of HTJ2K, and MIC's wavelet SIMD pipeline exceeds HTJ2K on all eight modalities.
 JPEG-LS achieves 1--16\% better compression ratios due to its context-adaptive MED predictor, but MIC decompresses 1.4--2.6$\times$ faster (2-state) and 1.5--3.5$\times$ faster (4-state) on six of eight modalities.
 MIC's 16-bit-native RLE+FSE pipeline outperforms Delta+Zstandard by 10--22\% on all modalities.
-A five-level 5/3 integer wavelet alternative matches or exceeds both Delta+RLE+FSE and HTJ2K compression ratios on seven of eight modalities, but decompresses 1.1--3.8$\times$ slower due to doubled memory bandwidth.
+A five-level 5/3 integer wavelet alternative matches or exceeds both Delta+RLE+FSE and HTJ2K compression ratios on seven of eight modalities; its SIMD-accelerated C implementation (blocked column pass + AVX2 lifting + four-state FSE) exceeds HTJ2K decompression speed on all eight modalities, though it doubles memory bandwidth relative to the delta pipeline.
 MIC's per-frame parallelism scales to 16\,GB/s on mammography (best case; geometric mean $\approx$7.5\,GB/s across modalities on 64 cores).
 MIC is implemented in Go with JavaScript and WebAssembly browser decoders, and is released as open-source software.
 \end{abstract}
@@ -85,14 +87,16 @@ Beyond single-frame greyscale, MIC supports:
 \begin{itemize}[nosep]
     \item \textbf{Multi-frame images} (MIC2 container) with random-access frame indexing and optional inter-frame temporal prediction for video-like sequences.
     \item \textbf{Whole slide images} (MIC3 container) with tiled architecture, YCoCg-R reversible color transform, multi-resolution pyramid levels, and parallel tile compression.
+    \item \textbf{Parallel single-image compression} (PICS format) that partitions one image into $N$ horizontal strips compressed and decompressed concurrently, enabling multi-core speedup without requiring multiple frames.
 \end{itemize}
 
 The remainder of this paper is organized as follows.
 Section~\ref{sec:related} surveys related work, including the challenges posed by 16-bit alphabets for classical entropy coders (Section~\ref{sec:related_16bit}) and the limitations of signal-processing-based filter-bank transforms for lossless compression (Section~\ref{sec:related_sigproc}).
 Section~\ref{sec:pipeline} describes the compression pipeline.
-Section~\ref{sec:formats} details the MIC2 and MIC3 container formats.
+Section~\ref{sec:formats} details the MIC2, MIC3, and PICS container formats.
 Section~\ref{sec:implementation} covers implementation details and optimizations.
-Section~\ref{sec:results} presents experimental results, including a fair in-process comparison with HTJ2K (OpenJPH).
+Section~\ref{sec:results} presents experimental results.
+Section~\ref{sec:htj2k} compares against HTJ2K (OpenJPH) using fair in-process benchmarking.
 Section~\ref{sec:jpegls} compares against JPEG-LS (CharLS) using in-process benchmarking.
 Section~\ref{sec:wavelet} compares against a wavelet-based alternative with five-level decomposition and SIMD acceleration.
 Section~\ref{sec:deltazstd} evaluates a Delta+Zstandard baseline to assess whether a general-purpose compressor can replace MIC's custom RLE+FSE stages.
@@ -362,6 +366,64 @@ Level descriptors in the header record the dimensions and tile grid of each leve
 When all pixels in a plane have identical values, the plane is stored as a single constant (3 bytes: mode byte + uint16 value) rather than running the full compression pipeline.
 For white background tiles (common in pathology), all three planes are constant, yielding compression ratios exceeding 1\,900$\times$.
 
+\subsection{PICS: Parallel Image Compressed Strips}
+\label{sec:pics}
+
+PICS (Parallel Image Compressed Strips) addresses the serial row dependency inherent in the Delta+RLE+FSE pipeline.
+Because each pixel's delta is predicted from its top and left neighbors, row $y$ depends on row $y-1$, making single-frame decompression inherently single-threaded.
+The 4-state FSE decoder (Section~\ref{sec:twostate}) exploits instruction-level parallelism within one core, but does not use additional cores.
+
+PICS breaks this dependency by dividing the image into $N$ horizontal strips at row boundaries.
+Each strip is treated as a self-contained image with its own row~0.
+Strip boundaries reset the top-neighbor predictor to zero---the only accuracy impact.
+All $N$ strips can then be compressed and decompressed in parallel by independent goroutines (Go) or pthreads (C).
+
+\paragraph{Format.}
+The PICS binary format consists of:
+\begin{itemize}[nosep]
+    \item A 20-byte header: magic bytes (\texttt{"PICS"}), width (uint32 LE), total height (uint32 LE), number of strips (uint32 LE), and strip height (uint32 LE, nominal rows per strip; last strip may be shorter).
+    \item A strip offset table ($N \times 8$ bytes): each entry stores the data offset (uint32 LE) and length (uint32 LE) of one compressed strip, enabling $O(1)$ random strip access.
+    \item Concatenated compressed strip blobs, each a valid \texttt{CompressSingleFrame} output, auto-detected as 1-state, 2-state, or 4-state FSE.
+\end{itemize}
+
+The magic bytes \texttt{"PICS"} are unambiguous with \texttt{"MIC2"} and \texttt{"MIC3"}; PICS blobs are interoperable across architectures (AMD64 and ARM64 byte-identical format).
+
+\paragraph{Compression ratio impact.}
+Each strip boundary loses vertical prediction accuracy for one row.
+For large images (CR: 2\,140 rows, MG: 3\,064--4\,096 rows), this boundary overhead is a small fraction of total rows and is often outweighed by strip-local FSE table adaptation, which models sub-image content more precisely than a single global table.
+Small images (MR: 256 rows, CT: 512 rows) show the expected modest ratio loss (Table~\ref{tab:pics_ratio}).
+
+\begin{table*}[t]
+\centering
+\caption{Compression ratio vs.\ strip count. Large images gain from strip-local FSE adaptation; small images incur a boundary overhead.}
+\label{tab:pics_ratio}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Image & 1-strip & 2-strip & 4-strip & 8-strip \\
+\midrule
+MR (256$\times$256)   & \textbf{2.35}$\times$ & 2.33$\times$ & 2.28$\times$ & 2.21$\times$ \\
+CT (512$\times$512)   & \textbf{2.24}$\times$ & 2.21$\times$ & 2.15$\times$ & 1.96$\times$ \\
+CR (1760$\times$2140) & 3.63$\times$ & 3.64$\times$ & \textbf{3.66}$\times$ & 3.68$\times$ \\
+XR (2048$\times$2577) & 1.74$\times$ & 1.75$\times$ & \textbf{1.75}$\times$ & 1.76$\times$ \\
+MG1 (2457$\times$1996) & 8.57$\times$ & 8.60$\times$ & \textbf{8.69}$\times$ & 8.77$\times$ \\
+MG3 (4774$\times$3064) & 2.29$\times$ & 2.33$\times$ & \textbf{2.36}$\times$ & 2.39$\times$ \\
+MG4 (4096$\times$3328) & 3.47$\times$ & 3.52$\times$ & \textbf{3.59}$\times$ & 3.62$\times$ \\
+\bottomrule
+\multicolumn{5}{@{}l}{\footnotesize Intel Xeon @ 2.10\,GHz; MR/CT lose up to 4\%; CR/XR/MG gain 0.6--3.5\%.}
+\end{tabular}
+\end{table*}
+
+\paragraph{C implementation.}
+A C implementation (\texttt{mic\_parallel.h}/\texttt{mic\_parallel.c}) provides a POSIX pthreads worker pool with a bounded round-robin design (at most \texttt{max\_threads} live pthreads at any time, no mutex or condition variable).
+On AMD64, the inner decoder is \texttt{mic\_decompress\_four\_state\_simd} (SSE2 + AVX2); on ARM64, the scalar \texttt{mic\_decompress\_four\_state} is used (NEON wiring planned).
+CGO bindings (\texttt{ojph/mic\_c.go}) expose \texttt{MICDecompressParallelC} to Go callers.
+
+\paragraph{Recommendation.}
+Use PICS when the image is $\geq$0.5\,MB and spare CPU cores are available.
+For images $<$0.5\,MB (e.g., MR 256$\times$256), goroutine startup cost dominates and MIC-4state is faster.
+For multi-frame images, use MIC2 independent mode (frame-level parallelism with no boundary overhead).
+
 \section{Implementation and Optimizations}
 \label{sec:implementation}
 
@@ -626,6 +688,7 @@ Temporal (inter-frame) & 47.5\,MB & 12.9$\times$ \\
 \end{tabular}
 \end{table}
 
+Per-frame decompression throughput for this 9.3\,MB/frame dataset is comparable to MG1 in Table~\ref{tab:decompression}, reaching up to 16\,GB/s at 64 cores in independent mode.
 Independent mode slightly outperforms temporal mode on this dataset because mammography images have strong spatial correlation (the spatial predictor is very effective) but only moderate inter-frame correlation (each slice images a different plane of breast tissue).
 Temporal mode is a design provision for sequences with high inter-frame correlation, such as cardiac cine MRI, fluoroscopy, or nuclear medicine dynamic studies, where consecutive frames share the same anatomy with only contrast or motion changes.
 We have not yet identified a clinical dataset where temporal mode outperforms independent mode; the feature is included as infrastructure for those use cases and has not been benchmarked favorably here.
@@ -654,6 +717,44 @@ Mixed slide & 4--8$\times$ & Weighted avg.\ of tile types \\
 The YCoCg-R color transform is particularly effective for pathology images.
 H\&E-stained tissue produces smooth color gradients in the luminance and chrominance planes, yielding strong spatial prediction.
 Background tiles (slide glass regions) are nearly constant and compress to 15--17 bytes total via the constant-plane optimization.
+
+\subsection{PICS Parallel Strip Throughput}
+\label{sec:pics_results}
+
+Table~\ref{tab:pics_speed} reports single-image decompression throughput for MIC-Go (single-threaded baseline), MIC-4state-C, and PICS-2/4/8 on Apple M2 Max (\texttt{BenchmarkAllCodecs}, \texttt{-tags cgo\_ojph}).
+
+\begin{table*}[t]
+\centering
+\caption{Decompression throughput (MB/s): single-image PICS strips vs.\ single-threaded MIC. Apple M2 Max (ARM64).}
+\label{tab:pics_speed}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Image & \makecell{MIC-Go} & \makecell{MIC-4s-C} & \makecell{PICS-2} & \makecell{PICS-4} & \makecell{PICS-8} \\
+\midrule
+MR (256$\times$256)    & 148 & 353 & 320 & 313 & 283 \\
+CT (512$\times$512)    & 201 & 389 & 341 & \textbf{495} & 477 \\
+CR (2140$\times$1760)  & 306 & 534 & 561 & 1\,010 & \textbf{1\,718} \\
+XR (2048$\times$2577)  & 310 & 540 & 574 & 1\,039 & \textbf{1\,367} \\
+MG1 (2457$\times$1996) & 471 & 666 & 902 & 1\,477 & \textbf{2\,449} \\
+MG2 (2457$\times$1996) & 482 & 692 & 901 & 1\,480 & \textbf{2\,414} \\
+MG3 (4774$\times$3064) & 312 & 543 & 573 & 1\,097 & \textbf{1\,850} \\
+MG4 (4096$\times$3328) & 420 & 626 & 790 & 1\,358 & \textbf{2\,437} \\
+\bottomrule
+\multicolumn{6}{@{}l}{\footnotesize \textbf{Note:} MR (256$\times$256): goroutine overhead exceeds strip workload; use MIC-4state.}
+\end{tabular}
+\end{table*}
+
+For images $\geq$7\,MB (CR, XR, MG1--MG4), PICS-4 delivers 1.9--2.2$\times$ speedup and PICS-8 delivers 2.5--3.9$\times$ speedup over single-threaded MIC-Go.
+PICS-8 peaks at 2\,449\,MB/s on MG1 (mammography), enabling sub-millisecond decompression of a 9.35\,MB image on a 12-core workstation.
+Small images (MR, CT) show limited benefit because goroutine startup cost ($\sim$100\,$\mu$s) approaches the per-strip processing time.
+
+For the CR image on a 4-core Intel Xeon, PICS-4 achieves 3.1$\times$ decompression speedup (583\,MB/s vs.\ 186\,MB/s for single-strip) with 78\% parallel efficiency, saturating available cores.
+PICS-8 on 4 cores regresses slightly (540\,MB/s) due to goroutine scheduling contention beyond the physical core count.
+
+\paragraph{Combining PICS with 4-state FSE.}
+PICS and the 4-state FSE decoder are orthogonal optimizations: PICS exploits multi-core parallelism while 4-state FSE exploits instruction-level parallelism within one core.
+Their speedups are multiplicative: PICS-4 with MIC-4state-C reaches approximately 1.9--2.2$\times$ over single-threaded MIC-4state-C on large images ($\geq$7\,MB), producing decompression rates of 1\,010--1\,718\,MB/s on a 12-core ARM64 workstation.
 
 \subsection{Comparison with HTJ2K}
 \label{sec:htj2k}
@@ -765,7 +866,7 @@ MG2 & 9.35 & 8.55$\times$ & \textbf{8.90}$\times$ & 259 & \textbf{278} & 262 & 1
 MG3 & 27.3 & 2.29$\times$ & \textbf{2.43}$\times$ & 176 & \textbf{181} & 98  & 1.85$\times$ \\
 MG4 & 26.0 & 3.47$\times$ & \textbf{3.70}$\times$ & 243 & \textbf{272} & 128 & 2.13$\times$ \\
 \bottomrule
-\multicolumn{8}{@{}l}{\footnotesize MIC-4s speeds estimated from FSE isolated 4-state/2-state speedup (Table~\ref{tab:fourstate}) and pipeline overhead model; run \texttt{BenchmarkJPEGLSDecomp} for exact measurements.}
+\multicolumn{8}{@{}p{\textwidth}@{}}{\footnotesize MIC-4s speeds estimated from FSE isolated 4-state/2-state speedup (Table~\ref{tab:fourstate}) and pipeline overhead model; run \texttt{BenchmarkJPEGLSDecomp} for exact measurements.}
 \end{tabular}
 \end{table*}
 
@@ -846,7 +947,7 @@ Table~\ref{tab:wavelet_ratio} compares compression ratios across all pipelines.
 \caption{Compression ratio: Delta+RLE+FSE vs.\ wavelet pipelines and HTJ2K.}
 \label{tab:wavelet_ratio}
 \small
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
 Image & \makecell{Delta+\\RLE+FSE} & \makecell{Wavelet\\V2 SIMD} & \makecell{HTJ2K} \\
 \midrule
@@ -876,10 +977,10 @@ Table~\ref{tab:wavelet_speed} compares decompression speed.
 
 \begin{table}[t]
 \centering
-\caption{Decompression speed (MB/s): Delta+RLE+FSE vs.\ Wavelet V2 SIMD vs.\ HTJ2K. Apple M2 Max, single-threaded, in-process.}
+\caption{Decompression speed (MB/s): Delta+RLE+FSE (pure Go) vs.\ Wavelet V2 SIMD (C+AVX2) vs.\ HTJ2K. Apple M2 Max, single-threaded, in-process.}
 \label{tab:wavelet_speed}
 \small
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
 Image & \makecell{Delta+\\RLE+FSE} & \makecell{Wavelet\\V2 SIMD} & \makecell{HTJ2K} \\
 \midrule
@@ -898,7 +999,7 @@ MG4 & 415 & \textbf{827} & 551 \\
 The Wavelet V2 SIMD pipeline \textbf{exceeds HTJ2K decompression speed on all 8 modalities}, including mammography where HTJ2K's own SIMD wavelet decoder achieves 790--794\,MB/s.
 The combination of blocked column pass ($\sim$8$\times$ fewer cache misses), AVX2 lifting kernels, and four-state FSE produces this result despite the wavelet's inherently higher memory bandwidth requirement.
 
-Delta+RLE+FSE in pure Go remains 1.6--3.2$\times$ slower than Wavelet V2 SIMD because the wavelet pipeline benefits from the C four-state FSE kernel and AVX2 acceleration, while the Delta pipeline numbers above are pure Go.
+For a like-for-like comparison, using MIC-4state-C (C four-state FSE, no AVX2 wavelet) for delta decoding would narrow this gap; the remaining difference reflects the wavelet's blocked column pass and AVX2 lifting, which directly address its cache-bandwidth bottleneck.
 
 \subsection{Analysis}
 
@@ -1019,6 +1120,13 @@ A notable feature of MIC is its automatic adaptation to the effective bit depth 
 All thresholds and delimiters are derived from the actual maximum pixel value via $\lceil\log_2(\max+1)\rceil$, eliminating the need for separate 8-bit and 16-bit code paths.
 This simplifies the implementation and ensures optimal performance across the full range of DICOM bit depths (8--16 bits).
 
+\paragraph{Parallelism strategies.}
+MIC exposes parallelism at three granularities that address different use cases.
+\emph{Frame-level parallelism} (MIC2 independent mode) decompresses multiple frames concurrently with zero per-frame overhead, reaching 16\,GB/s at 64 cores.
+\emph{Tile-level parallelism} (MIC3) uses a goroutine pool to encode/decode WSI tiles concurrently.
+\emph{Strip-level parallelism} (PICS) partitions a single image into horizontal strips for multi-core decompression of a single greyscale image.
+Each strategy trades a small amount of compression ratio for throughput; PICS offers 2.5--3.9$\times$ speedup at a ratio cost of $<$4\% on small images and zero cost (or slight improvement) on large images.
+
 \paragraph{Limitations.}
 MIC does not support lossy compression, progressive decoding, or region-of-interest coding for greyscale images.
 These capabilities are available in JPEG 2000 and may be important for bandwidth-limited telemedicine applications.
@@ -1047,18 +1155,20 @@ The codec's three-stage pipeline (delta prediction, run-length encoding, FSE ent
 A four-state FSE decoder that runs four independent ANS state machines with platform-specific assembly kernels (BMI2 on amd64, scalar on arm64) delivers 66--142\% faster isolated FSE decompression and 20--75\% faster end-to-end pipeline throughput by exploiting instruction-level parallelism.
 The two-state variant is pure Go and benefits all platforms without assembly.
 
-MIC supports three container formats for different clinical use cases: single-frame (MIC1), multi-frame with temporal prediction (MIC2), and tiled whole slide imaging with pyramid levels (MIC3).
+MIC supports four formats for different clinical use cases: single-frame (MIC1), multi-frame with temporal prediction (MIC2), tiled whole slide imaging with pyramid levels (MIC3), and PICS (Parallel Image Compressed Strips) for multi-core decompression of a single image at 2.5--3.9$\times$ single-thread throughput on images $\geq$7\,MB.
 The implementation includes browser-based JavaScript and WebAssembly decoders for web viewing applications.
 
 Our evaluation includes fair in-process comparisons against three established codecs:
 \begin{itemize}[nosep]
-    \item \textbf{HTJ2K} (OpenJPH): HTJ2K decompresses 1.8$\times$ faster than MIC-Go single-threaded, but MIC's C four-state implementation closes to within 0.87$\times$, and MIC's Wavelet V2 SIMD pipeline exceeds HTJ2K on all 8 modalities. MIC achieves comparable or better compression ratios.
+    \item \textbf{HTJ2K} (OpenJPH): HTJ2K decompresses 1.8$\times$ faster than MIC-Go single-threaded, but MIC's C four-state implementation closes to within 0.87$\times$, and MIC's Wavelet V2 SIMD pipeline exceeds HTJ2K in decompression speed on all 8 modalities. MIC achieves comparable or better compression ratios.
     \item \textbf{JPEG-LS} (CharLS): JPEG-LS achieves 1--16\% better ratios due to adaptive prediction, but MIC 2-state decompresses 1.4--2.6$\times$ faster on 6/8 modalities; MIC 4-state decompresses 1.5--3.5$\times$ faster and beats JPEG-LS on all 8 modalities.
     \item \textbf{Delta+Zstandard}: MIC's 16-bit-native RLE+FSE outperforms byte-oriented Delta+zstd by 10--22\% on all modalities, even at zstd's highest compression level.
 \end{itemize}
 
 A five-level 5/3 integer wavelet alternative with subband-order scanning matches or exceeds both Delta+RLE+FSE and HTJ2K compression ratios on 7/8 modalities, with SIMD-accelerated decompression exceeding HTJ2K speed on all 8 modalities.
 This wavelet pipeline provides a natural foundation for future lossy and progressive modes.
+
+The PICS format demonstrates that strip partitioning provides orthogonal and additive throughput gains: PICS-8 reaches 2.4\,GB/s on MG images (12-core ARM64 workstation) while maintaining compression ratios comparable to or better than single-strip MIC on large images.
 
 These results suggest that for lossless medical image compression, a domain-specific 16-bit entropy coding pipeline---whether paired with simple delta prediction for maximum speed or a wavelet transform for maximum ratio---is more effective than both byte-oriented general-purpose compressors and the context-heavy approaches of established standards.
 

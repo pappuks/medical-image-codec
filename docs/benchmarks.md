@@ -163,17 +163,19 @@ For CR/XR/MG modalities, strip-local FSE table adaptation at higher strip counts
 | 4 | 401 | **3.0×** | 583 | **3.1×** |
 | 8 | 479 | **3.6×** | 540 | 2.9× |
 
-### PICS-4 and PICS-8 vs Single-Thread — All Modalities (MB/s)
+### PICS-2, PICS-4 and PICS-8 vs Single-Thread — All Modalities (MB/s)
 
-| Image | MIC-Go | MIC-4state | PICS-4 | PICS-8 | Speedup (PICS-4) |
-|-------|:------:|:----------:|:------:|:------:|:----------------:|
-| MR (256×256) | 122 | 141 | 138 | 68 | 1.1× ⚠ |
-| CT (512×512) | 138 | 154 | 217 | 163 | **1.6×** |
-| CR (1760×2140) | 165 | 226 | 599 | 564 | **3.6×** |
-| XR (2048×2577) | 221 | 237 | 738 | 716 | **3.3×** |
-| MG1 (2457×1996) | 381 | 365 | 849 | 816 | **2.2×** |
-| MG2 (2457×1996) | 386 | 384 | 797 | **951** | **2.1×** |
-| MG3 (4774×3064) | 214 | 192 | 679 | **682** | **3.2×** |
-| MG4 (4096×3328) | 327 | 324 | **808** | 788 | **2.5×** |
+Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`):
 
-> ⚠ MR (256×256) is too small for PICS — goroutine overhead exceeds the workload. For images ≥ 0.5 MB, PICS-4 delivers 1.6–3.6× speedup.
+| Image | MIC-4state-C | PICS-2 | PICS-4 | PICS-8 | Speedup (PICS-4) | Speedup (PICS-8) |
+|-------|:------------:|:------:|:------:|:------:|:----------------:|:----------------:|
+| MR (256×256) | 353 | 320 | 313 | 283 | 0.9× ⚠ | 0.8× ⚠ |
+| CT (512×512) | 389 | 341 | **495** | 477 | **1.3×** | 1.2× |
+| CR (2140×1760) | 534 | 561 | 1010 | **1718** | **1.9×** | **3.2×** |
+| XR (2048×2577) | 540 | 574 | 1039 | **1367** | **1.9×** | **2.5×** |
+| MG1 (2457×1996) | 666 | 902 | 1477 | **2449** | **2.2×** | **3.7×** |
+| MG2 (2457×1996) | 692 | 901 | 1480 | **2414** | **2.1×** | **3.5×** |
+| MG3 (4774×3064) | 543 | 573 | 1097 | **1850** | **2.0×** | **3.4×** |
+| MG4 (4096×3328) | 626 | 790 | 1358 | **2437** | **2.2×** | **3.9×** |
+
+> ⚠ MR (256×256) is too small for PICS — goroutine overhead exceeds the workload. For images ≥ 0.5 MB, PICS-4 delivers 1.9–2.2× and PICS-8 delivers 2.5–3.9× speedup over single-threaded MIC.

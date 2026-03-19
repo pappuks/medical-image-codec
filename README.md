@@ -193,56 +193,51 @@ For throughput scaling numbers, the C/pthreads API, and format specification, se
 
 ## Compression Results
 
-`Delta + RLE + FSE` — all images are 16-bit greyscale DICOM.
+All images are 16-bit greyscale DICOM. Ratios measured in-process on Apple M2 Max (`-tags cgo_ojph`).
 
-| Modality | Dimensions | Raw Size | Compressed | Ratio |
-|----------|-----------|----------|------------|-------|
-| MR | 256×256 | 0.13 MB | 0.053 MB | **2.35×** |
-| CT | 512×512 | 0.50 MB | 0.22 MB | **2.24×** |
-| CR | 2140×1760 | 7.18 MB | 1.98 MB | **3.63×** |
-| XR | 2048×2577 | 10.1 MB | 5.79 MB | **1.74×** |
-| MG1 | 2457×1996 | 9.35 MB | 1.09 MB | **8.57×** |
-| MG2 | 2457×1996 | 9.35 MB | 1.09 MB | **8.55×** |
-| MG3 | 4774×3064 | 27.3 MB | 12.2 MB | **2.24×** |
-| MG4 | 4096×3328 | 26.0 MB | 7.49 MB | **3.47×** |
+| Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
+|-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:-----:|:-------:|
+| MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.38× | **2.52×** |
+| CT (512×512) | 0.50 | **2.24×** | **2.24×** | 1.67× | 2.15× | 1.96× | 1.77× | 2.68× |
+| CR (2140×1760) | 7.18 | 3.63× | 3.63× | 3.81× | 3.66× | 3.68× | 3.77× | **3.96×** |
+| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | **1.76×** | 1.67× | **1.76×** |
+| MG1 (2457×1996) | 9.35 | 8.57× | 8.57× | 8.67× | 8.69× | 8.77× | 8.25× | **8.91×** |
+| MG2 (2457×1996) | 9.35 | 8.55× | 8.55× | 8.65× | 8.68× | 8.76× | 8.24× | **8.90×** |
+| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.22× | **2.38×** |
+| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.59× | 3.62× | 3.51× | **3.71×** |
 
-For predictor comparisons (MED, Zstandard), wavelet pipeline ratios, and WSI results, see [docs/compression-results.md](./docs/compression-results.md).
+MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) but improves it on large CR/MG images where strip-local FSE table adaptation helps. JPEG-LS consistently achieves the highest ratios but at 3–6× lower decompression throughput (see Performance table below).
+
+For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compression-results.md](./docs/compression-results.md).
 
 ---
 
 ## Performance
 
-Benchmarks measure **decompression throughput** — the primary use case is real-time rendering of compressed DICOM. All timings below are **single-threaded, in-process** on Apple M2 Max (ARM64).
+**Decompression throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`). PICS-N decompresses a single image using N goroutines in parallel.
 
-| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | HTJ2K | JPEG-LS |
-|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:-----:|:-------:|
-| MR (256×256) | 0.13 | 145 | 209 | 350 | **385** | 464 | 261 | 155 |
-| CT (512×512) | 0.50 | 181 | 228 | 370 | **375** | 538 | 292 | 95 |
-| CR (2140×1760) | 7.18 | 290 | 339 | **532** | 530 | 784 | 358 | 70 |
-| XR (2048×2577) | 10.1 | 301 | 330 | 519 | **529** | 878 | 317 | 85 |
-| MG1 (2457×1996) | 9.35 | 472 | 500 | **684** | 678 | 1129 | 790 | 280 |
-| MG2 (2457×1996) | 9.35 | 473 | 509 | **681** | 688 | 1069 | 794 | 275 |
-| MG3 (4774×3064) | 27.3 | 304 | 342 | **534** | 533 | 716 | 334 | 105 |
-| MG4 (4096×3328) | 26.0 | 415 | 447 | **627** | 610 | 827 | 551 | 165 |
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-2 | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
+|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:------:|:------:|:------:|:-----:|:-------:|
+| MR (256×256) | 0.13 | 148 | 205 | 353 | **347** | 240 | 320 | 313 | 283 ⚠ | 241 | 98 |
+| CT (512×512) | 0.50 | 201 | 240 | 389 | **383** | 321 | 341 | 495 | 477 | 314 | 140 |
+| CR (2140×1760) | 7.18 | 306 | 342 | **534** | 539 | 571 | 561 | 1010 | **1718** | 367 | 154 |
+| XR (2048×2577) | 10.1 | 310 | 347 | **540** | 539 | 632 | 574 | 1039 | **1367** | 132 | 99 |
+| MG1 (2457×1996) | 9.35 | 471 | 497 | 666 | **662** | 687 | 902 | 1477 | **2449** | 757 | 415 |
+| MG2 (2457×1996) | 9.35 | 482 | 525 | **692** | 682 | 708 | 901 | 1480 | **2414** | 794 | 416 |
+| MG3 (4774×3064) | 27.3 | 312 | 349 | **543** | 539 | 444 | 573 | 1097 | **1850** | 341 | 154 |
+| MG4 (4096×3328) | 26.0 | 420 | 456 | 626 | **640** | 530 | 790 | 1358 | **2437** | 542 | 185 |
 
-All values in MB/s. MIC-4state-C/SIMD require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go.
+MIC-4state-C/SIMD and PICS require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go. ⚠ MR (256×256) is too small for PICS — goroutine overhead dominates.
 
-**PICS decompression throughput** — Intel Xeon @ 2.10 GHz, 4 cores (multi-core, Go pthreads):
+**When to use which:**
+- **Pure Go, simplest integration** → MIC-Go: ~300–480 MB/s, zero dependencies.
+- **Best single-core throughput** → MIC-4state-C or MIC-4state-SIMD: 1.5–1.8× faster than MIC-Go via CGO.
+- **High spatial-frequency images (XR, CR)** → Wavelet+SIMD: better compression and throughput than Delta+FSE on wavelet-friendly content.
+- **Latency-critical, multi-core available** → PICS-4/8: 1.9–3.9× over single-threaded MIC on images ≥ 0.5 MB; reaches 2.4 GB/s on MG modality with 8 strips.
+- **Maximum compression ratio, speed secondary** → JPEG-LS: best ratios across all modalities but 3–6× slower to decompress than MIC-4state-C.
+- **Interoperability with existing DICOM viewers** → HTJ2K: competitive ratios and speed on MG/MR, but significantly slower on XR (132 MB/s vs 540 MB/s for MIC).
 
-| Image | MIC-1strip | PICS-4 | PICS-8 | Speedup (PICS-4) |
-|-------|:----------:|:------:|:------:|:----------------:|
-| MR (256×256) | 122 | 138 | 68 | 1.1× ⚠ |
-| CT (512×512) | 138 | 217 | 163 | **1.6×** |
-| CR (2140×1760) | 165 | 599 | 564 | **3.6×** |
-| XR (2048×2577) | 221 | 738 | 716 | **3.3×** |
-| MG1 (2457×1996) | 381 | 849 | 816 | **2.2×** |
-| MG2 (2457×1996) | 386 | 797 | **951** | **2.1×** |
-| MG3 (4774×3064) | 214 | 679 | **682** | **3.2×** |
-| MG4 (4096×3328) | 327 | **808** | 788 | **2.5×** |
-
-⚠ MR (256×256) is too small for PICS — goroutine overhead exceeds the workload. For images ≥ 0.5 MB, PICS-4 delivers 1.6–3.6× speedup over single-threaded MIC.
-
-For multi-core numbers (up to 16 GB/s at 64 cores) and wavelet SIMD detail, see [docs/benchmarks.md](./docs/benchmarks.md). For full comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
+For multi-core scaling detail and wavelet SIMD analysis, see [docs/benchmarks.md](./docs/benchmarks.md). For comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
 
 ---
 

@@ -10,8 +10,8 @@
 package ojph
 
 /*
-#cgo CXXFLAGS: -O2 -I/usr/local/include
-#cgo LDFLAGS: -L/usr/local/lib -lcharls -lstdc++ -Wl,-rpath,/usr/local/lib
+#cgo CXXFLAGS: -O2 -I/usr/local/include -I/opt/homebrew/include
+#cgo LDFLAGS: -L/usr/local/lib -L/opt/homebrew/lib -lcharls -lstdc++ -Wl,-rpath,/usr/local/lib -Wl,-rpath,/opt/homebrew/lib
 #include <stdint.h>
 #include <stddef.h>
 
