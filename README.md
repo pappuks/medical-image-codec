@@ -227,7 +227,22 @@ Benchmarks measure **decompression throughput** — the primary use case is real
 
 All values in MB/s. MIC-4state-C/SIMD require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go.
 
-For multi-core numbers (up to 16 GB/s at 64 cores), PICS parallel strip scaling, and wavelet SIMD detail, see [docs/benchmarks.md](./docs/benchmarks.md). For full comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
+**PICS decompression throughput** — Intel Xeon @ 2.10 GHz, 4 cores (multi-core, Go pthreads):
+
+| Image | MIC-1strip | PICS-4 | PICS-8 | Speedup (PICS-4) |
+|-------|:----------:|:------:|:------:|:----------------:|
+| MR (256×256) | 122 | 138 | 68 | 1.1× ⚠ |
+| CT (512×512) | 138 | 217 | 163 | **1.6×** |
+| CR (2140×1760) | 165 | 599 | 564 | **3.6×** |
+| XR (2048×2577) | 221 | 738 | 716 | **3.3×** |
+| MG1 (2457×1996) | 381 | 849 | 816 | **2.2×** |
+| MG2 (2457×1996) | 386 | 797 | **951** | **2.1×** |
+| MG3 (4774×3064) | 214 | 679 | **682** | **3.2×** |
+| MG4 (4096×3328) | 327 | **808** | 788 | **2.5×** |
+
+⚠ MR (256×256) is too small for PICS — goroutine overhead exceeds the workload. For images ≥ 0.5 MB, PICS-4 delivers 1.6–3.6× speedup over single-threaded MIC.
+
+For multi-core numbers (up to 16 GB/s at 64 cores) and wavelet SIMD detail, see [docs/benchmarks.md](./docs/benchmarks.md). For full comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
 
 ---
 
