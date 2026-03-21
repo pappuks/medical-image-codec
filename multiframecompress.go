@@ -47,6 +47,41 @@ func DecompressSingleFrame(compressed []byte, width, height int) ([]uint16, erro
 	return drd.Out, nil
 }
 
+// CompressSingleFrameGrad compresses a single frame using the gradient-adaptive
+// Delta+RLE+FSE pipeline (CALIC-style predictor selection).
+func CompressSingleFrameGrad(pixels []uint16, width, height int, maxValue uint16) ([]byte, error) {
+	var drc GradDeltaRleCompressU16
+	deltaComp, err := drc.Compress(pixels, width, height, maxValue)
+	if err != nil {
+		return nil, fmt.Errorf("grad-delta+RLE compress: %w", err)
+	}
+
+	var s ScratchU16
+	fseComp, err := FSECompressU16TwoState(deltaComp, &s)
+	if err != nil {
+		s2 := ScratchU16{}
+		fseComp, err = FSECompressU16(deltaComp, &s2)
+		if err != nil {
+			return nil, fmt.Errorf("FSE compress: %w", err)
+		}
+	}
+
+	return fseComp, nil
+}
+
+// DecompressSingleFrameGrad decompresses a gradient-adaptive Delta+RLE+FSE stream.
+func DecompressSingleFrameGrad(compressed []byte, width, height int) ([]uint16, error) {
+	var s ScratchU16
+	rleSymbols, err := FSEDecompressU16Auto(compressed, &s)
+	if err != nil {
+		return nil, fmt.Errorf("FSE decompress: %w", err)
+	}
+
+	var drd GradDeltaRleDecompressU16
+	drd.Decompress(rleSymbols, width, height)
+	return drd.Out, nil
+}
+
 // compressResidualFrame compresses temporal residual data using RLE+FSE only
 // (no spatial delta, since zigzag-encoded temporal residuals lack spatial correlation).
 func compressResidualFrame(residuals []uint16, maxValue uint16) ([]byte, error) {

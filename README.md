@@ -195,18 +195,18 @@ For throughput scaling numbers, the C/pthreads API, and format specification, se
 
 All images are 16-bit greyscale DICOM. Ratios measured in-process on Apple M2 Max (`-tags cgo_ojph`).
 
-| Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
-|-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:-----:|:-------:|
-| MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.38× | **2.52×** |
-| CT (512×512) | 0.50 | **2.24×** | **2.24×** | 1.67× | 2.15× | 1.96× | 1.77× | 2.68× |
-| CR (2140×1760) | 7.18 | 3.63× | 3.63× | 3.81× | 3.66× | 3.68× | 3.77× | **3.96×** |
-| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | **1.76×** | 1.67× | **1.76×** |
-| MG1 (2457×1996) | 9.35 | 8.57× | 8.57× | 8.67× | 8.69× | 8.77× | 8.25× | **8.91×** |
-| MG2 (2457×1996) | 9.35 | 8.55× | 8.55× | 8.65× | 8.68× | 8.76× | 8.24× | **8.90×** |
-| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.22× | **2.38×** |
-| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.59× | 3.62× | 3.51× | **3.71×** |
+| Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | PICA-4 | HTJ2K | JPEG-LS |
+|-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:------:|:-----:|:-------:|
+| MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.31× | 2.38× | **2.52×** |
+| CT (512×512) | 0.50 | **2.24×** | **2.24×** | 1.67× | 2.15× | 1.96× | 2.11× | 1.77× | 2.68× |
+| CR (2140×1760) | 7.18 | 3.63× | 3.63× | 3.81× | 3.66× | 3.68× | 3.73× | 3.77× | **3.96×** |
+| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | **1.76×** | **1.76×** | 1.67× | **1.76×** |
+| MG1 (2457×1996) | 9.35 | 8.57× | 8.57× | 8.67× | 8.69× | 8.77× | **8.89×** | 8.25× | 8.91× |
+| MG2 (2457×1996) | 9.35 | 8.55× | 8.55× | 8.65× | 8.68× | 8.76× | **8.88×** | 8.24× | 8.90× |
+| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.37× | 2.22× | **2.38×** |
+| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.59× | 3.62× | 3.58× | 3.51× | **3.71×** |
 
-MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) but improves it on large CR/MG images where strip-local FSE table adaptation helps. JPEG-LS consistently achieves the highest ratios but at 3–6× lower decompression throughput (see Performance table below).
+MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) but improves it on large CR/MG images where strip-local FSE table adaptation helps. PICA-4 (Parallel Image Compressed Adaptive) extends PICS with per-strip predictor selection (tries avg and grad, keeps smaller) and content-adaptive strip boundaries; it beats PICS-4 on 6/8 modalities and beats JPEG-LS on MG1/MG2. JPEG-LS consistently achieves the highest ratios but at 3–6× lower decompression throughput (see Performance table below).
 
 For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compression-results.md](./docs/compression-results.md).
 
@@ -293,6 +293,7 @@ go build -o mic-compress ./cmd/mic-compress/
 | [docs/wavelet-simd.md](./docs/wavelet-simd.md) | SIMD-accelerated wavelet transform: blocked column pass + AVX2 kernels |
 | [docs/wavelet-fse-analysis.md](./docs/wavelet-fse-analysis.md) | 5/3 integer wavelet pipeline analysis: multi-level decomposition, 4-state FSE |
 | [docs/parallel-strips.md](./docs/parallel-strips.md) | PICS format specification, C/pthreads API, throughput scaling, when to use |
+| [docs/adaptive-compression.md](./docs/adaptive-compression.md) | Adaptive compression: CALIC gradient predictor, PICA per-strip selection, tableLog tuning, content-adaptive partitioning |
 | [docs/16bit-alphabet-entropy-coding.md](./docs/16bit-alphabet-entropy-coding.md) | Design background: why a 16-bit-native entropy coder; why delta over wavelet |
 | [web/README.md](./web/README.md) | Browser decoder API reference and integration guide |
 
@@ -309,7 +310,9 @@ go build -o mic-compress ./cmd/mic-compress/
 - [x] Whole Slide Imaging (WSI) — MIC3 tiled container with YCoCg-R color transform, pyramid levels, parallel tile compression, browser RGB viewer
 - [x] Parallel single-image compression (PICS) — horizontal strip partitioning; Go + C (pthreads, AMD64 AVX2, ARM64 scalar) — see [docs/parallel-strips.md](./docs/parallel-strips.md)
 - [x] Left+Up average predictor — avg(left, top) replaces pure-left prediction
-- [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [ ] Gap removal for sparse value distributions (XR images) — bitmap to collapse unused symbols before FSE; estimated 15–20% size reduction
-- [ ] Dynamic prediction switching (every 32 pixels) — adaptive selection between left, top, avg predictors
-- [ ] Paeth filtering — PNG-style predictor; marginal gain (~1–3%) over avg predictor, low priority
+- [x] CALIC-style gradient-adaptive predictor — `avg(W,N) + slope(NE,NW)/8` correction; improves 7/8 modalities (+0.2–1.1%); CT regresses −2.5% due to sharp boundaries — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
+- [x] Per-strip pipeline selection — PICA format tries avg and grad predictor per strip, keeps smaller; improves 6/8 modalities (+0.3–1.1%); CT correctly auto-selects avg — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
+- [x] Adaptive tableLog refinement — tableLog=13 branch for large symbol sets (symbolLen > 512); reduces probability quantization error on 12-16 bit images — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
+- [x] Content-adaptive strip partitioning — PICA places strip boundaries at entropy transitions (equal-cost on inter-row variance) for more uniform per-strip FSE tables — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
+- [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)

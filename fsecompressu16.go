@@ -493,8 +493,11 @@ func (s *ScratchU16) optimalTableLog() {
 	// For medical images with many distinct values after delta encoding, the extra
 	// precision in frequency representation yields measurably better compression.
 	symbolDensity := uint32(s.br.remain()) / s.symbolLen
-	if symbolDensity > 64 && s.symbolLen > 256 && tableLog < 12 {
-		// Enough data per symbol to justify a larger table
+	if s.symbolLen > 512 && symbolDensity > 16 && tableLog < 13 {
+		// Large symbol set with sufficient data: tableLog=13 gives 8192-entry tables.
+		// Reduces quantization error in probability representation for 12-16 bit images.
+		tableLog = 13
+	} else if symbolDensity > 64 && s.symbolLen > 256 && tableLog < 12 {
 		tableLog = 12
 	} else if symbolDensity > 32 && s.symbolLen > 128 && tableLog < 12 {
 		tableLog = 12
