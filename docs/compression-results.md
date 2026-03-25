@@ -27,6 +27,21 @@ Raising `tableLog` from 11 → 12 when symbol density is high (>128 distinct sym
 | MG1 | 7.99× | 8.57× | +7.1% |
 | MG2 | 7.98× | 8.55× | +7.1% |
 
+### Gap Removal for Sparse Symbol Distributions
+
+For images with a very sparse RLE symbol distribution, remapping the post-RLE uint16 stream to a dense compact alphabet before FSE encoding reduces the effective `tableLog` and header overhead. CT's full 16-bit pixel range (maxValue=65535) produces a 65536-symbol FSE alphabet, but only 1782 distinct symbols (2.7% fill) actually appear after Delta+RLE. A delta-encoded expand map (1798 bytes) collapses the alphabet to 1782 symbols, allowing `tableLog` to drop from 15 → 13:
+
+| Modality | Standard | Gap Removal | Change |
+|----------|:--------:|:-----------:|:------:|
+| CT | 2.237× | **2.247×** | **+0.45%** |
+| All others | unchanged | unchanged | 0.00% |
+
+Three map representations are tried and the smallest chosen: bitmap (`ceil((maxSym+1)/8)` bytes), delta-encoded list (~1 byte/gap), and raw list (numUsed × 2 bytes). GR is suppressed when the map overhead exceeds 1/8 of the estimated zero-elimination savings, preventing marginal cases from regressing. See [docs/adaptive-compression.md](./adaptive-compression.md) for full analysis.
+
+```bash
+go test -run TestGapRemovalCompressionRatio -v
+```
+
 ---
 
 ## Comparison with Delta+Zstandard
