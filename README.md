@@ -208,6 +208,8 @@ All images are 16-bit greyscale DICOM. Ratios measured in-process on Apple M2 Ma
 
 MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) but improves it on large CR/MG images where strip-local FSE table adaptation helps. PICA-4 (Parallel Image Compressed Adaptive) extends PICS with per-strip predictor selection (tries avg and grad, keeps smaller) and content-adaptive strip boundaries; it beats PICS-4 on 6/8 modalities and beats JPEG-LS on MG1/MG2. JPEG-LS consistently achieves the highest ratios but at 3–6× lower decompression throughput (see Performance table below).
 
+`CompressSingleFrameGapRemoval` adds +0.45% on CT (2.237× → **2.247×**) by collapsing the 65536-symbol RLE alphabet to the 1782 symbols that actually occur, via a delta-encoded expand map (1798 bytes overhead). Other modalities are unaffected. See [docs/compression-results.md](./docs/compression-results.md).
+
 For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compression-results.md](./docs/compression-results.md).
 
 ---
