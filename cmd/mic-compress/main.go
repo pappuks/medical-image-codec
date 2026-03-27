@@ -62,6 +62,10 @@ func compressImage(shortData []uint16, width, height int, maxValue uint16) ([]by
 	return mic.CompressSingleFrame(shortData, width, height, maxValue)
 }
 
+func compressImage4State(shortData []uint16, width, height int, maxValue uint16) ([]byte, error) {
+	return mic.CompressSingleFrame4State(shortData, width, height, maxValue)
+}
+
 // readDicomMultiFrame reads all frames from a multiframe DICOM file.
 func readDicomMultiFrame(fileName string) ([][]uint16, int, int, uint16, error) {
 	dataset, err := dicom.ParseFile(fileName, nil)
@@ -281,6 +285,43 @@ func main() {
 			}
 
 			outPath := filepath.Join(outDir, img.name+".mic")
+			if err := writeMicFile(outPath, img.cols, img.rows, compressed); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			ratio := float64(len(byteData)) / float64(len(compressed))
+			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				img.name, len(byteData), len(compressed), ratio, outPath)
+		}
+
+		// Compress single-frame test images with 4-state FSE (MIC1, suffix _4s)
+		for _, img := range testImages {
+			fmt.Printf("Compressing %s 4-state (%dx%d)...\n", img.name, img.cols, img.rows)
+
+			byteData, err := os.ReadFile(img.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  skip %s: %v\n", img.name, err)
+				continue
+			}
+
+			shortData := make([]uint16, img.cols*img.rows)
+			var maxValue uint16
+			for i := 0; i < len(byteData); i += 2 {
+				v := uint16(byteData[i]) | (uint16(byteData[i+1]) << 8)
+				shortData[i/2] = v
+				if v > maxValue {
+					maxValue = v
+				}
+			}
+
+			compressed, err := compressImage4State(shortData, img.cols, img.rows, maxValue)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", img.name, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, img.name+"_4s.mic")
 			if err := writeMicFile(outPath, img.cols, img.rows, compressed); err != nil {
 				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
 				continue

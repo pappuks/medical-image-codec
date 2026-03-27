@@ -83,6 +83,13 @@ const tests = [
   { mic: 'testdata/MG1.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 (1996x2457)' },
   { mic: 'testdata/MG2.mic', raw: '../testdata/MG_Image_2_frame.bin', name: 'MG2 (1996x2457)' },
   { mic: 'testdata/MG3.mic', raw: '../testdata/MG1.RAW', name: 'MG3 (3064x4774)' },
+  // 4-state FSE variants
+  { mic: 'testdata/MR_4s.mic', raw: '../testdata/MR_256_256_image.bin', name: 'MR 4-state (256x256)' },
+  { mic: 'testdata/CT_4s.mic', raw: '../testdata/CT_512_512_image.bin', name: 'CT 4-state (512x512)' },
+  { mic: 'testdata/CR_4s.mic', raw: '../testdata/CR_1760_2140_image.bin', name: 'CR 4-state (1760x2140)' },
+  { mic: 'testdata/MG1_4s.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 4-state (1996x2457)' },
+  { mic: 'testdata/MG2_4s.mic', raw: '../testdata/MG_Image_2_frame.bin', name: 'MG2 4-state (1996x2457)' },
+  { mic: 'testdata/MG3_4s.mic', raw: '../testdata/MG1.RAW', name: 'MG3 4-state (3064x4774)' },
 ];
 
 let passed = 0;

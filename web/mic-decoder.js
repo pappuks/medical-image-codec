@@ -203,7 +203,7 @@ class FSEDecompressor {
 
   /**
    * Decompress FSE-encoded bytes into uint16 symbols.
-   * Automatically detects 1-state vs 4-state format via magic bytes.
+   * Automatically detects 1-state vs 2-state vs 4-state format via magic bytes.
    * @param {Uint8Array} input - FSE compressed data
    * @returns {Uint16Array} decompressed uint16 symbols
    */
@@ -211,6 +211,10 @@ class FSEDecompressor {
     // 4-state magic: [0xFF][0x04] followed by 4-byte LE count
     if (input.length >= 2 && input[0] === 0xFF && input[1] === 0x04) {
       return this._decompress4State(input);
+    }
+    // 2-state magic: [0xFF][0x02] followed by 4-byte LE count
+    if (input.length >= 2 && input[0] === 0xFF && input[1] === 0x02) {
+      return this._decompress2State(input);
     }
     this.byteReader.init(input);
     this._readNCount();
@@ -231,6 +235,119 @@ class FSEDecompressor {
     this._readNCount();
     this._buildDtable();
     return this._decompressStream4State(count);
+  }
+
+  /**
+   * Dispatch for 2-state FSE streams (magic [0xFF][0x02]).
+   * @param {Uint8Array} input - full 2-state compressed buffer (including 6-byte header)
+   * @returns {Uint16Array}
+   */
+  _decompress2State(input) {
+    if (input.length < 6) throw new Error('fse2state: input too small');
+    const count = (input[2] | (input[3] << 8) | (input[4] << 16) | ((input[5] << 24) >>> 0)) >>> 0;
+    // FSE header + bitstream start at byte 6
+    this.byteReader.init(input.subarray(6));
+    this._readNCount();
+    this._buildDtable();
+    return this._decompressStream2State(count);
+  }
+
+  /**
+   * Decode a 2-state FSE bitstream into exactly `count` symbols.
+   * Two independent state machines (A, B) handle alternating symbols,
+   * mirroring the Go compress2State / decompress2State implementation.
+   * @param {number} count - exact number of symbols to produce
+   * @returns {Uint16Array}
+   */
+  _decompressStream2State(count) {
+    const br = this.bitReader;
+    br.init(this.byteReader.unread());
+
+    const dt = this.decTable;
+    const tableLog = this.actualTableLog;
+
+    // Encoder wrote stateB then stateA; decoder reads stateA first (top of reversed stream).
+    let stateA = br.getBits(tableLog);
+    br.fill();
+    let stateB = br.getBits(tableLog);
+
+    const out = new Uint16Array(count);
+    let outPos = 0;
+    let remaining = count;
+
+    if (!this.zeroBits) {
+      // Fast path: no symbol has nbBits == 0.
+      while (br.off >= 8 && remaining >= 4) {
+        br.fillFast();
+
+        const nA0 = dt[stateA];
+        const nB0 = dt[stateB];
+        const lowA0 = br.getBitsFast(nA0.nbBits);
+        const lowB0 = br.getBitsFast(nB0.nbBits);
+        stateA = nA0.newState + lowA0;
+        stateB = nB0.newState + lowB0;
+
+        br.fillFast();
+
+        const nA1 = dt[stateA];
+        const nB1 = dt[stateB];
+        const lowA1 = br.getBitsFast(nA1.nbBits);
+        const lowB1 = br.getBitsFast(nB1.nbBits);
+        stateA = nA1.newState + lowA1;
+        stateB = nB1.newState + lowB1;
+
+        out[outPos++] = nA0.symbol;
+        out[outPos++] = nB0.symbol;
+        out[outPos++] = nA1.symbol;
+        out[outPos++] = nB1.symbol;
+        remaining -= 4;
+      }
+    } else {
+      // Safe path: some symbols output 0 bits.
+      while (br.off >= 8 && remaining >= 4) {
+        br.fillFast();
+
+        const nA0 = dt[stateA];
+        const nB0 = dt[stateB];
+        const lowA0 = br.getBits(nA0.nbBits);
+        const lowB0 = br.getBits(nB0.nbBits);
+        stateA = nA0.newState + lowA0;
+        stateB = nB0.newState + lowB0;
+
+        br.fillFast();
+
+        const nA1 = dt[stateA];
+        const nB1 = dt[stateB];
+        const lowA1 = br.getBits(nA1.nbBits);
+        const lowB1 = br.getBits(nB1.nbBits);
+        stateA = nA1.newState + lowA1;
+        stateB = nB1.newState + lowB1;
+
+        out[outPos++] = nA0.symbol;
+        out[outPos++] = nB0.symbol;
+        out[outPos++] = nA1.symbol;
+        out[outPos++] = nB1.symbol;
+        remaining -= 4;
+      }
+    }
+
+    // Tail: drain remaining symbols in A, B order.
+    while (remaining > 0) {
+      br.fill();
+      const nA = dt[stateA];
+      stateA = nA.newState + br.getBits(nA.nbBits);
+      out[outPos++] = nA.symbol;
+      if (--remaining === 0) break;
+
+      br.fill();
+      const nB = dt[stateB];
+      stateB = nB.newState + br.getBits(nB.nbBits);
+      out[outPos++] = nB.symbol;
+      remaining--;
+    }
+
+    br.close();
+    return out;
   }
 
   /**

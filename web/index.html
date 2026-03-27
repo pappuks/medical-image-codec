@@ -137,6 +137,11 @@
     <span style="color:#555">|</span>
     <button id="loadTestWSI" style="border-color:#4caf50;color:#4caf50">WSI Tissue (512x384)</button>
     <span style="color:#555">|</span>
+    <button id="loadTestMR4s" style="border-color:#2196f3;color:#2196f3">MR 4-state</button>
+    <button id="loadTestCT4s" style="border-color:#2196f3;color:#2196f3">CT 4-state</button>
+    <button id="loadTestCR4s" style="border-color:#2196f3;color:#2196f3">CR 4-state</button>
+    <button id="loadTestMG14s" style="border-color:#2196f3;color:#2196f3">MG1 4-state</button>
+    <span style="color:#555">|</span>
     <label>Decoder:
       <select id="decoderType">
         <option value="js" selected>JavaScript</option>
@@ -737,6 +742,10 @@ $('loadTestMG3').addEventListener('click', () => loadTestFile('MG3'));
 $('loadTestTOMO').addEventListener('click', () => loadTestFile('MG_TOMO'));
 $('loadTestCTMulti').addEventListener('click', () => loadTestFile('CT_MULTI'));
 $('loadTestWSI').addEventListener('click', () => loadTestFile('WSI_TISSUE'));
+$('loadTestMR4s').addEventListener('click', () => loadTestFile('MR_4s'));
+$('loadTestCT4s').addEventListener('click', () => loadTestFile('CT_4s'));
+$('loadTestCR4s').addEventListener('click', () => loadTestFile('CR_4s'));
+$('loadTestMG14s').addEventListener('click', () => loadTestFile('MG1_4s'));
 
 // WSI level selector
 $('wsiLevelSelect').addEventListener('change', () => {

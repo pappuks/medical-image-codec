@@ -33,6 +33,34 @@ func CompressSingleFrame(pixels []uint16, width, height int, maxValue uint16) ([
 	return fseComp, nil
 }
 
+// CompressSingleFrame4State compresses a single frame using the Delta+RLE+FSE
+// pipeline with four-state FSE. Falls back to two-state then single-state.
+func CompressSingleFrame4State(pixels []uint16, width, height int, maxValue uint16) ([]byte, error) {
+	var drc DeltaRleCompressU16
+	deltaComp, err := drc.Compress(pixels, width, height, maxValue)
+	if err != nil {
+		return nil, fmt.Errorf("delta+RLE compress: %w", err)
+	}
+
+	var s ScratchU16
+	fseComp, err := FSECompressU16FourState(deltaComp, &s)
+	if err != nil {
+		// Fall back to two-state FSE
+		s2 := ScratchU16{}
+		fseComp, err = FSECompressU16TwoState(deltaComp, &s2)
+		if err != nil {
+			// Fall back to single-state FSE
+			s3 := ScratchU16{}
+			fseComp, err = FSECompressU16(deltaComp, &s3)
+			if err != nil {
+				return nil, fmt.Errorf("FSE compress: %w", err)
+			}
+		}
+	}
+
+	return fseComp, nil
+}
+
 // DecompressSingleFrame decompresses FSE-compressed bytes back to 16-bit pixels.
 // Auto-detects two-state vs single-state FSE stream format.
 func DecompressSingleFrame(compressed []byte, width, height int) ([]uint16, error) {
