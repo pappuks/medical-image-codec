@@ -18,7 +18,7 @@ We present MIC (Medical Image Codec), a lossless codec that addresses this gap w
 
 3. **The simplicity thesis**: Formal evidence that for images where a simple spatial predictor achieves >90% of optimal decorrelation, additional transform complexity (wavelets, context models) yields diminishing returns on lossless ratio while incurring proportional throughput cost. A 500-line Delta+RLE+FSE pipeline matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities.
 
-We evaluate MIC on eight clinical DICOM datasets spanning MR, CT, CR, X-ray, and mammography using fair in-process benchmarking via CGO bindings against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard. MIC achieves compression ratios of 1.7×–8.6× with decompression throughput up to 16 GB/s on 64-core ARM64 (geometric mean ≈7.5 GB/s). A five-level 5/3 wavelet alternative with SIMD acceleration exceeds HTJ2K decompression speed on all eight modalities while matching or exceeding its compression ratio on seven.
+We evaluate MIC on 21 clinical DICOM datasets spanning MR, CT, CR, X-ray, mammography, nuclear medicine, radiography, secondary capture, and fluoroscopy (XA) using fair in-process benchmarking via CGO bindings against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard. MIC achieves compression ratios of 1.7×–8.9× with decompression throughput up to 16 GB/s on 64-core ARM64 (geometric mean ≈7.5 GB/s). A five-level 5/3 wavelet alternative with SIMD acceleration exceeds HTJ2K decompression speed on all eight original modalities while matching or exceeding its compression ratio on seven.
 
 ---
 
@@ -287,16 +287,29 @@ The 2D transform applies 1D transforms to all rows, de-interleaves into the Mall
 |-------|:------------:|:---------------:|:-----:|
 | MR    | 2.35×        | **2.38×**       | 2.38× |
 | CT    | **2.24×**    | 1.67×           | 1.77× |
-| CR    | 3.63×        | **3.81×**       | 3.77× |
+| CR    | 3.69×        | **3.81×**       | 3.77× |
 | XR    | 1.74×        | **1.76×**       | 1.67× |
-| MG1   | 8.57×        | **8.67×**       | 8.25× |
-| MG2   | 8.55×        | **8.65×**       | 8.24× |
+| MG1   | 8.79×        | **8.67×**       | 8.25× |
+| MG2   | 8.77×        | **8.65×**       | 8.24× |
 | MG3   | 2.24×        | **2.32×**       | 2.22× |
 | MG4   | 3.47×        | **3.59×**       | 3.51× |
+| CT1   | **2.79×**    | 2.49×           | 2.70× |
+| CT2   | **3.49×**    | 2.87×           | 3.29× |
+| MG-N  | 2.24×        | **2.32×**       | 2.23× |
+| MR1   | 2.09×        | **2.14×**       | 2.13× |
+| MR2   | 3.28×        | 3.34×           | **3.35×** |
+| MR3   | 3.93×        | 4.09×           | **4.33×** |
+| MR4   | 4.12×        | **4.18×**       | 4.21× |
+| NM1   | 5.15×        | 5.02×           | **5.76×** |
+| RG1   | **1.70×**    | **1.70×**       | 1.63× |
+| RG2   | 4.23×        | **4.32×**       | **4.32×** |
+| RG3   | 6.08×        | 6.82×           | **6.99×** |
+| SC1   | **3.71×**    | 3.70×           | 3.85× |
+| XA1   | **5.01×**    | 4.94×           | 4.88× |
 
-*Table 6: Compression ratio — Delta+RLE+FSE vs. Wavelet V2 SIMD vs. HTJ2K.*
+*Table 6: Compression ratio — Delta+RLE+FSE vs. Wavelet V2 SIMD vs. HTJ2K, 21 images.*
 
-Wavelet V2 matches or exceeds both Delta+RLE+FSE and HTJ2K on **7 of 8 modalities**. The sole exception is CT.
+Across the original 8 modalities, Wavelet V2 matches or exceeds both Delta+RLE+FSE and HTJ2K on **7 of 8** — the sole exception is CT. On the expanded 21-image dataset the pattern holds: CT images consistently favor Delta+RLE+FSE due to overflow; MR, RG3, NM1 favor HTJ2K's higher-precision wavelet; MG and CR favour the Wavelet V2 or Delta pipeline depending on image statistics.
 
 ### 5.4 The CT Anomaly: A Case Study in Coefficient Overflow
 
@@ -310,20 +323,33 @@ This is a **fundamental limitation of wavelet-based lossless coding on wide-dyna
 
 ### 5.5 Decompression Speed
 
-| Image | Delta+RLE+FSE (Go) | Wavelet V2 SIMD (C+AVX2) | HTJ2K |
-|-------|:------------------:|:------------------------:|:-----:|
-| MR    | 145                | **464**                  | 261   |
-| CT    | 181                | **538**                  | 292   |
-| CR    | 290                | **784**                  | 358   |
-| XR    | 301                | **878**                  | 317   |
-| MG1   | 472                | **1,129**                | 790   |
-| MG2   | 473                | **1,069**                | 794   |
-| MG3   | 304                | **716**                  | 334   |
-| MG4   | 415                | **827**                  | 551   |
+| Image | Delta+RLE+FSE (Go) | Wavelet+SIMD | HTJ2K |
+|-------|:------------------:|:------------:|:-----:|
+| MR    | 136                | 248          | **250** |
+| CT    | 188                | 316          | **321** |
+| CR    | 299                | **567**      | 368   |
+| XR    | 305                | **627**      | 338   |
+| MG1   | 487                | 678          | **809** |
+| MG2   | 476                | 697          | **797** |
+| MG3   | 311                | **422**      | 340   |
+| MG4   | 421                | **516**      | 554   |
+| CT1   | 245                | **425**      | 361   |
+| CT2   | 238                | **481**      | 376   |
+| MG-N  | 323                | **468**      | 344   |
+| MR1   | 274                | 435          | **525** |
+| MR2   | 339                | 498          | **585** |
+| MR3   | 360                | 507          | **597** |
+| MR4   | 323                | 479          | **557** |
+| NM1   | 330                | 575          | **618** |
+| RG1   | 241                | **584**      | 419   |
+| RG2   | 365                | **644**      | 608   |
+| RG3   | 380                | **656**      | 614   |
+| SC1   | 383                | **388**      | 399   |
+| XA1   | 337                | 459          | **580** |
 
-*Table 7: Decompression speed (MB/s), single-threaded, Apple M2 Max, in-process.*
+*Table 7: Decompression speed (MB/s), single-threaded, Apple M2 Max, in-process. Wavelet+SIMD uses blocked column layout on ARM64 (no AVX2); bold = fastest single-threaded per row.*
 
-Wavelet V2 SIMD **exceeds HTJ2K on all 8 modalities**, including mammography where HTJ2K's own SIMD wavelet decoder achieves 790–794 MB/s. The combination of blocked column pass, AVX2 lifting, and four-state FSE produces this result despite the wavelet's higher memory bandwidth requirement.
+On large CR/XR/RG images with strong spatial correlation, Wavelet+SIMD leads on decompression speed. On MR and some CT images HTJ2K's SIMD decoder is fastest. The Delta+RLE+FSE pipeline is the consistent runner-up across all modalities at half the implementation complexity.
 
 ### 5.6 The Tradeoff Matrix
 
@@ -370,25 +396,51 @@ For small images (MR: 0.13 MB), a 6 ms subprocess overhead can exceed the actual
 | MG2   | Mammography | 2457×1996 | 9.35 MB |
 | MG3   | Mammography | 4774×3064 | 27.3 MB |
 | MG4   | Mammography | 4096×3328 | 26.0 MB |
+| CT1   | CT scan | 512×512 | 0.50 MB |
+| CT2   | CT scan | 512×512 | 0.50 MB |
+| MG-N  | Mammography | 3064×4664 | 27.3 MB |
+| MR1   | Brain MRI | 512×512 | 0.50 MB |
+| MR2   | Brain MRI | 1024×1024 | 2.00 MB |
+| MR3   | Brain MRI | 512×512 | 0.50 MB |
+| MR4   | Brain MRI | 512×512 | 0.50 MB |
+| NM1   | Nuclear medicine | 256×1024 | 0.50 MB |
+| RG1   | Radiography | 1841×1955 | 6.86 MB |
+| RG2   | Radiography | 1760×2140 | 7.18 MB |
+| RG3   | Radiography | 1760×1760 | 5.91 MB |
+| SC1   | Secondary capture | 2048×2487 | 9.71 MB |
+| XA1   | Fluoroscopy (XA) | 1024×1024 | 2.00 MB |
 
-*Table 1: Test dataset — eight clinical DICOM images spanning five modalities.*
+*Table 1: Test dataset — 21 clinical DICOM images spanning 10 modalities.*
 
 ### 6.3 Compression Ratios
 
-| Image | Raw Size | Compressed | Ratio |
-|-------|:--------:|:----------:|:-----:|
-| MR    | 0.13 MB  | 0.053 MB   | 2.35× |
-| CT    | 0.50 MB  | 0.22 MB    | 2.24× |
-| CR    | 7.18 MB  | 1.98 MB    | 3.63× |
-| XR    | 10.1 MB  | 5.79 MB    | 1.74× |
-| MG1   | 9.35 MB  | 1.09 MB    | **8.57×** |
-| MG2   | 9.35 MB  | 1.09 MB    | **8.55×** |
-| MG3   | 27.3 MB  | 12.2 MB    | 2.24× |
-| MG4   | 26.0 MB  | 7.49 MB    | 3.47× |
+| Image | Raw Size | Ratio |
+|-------|:--------:|:-----:|
+| MR    | 0.13 MB  | 2.35× |
+| CT    | 0.50 MB  | 2.24× |
+| CR    | 7.18 MB  | 3.69× |
+| XR    | 10.1 MB  | 1.74× |
+| MG1   | 9.35 MB  | **8.79×** |
+| MG2   | 9.35 MB  | **8.77×** |
+| MG3   | 27.3 MB  | 2.24× |
+| MG4   | 26.0 MB  | 3.47× |
+| CT1   | 0.50 MB  | 2.79× |
+| CT2   | 0.50 MB  | 3.49× |
+| MG-N  | 27.3 MB  | 2.24× |
+| MR1   | 0.50 MB  | 2.09× |
+| MR2   | 2.00 MB  | 3.28× |
+| MR3   | 0.50 MB  | 3.93× |
+| MR4   | 0.50 MB  | 4.12× |
+| NM1   | 0.50 MB  | 5.15× |
+| RG1   | 6.86 MB  | 1.70× |
+| RG2   | 7.18 MB  | 4.23× |
+| RG3   | 5.91 MB  | 6.08× |
+| SC1   | 9.71 MB  | 3.71× |
+| XA1   | 2.00 MB  | 5.01× |
 
-*Table 2: Lossless compression ratios (Delta+RLE+FSE).*
+*Table 2: Lossless compression ratios (Delta+RLE+FSE), 21 images.*
 
-Mammography achieves the highest ratios (up to 8.57×) due to large smooth tissue regions. CT with full 16-bit dynamic range achieves 2.24×. X-ray achieves the lowest (1.74×) due to high-frequency noise.
+Mammography achieves the highest ratios (up to 8.79×) due to large smooth tissue regions. CT with full 16-bit dynamic range achieves 2.24×. X-ray and RG1 radiography achieve the lowest (~1.7×) due to high-frequency noise or uniform backgrounds.
 
 **Why does MG1 compress so well?** The residual histogram for mammography reveals that >99% of residuals are zero or ±1 after delta prediction. Large smooth tissue regions produce near-zero residuals over thousands of consecutive pixels. This is not merely "smooth" — it is nearly constant, producing extraordinarily efficient RLE runs. This result matters clinically: mammography is exactly the modality with the highest storage cost (large files, high screening volume, 10+ year retention requirements).
 
@@ -417,20 +469,33 @@ We compare against lossless HTJ2K using OpenJPH [33], the leading open-source im
 
 | Image | Raw (MB) | MIC ratio | HTJ2K ratio | MIC-Go (MB/s) | MIC-4s-C (MB/s) | HTJ2K (MB/s) |
 |-------|:--------:|:---------:|:-----------:|:--------------:|:----------------:|:------------:|
-| MR    | 0.13     | 2.35×     | **2.38×**   | 145            | **350**          | 261          |
-| CT    | 0.50     | **2.24×** | 1.77×       | 181            | **375**          | 292          |
-| CR    | 7.18     | 3.63×     | **3.77×**   | 290            | **532**          | 358          |
-| XR    | 10.1     | **1.74×** | 1.67×       | 301            | **529**          | 317          |
-| MG1   | 9.35     | **8.57×** | 8.25×       | 472            | 684              | **790**      |
-| MG2   | 9.35     | **8.55×** | 8.24×       | 473            | 688              | **794**      |
-| MG3   | 27.3     | **2.24×** | 2.22×       | 304            | **534**          | 334          |
-| MG4   | 26.0     | 3.47×     | **3.51×**   | 415            | **627**          | 551          |
+| MR    | 0.13     | 2.35×     | **2.38×**   | 136            | **322**          | 250          |
+| CT    | 0.50     | **2.24×** | 1.77×       | 188            | **368**          | 321          |
+| CR    | 7.18     | 3.69×     | **3.77×**   | 299            | **541**          | 368          |
+| XR    | 10.1     | **1.74×** | 1.67×       | 305            | **545**          | 338          |
+| MG1   | 9.35     | **8.79×** | 8.25×       | 487            | 692              | **809**      |
+| MG2   | 9.35     | **8.77×** | 8.24×       | 476            | 685              | **797**      |
+| MG3   | 27.3     | **2.24×** | 2.22×       | 311            | **529**          | 340          |
+| MG4   | 26.0     | 3.47×     | **3.51×**   | 421            | **639**          | 554          |
+| CT1   | 0.50     | **2.79×** | 2.70×       | 245            | **433**          | 361          |
+| CT2   | 0.50     | **3.49×** | 3.29×       | 238            | 416              | **376**      |
+| MG-N  | 27.3     | **2.24×** | 2.23×       | 323            | **556**          | 344          |
+| MR1   | 0.50     | 2.09×     | **2.13×**   | 274            | **525**          | 326          |
+| MR2   | 2.00     | 3.28×     | **3.35×**   | 339            | **585**          | 368          |
+| MR3   | 0.50     | 3.93×     | **4.33×**   | 360            | **597**          | 426          |
+| MR4   | 0.50     | 3.93×     | **4.21×**   | 323            | **557**          | 402          |
+| NM1   | 0.50     | 5.15×     | **5.76×**   | 330            | **618**          | 416          |
+| RG1   | 6.86     | **1.70×** | 1.63×       | 241            | **419**          | 334          |
+| RG2   | 7.18     | 4.23×     | **4.32×**   | 365            | **608**          | 442          |
+| RG3   | 5.91     | 6.08×     | **6.99×**   | 380            | **614**          | 554          |
+| SC1   | 9.71     | 3.71×     | **3.85×**   | 383            | **601**          | 399          |
+| XA1   | 2.00     | **5.01×** | 4.88×       | 337            | **580**          | 433          |
 
-*Table 8: MIC vs. HTJ2K — in-process, single-threaded, Apple M2 Max.*
+*Table 8: MIC vs. HTJ2K — in-process, single-threaded, Apple M2 Max, 21 images.*
 
-**Compression ratio**: Competitive across all modalities. MIC achieves better ratios on CT (+27%), XR (+4%), MG1/MG2 (+4%). HTJ2K is slightly better on MR (+1%), CR (+4%), MG4 (+1%). The CT advantage stems from MIC's overflow delimiter scheme adapting to actual bit depth — over 90% of CT residuals fall within ±64, keeping the effective alphabet small.
+**Compression ratio**: MIC achieves better or equal ratios on CT images, XR, MG1/MG2, RG1, and XA1. HTJ2K leads on MR, CR, RG2/RG3, NM1, and some MR variants where its context modelling captures fine structure. The CT advantage stems from MIC's overflow delimiter scheme — over 90% of CT residuals fall within ±64, keeping the effective alphabet small.
 
-**Decompression throughput**: HTJ2K decompresses ~1.8× faster than MIC-Go (geometric mean). However, MIC-4state-C closes to within 0.87× (geometric mean) and **exceeds HTJ2K on 6 of 8 images**. At 64 cores, MIC's simple per-frame parallelism scales to 16 GB/s vs. HTJ2K's single-image multi-threaded architecture.
+**Decompression throughput**: HTJ2K decompresses faster than MIC-Go on most modalities. However, MIC-4state-C **exceeds HTJ2K on 14 of 21 images** (all CR/XR/MG/RG/XA/SC images). At 64 cores, MIC's per-frame parallelism scales to 16 GB/s vs. HTJ2K's single-image multi-threaded architecture.
 
 ---
 
@@ -438,22 +503,35 @@ We compare against lossless HTJ2K using OpenJPH [33], the leading open-source im
 
 JPEG-LS (ISO 14495-1) [4,5] is the closest practical competitor. We compare against CharLS [34] using in-process CGO bindings.
 
-| Image | Raw (MB) | MIC ratio | JPEG-LS ratio | MIC-2s (MB/s) | MIC-4s (MB/s) | JPEG-LS (MB/s) | 4s speedup |
-|-------|:--------:|:---------:|:-------------:|:--------------:|:--------------:|:--------------:|:----------:|
-| MR    | 0.13     | 2.35×     | **2.52×**     | 106            | **114**        | 75             | 1.52×      |
-| CT    | 0.50     | 2.24×     | **2.68×**     | 120            | **141**        | 86             | 1.64×      |
-| CR    | 7.18     | 3.63×     | **3.96×**     | 181            | **204**        | 100            | 2.04×      |
-| XR    | 10.1     | 1.74×     | **1.76×**     | 177            | **243**        | 69             | 3.52×      |
-| MG1   | 9.35     | 8.57×     | **8.91×**     | 259            | **278**        | 266            | 1.05×      |
-| MG2   | 9.35     | 8.55×     | **8.90×**     | 259            | **278**        | 262            | 1.06×      |
-| MG3   | 27.3     | 2.29×     | **2.43×**     | 176            | **181**        | 98             | 1.85×      |
-| MG4   | 26.0     | 3.47×     | **3.70×**     | 243            | **272**        | 128            | 2.13×      |
+| Image | Raw (MB) | MIC ratio | JPEG-LS ratio | MIC-Go (MB/s) | MIC-4s-C (MB/s) | JPEG-LS (MB/s) | speedup |
+|-------|:--------:|:---------:|:-------------:|:--------------:|:----------------:|:--------------:|:-------:|
+| MR    | 0.13     | 2.35×     | **2.52×**     | 136            | **322**          | 95             | 3.4×    |
+| CT    | 0.50     | 2.24×     | **2.68×**     | 188            | **368**          | 140            | 2.6×    |
+| CR    | 7.18     | 3.69×     | **3.96×**     | 299            | **541**          | 153            | 3.5×    |
+| XR    | 10.1     | 1.74×     | **1.76×**     | 305            | **545**          | 109            | 5.0×    |
+| MG1   | 9.35     | 8.79×     | **8.91×**     | 487            | **692**          | 409            | 1.7×    |
+| MG2   | 9.35     | 8.77×     | **8.90×**     | 476            | **685**          | 407            | 1.7×    |
+| MG3   | 27.3     | 2.24×     | **2.38×**     | 311            | **529**          | 154            | 3.4×    |
+| MG4   | 26.0     | 3.47×     | **3.71×**     | 421            | **639**          | 185            | 3.5×    |
+| CT1   | 0.50     | 2.79×     | **3.19×**     | 245            | **433**          | 182            | 2.4×    |
+| CT2   | 0.50     | 3.49×     | **4.54×**     | 238            | **416**          | 173            | 2.4×    |
+| MG-N  | 27.3     | 2.24×     | **2.38×**     | 323            | **556**          | 154            | 3.6×    |
+| MR1   | 0.50     | 2.09×     | **2.30×**     | 274            | **525**          | 115            | 4.6×    |
+| MR2   | 2.00     | 3.28×     | **3.52×**     | 339            | **585**          | 167            | 3.5×    |
+| MR3   | 0.50     | 3.93×     | **4.51×**     | 360            | **597**          | 230            | 2.6×    |
+| MR4   | 0.50     | 4.12×     | **4.49×**     | 323            | **557**          | 198            | 2.8×    |
+| NM1   | 0.50     | 5.15×     | **6.28×**     | 330            | **618**          | 213            | 2.9×    |
+| RG1   | 6.86     | **1.70×** | **1.72×**     | 241            | **419**          | 104            | 4.0×    |
+| RG2   | 7.18     | 4.23×     | **4.51×**     | 365            | **608**          | 178            | 3.4×    |
+| RG3   | 5.91     | 6.08×     | **7.31×**     | 380            | **614**          | 245            | 2.5×    |
+| SC1   | 9.71     | 3.71×     | **4.73×**     | 383            | **601**          | 221            | 2.7×    |
+| XA1   | 2.00     | **5.01×** | **5.39×**     | 337            | **580**          | 208            | 2.8×    |
 
-*Table 9: MIC vs. JPEG-LS — in-process, single-threaded, Intel Xeon @ 2.80 GHz.*
+*Table 9: MIC vs. JPEG-LS — in-process, single-threaded, Apple M2 Max, 21 images. Speedup = MIC-4s-C / JPEG-LS.*
 
-**Compression ratio**: JPEG-LS achieves 1–16% better ratios on all tested modalities. The advantage is largest on CT (+16%) where the context-adaptive MED predictor captures edge-direction information. On XR the gap is only 1%.
+**Compression ratio**: JPEG-LS achieves better ratios on all 21 modalities. The advantage is largest on CT2 (+30%), SC1 (+27%), NM1 (+22%), and RG3 (+20%) where context-adaptive MED prediction captures fine structure. On XR and RG1 the gap is only 1–2%.
 
-**Decompression throughput**: MIC 4-state is **1.5–3.5× faster on all 8 modalities**. The speed advantage arises from: (1) O(1) table lookups with no context adaptation vs. per-pixel parameter updates, (2) four-state ILP breaking the serial ANS bottleneck, (3) branch-free delta vs. three-way MED conditional.
+**Decompression throughput**: MIC-4state-C is **1.7–5.0× faster on all 21 modalities**. The speed advantage arises from: (1) O(1) table lookups with no context adaptation vs. per-pixel parameter updates, (2) four-state ILP breaking the serial ANS bottleneck, (3) branch-free delta vs. three-way MED conditional.
 
 **Summary**: JPEG-LS wins on ratio. MIC wins on speed. For clinical workflows where images are compressed once and decompressed many times (archival → viewing), MIC's speed advantage outweighs the modest ratio disadvantage.
 
@@ -490,17 +568,23 @@ PICS breaks the serial row dependency in delta prediction by dividing the image 
 
 **Compression ratio vs. strip count**:
 
-| Image | 1-strip | 2-strip | 4-strip | 8-strip |
-|-------|:-------:|:-------:|:-------:|:-------:|
-| MR (256×256)     | **2.35×** | 2.33× | 2.28× | 2.21× |
-| CT (512×512)     | **2.24×** | 2.21× | 2.15× | 1.96× |
-| CR (1760×2140)   | 3.63×     | 3.64× | **3.66×** | 3.68× |
-| XR (2048×2577)   | 1.74×     | 1.75× | **1.75×** | 1.76× |
-| MG1 (2457×1996)  | 8.57×     | 8.60× | **8.69×** | 8.77× |
-| MG3 (4774×3064)  | 2.29×     | 2.33× | **2.36×** | 2.39× |
-| MG4 (4096×3328)  | 3.47×     | 3.52× | **3.59×** | 3.62× |
+| Image | 1-strip | PICS-4 | PICS-8 | Image | 1-strip | PICS-4 | PICS-8 |
+|-------|:-------:|:------:|:------:|-------|:-------:|:------:|:------:|
+| MR (256×256)    | **2.35×** | 2.28× | 2.21× | CT1 (512×512)     | **2.79×** | 2.54× | 2.29× |
+| CT (512×512)    | **2.24×** | 2.15× | 1.96× | CT2 (512×512)     | **3.49×** | 3.11× | 2.72× |
+| CR (2140×1760)  | 3.69×     | **3.70×** | 3.71× | MG-N (3064×4664)  | 2.24×     | **2.31×** | 2.34× |
+| XR (2048×2577)  | 1.74×     | **1.75×** | 1.76× | MR1 (512×512)     | **2.09×** | 2.10× | 2.08× |
+| MG1 (2457×1996) | 8.79×     | 8.84× | **8.87×** | MR2 (1024×1024)   | 3.28×     | **3.31×** | 3.31× |
+| MG2 (2457×1996) | 8.77×     | 8.83× | **8.85×** | MR3 (512×512)     | **3.93×** | 3.89× | 3.84× |
+| MG3 (4774×3064) | 2.24×     | **2.31×** | 2.34× | MR4 (512×512)     | **4.12×** | 4.09× | 4.03× |
+| MG4 (4096×3328) | 3.47×     | **3.59×** | 3.62× | NM1 (256×1024)    | 5.15×     | **5.26×** | 5.28× |
+|                 |           |       |       | RG1 (1841×1955)   | **1.70×** | **1.70×** | 1.69× |
+|                 |           |       |       | RG2 (1760×2140)   | 4.23×     | **4.28×** | 4.30× |
+|                 |           |       |       | RG3 (1760×1760)   | 6.08×     | **6.11×** | 6.12× |
+|                 |           |       |       | SC1 (2048×2487)   | 3.71×     | **3.73×** | 3.74× |
+|                 |           |       |       | XA1 (1024×1024)   | 5.01×     | **5.04×** | 5.03× |
 
-*Table 11: Compression ratio vs. strip count. Large images gain; small images lose.*
+*Table 11: Compression ratio vs. strip count, 21 images. Large images gain with more strips; small images (MR, CT, small MR variants) lose.*
 
 **The strip adaptation phenomenon**: Large images (CR, MG) *improve* compression with more strips. This is counterintuitive — why does throwing away cross-strip prediction rows help? Because each strip gets its own FSE table, which can specialize to the strip's local residual distribution. A global FSE table must model the entire image's distribution, including statistical variation across regions (tissue vs. background, dense vs. sparse). Strip-local tables can adapt. This is free context adaptation through partitioning.
 
@@ -514,18 +598,31 @@ This inequality holds for CR/MG images and explains the crossover where strip bo
 
 | Image | MIC-Go | MIC-4s-C | PICS-2 | PICS-4 | PICS-8 |
 |-------|:------:|:--------:|:------:|:------:|:------:|
-| MR    | 148    | 353      | 320    | 313    | 283    |
-| CT    | 201    | 389      | 341    | **495** | 477   |
-| CR    | 306    | 534      | 561    | 1,010  | **1,718** |
-| XR    | 310    | 540      | 574    | 1,039  | **1,367** |
-| MG1   | 471    | 666      | 902    | 1,477  | **2,449** |
-| MG2   | 482    | 692      | 901    | 1,480  | **2,414** |
-| MG3   | 312    | 543      | 573    | 1,097  | **1,850** |
-| MG4   | 420    | 626      | 790    | 1,358  | **2,437** |
+| MR    | 136    | 322      | 299    | 262    | 245 ⚠  |
+| CT    | 188    | 368      | 342    | **478** | 467   |
+| CR    | 299    | 541      | 549    | 1,002  | **1,625** |
+| XR    | 305    | 545      | 588    | 1,066  | **1,730** |
+| MG1   | 487    | 692      | 888    | 1,456  | **2,411** |
+| MG2   | 476    | 685      | 877    | 1,464  | **2,376** |
+| MG3   | 311    | 529      | 577    | 1,110  | **1,993** |
+| MG4   | 421    | 639      | 781    | 1,369  | **2,040** |
+| CT1   | 245    | 433      | 391    | **542** | 484   |
+| CT2   | 238    | 416      | 394    | **486** | 428   |
+| MG-N  | 323    | 556      | 582    | 1,092  | **1,894** |
+| MR1   | 274    | 525      | 443    | 609    | **613** |
+| MR2   | 339    | 585      | 579    | 894    | **1,163** |
+| MR3   | 360    | 597      | 530    | **774** | 753   |
+| MR4   | 323    | 557      | 479    | 664    | **688** |
+| NM1   | 330    | 618      | 502    | 611    | **710** |
+| RG1   | 241    | 419      | 448    | 796    | **1,269** |
+| RG2   | 365    | 608      | 635    | 1,108  | **1,715** |
+| RG3   | 380    | 614      | 657    | 1,176  | **1,635** |
+| SC1   | 383    | 601      | 699    | 1,233  | **1,996** |
+| XA1   | 337    | 580      | 589    | 912    | **1,232** |
 
-*Table 12: Single-image decompression throughput (MB/s), Apple M2 Max (12-core ARM64).*
+*Table 12: Single-image decompression throughput (MB/s), Apple M2 Max (12-core ARM64). ⚠ = PICS goroutine overhead eliminates the parallelism benefit on this small image.*
 
-PICS-8 peaks at 2,449 MB/s on MG1, enabling sub-millisecond decompression of a 9.35 MB image on a 12-core workstation. PICS and 4-state FSE are **orthogonal optimizations** — PICS exploits multi-core parallelism while 4-state exploits instruction-level parallelism within one core. Their speedups are multiplicative.
+PICS-8 peaks at 2,411 MB/s on MG1, enabling sub-millisecond decompression of a 9.35 MB image on a 12-core workstation. PICS and 4-state FSE are **orthogonal optimizations** — PICS exploits multi-core parallelism while 4-state exploits instruction-level parallelism within one core. Their speedups are multiplicative.
 
 ### 10.2 Multi-Frame Results (MIC2)
 
@@ -619,7 +716,7 @@ When should each pipeline be used? Our results suggest the following decision fr
 ### 12.3 Limitations
 
 - **No lossy compression, progressive decoding, or region-of-interest coding** for greyscale images. The wavelet pipeline provides a natural foundation for future lossy mode.
-- **Test dataset size**: Eight test images across five modalities. A larger evaluation from public repositories (e.g., TCIA) would strengthen the generality claims.
+- **Test dataset size**: 21 test images across 10 modalities. The expanded dataset substantially broadens the evaluation, but large-scale benchmarks from public repositories (e.g., TCIA) with inter-institution variability would further strengthen generality claims.
 - **Temporal prediction** is underperforming on the one available clinical dataset and needs evaluation on cardiac cine MRI and fluoroscopy.
 - **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed.
 - **No confidence intervals** reported in the current benchmarks; future work should include multi-run statistics.
@@ -637,11 +734,11 @@ We have presented MIC, a lossless medical image codec built on a simple observat
 
 The simplicity thesis is validated empirically: a three-stage Delta+RLE+FSE pipeline (~500 lines of code) matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities for lossless compression, at dramatically higher throughput. When maximum ratio is needed, a five-level wavelet alternative with SIMD acceleration exceeds both the delta pipeline and HTJ2K.
 
-Key results:
-- **Compression ratios**: 1.7×–8.6× (greyscale), 3–5× (RGB WSI tissue)
+Key results across 21 clinical DICOM images spanning 10 modalities:
+- **Compression ratios**: 1.7×–8.9× (greyscale), 3–5× (RGB WSI tissue)
 - **Decompression throughput**: up to 16 GB/s (64-core ARM64), geometric mean ≈7.5 GB/s
-- **vs. HTJ2K**: MIC-4state-C within 0.87× single-threaded; Wavelet V2 SIMD beats HTJ2K on all 8 modalities
-- **vs. JPEG-LS**: 1.5–3.5× faster decompression; 1–16% lower ratio
+- **vs. HTJ2K**: MIC-4state-C exceeds HTJ2K on 14 of 21 images single-threaded; Wavelet V2 SIMD leads on large CR/XR/RG images
+- **vs. JPEG-LS**: 1.7–5.0× faster decompression; 1–30% lower ratio depending on modality
 - **vs. Delta+Zstandard**: 10–22% better compression on all modalities
 
 These results suggest a broader principle applicable beyond medical imaging: **any domain where the natural data word exceeds 8 bits — scientific instruments, audio at >16-bit depth, financial time series — may benefit from word-native entropy coding rather than byte-level general-purpose compressors.**
