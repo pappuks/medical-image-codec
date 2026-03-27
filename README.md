@@ -195,18 +195,31 @@ For throughput scaling numbers, the C/pthreads API, and format specification, se
 
 All images are 16-bit greyscale DICOM. Ratios measured in-process on Apple M2 Max (`-tags cgo_ojph`).
 
-| Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | PICA-4 | HTJ2K | JPEG-LS |
-|-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:------:|:-----:|:-------:|
-| MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.31× | 2.38× | **2.52×** |
-| CT (512×512) | 0.50 | **2.24×** | **2.24×** | 1.67× | 2.15× | 1.96× | 2.11× | 1.77× | 2.68× |
-| CR (2140×1760) | 7.18 | 3.63× | 3.63× | 3.81× | 3.66× | 3.68× | 3.73× | 3.77× | **3.96×** |
-| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | **1.76×** | **1.76×** | 1.67× | **1.76×** |
-| MG1 (2457×1996) | 9.35 | 8.57× | 8.57× | 8.67× | 8.69× | 8.77× | **8.89×** | 8.25× | 8.91× |
-| MG2 (2457×1996) | 9.35 | 8.55× | 8.55× | 8.65× | 8.68× | 8.76× | **8.88×** | 8.24× | 8.90× |
-| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.37× | 2.22× | **2.38×** |
-| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.59× | 3.62× | 3.58× | 3.51× | **3.71×** |
+| Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
+|-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:-----:|:-------:|
+| MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.38× | **2.52×** |
+| CT (512×512) | 0.50 | 2.24× | 2.24× | 1.67× | 2.15× | 1.96× | 1.77× | **2.68×** |
+| CR (2140×1760) | 7.18 | 3.69× | 3.69× | 3.81× | 3.70× | 3.71× | 3.77× | **3.96×** |
+| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | **1.76×** | 1.67× | **1.76×** |
+| MG1 (2457×1996) | 9.35 | 8.79× | 8.79× | 8.67× | 8.84× | 8.87× | 8.25× | **8.91×** |
+| MG2 (2457×1996) | 9.35 | 8.77× | 8.77× | 8.65× | 8.83× | 8.85× | 8.24× | **8.90×** |
+| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.22× | **2.38×** |
+| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.59× | 3.62× | 3.51× | **3.71×** |
+| CT1 (512×512) | 0.50 | 2.79× | 2.79× | 2.49× | 2.54× | 2.29× | 2.70× | **3.19×** |
+| CT2 (512×512) | 0.50 | 3.49× | 3.49× | 2.87× | 3.11× | 2.72× | 3.29× | **4.54×** |
+| MG-N (3064×4664) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.23× | **2.38×** |
+| MR1 (512×512) | 0.50 | 2.09× | 2.09× | 2.14× | 2.10× | 2.08× | 2.13× | **2.30×** |
+| MR2 (1024×1024) | 2.00 | 3.28× | 3.28× | 3.34× | 3.31× | 3.31× | 3.35× | **3.52×** |
+| MR3 (512×512) | 0.50 | 3.93× | 3.93× | 4.09× | 3.89× | 3.84× | 4.33× | **4.51×** |
+| MR4 (512×512) | 0.50 | 4.12× | 4.12× | 4.18× | 4.09× | 4.03× | 4.21× | **4.49×** |
+| NM1 (256×1024) | 0.50 | 5.15× | 5.15× | 5.02× | 5.26× | 5.28× | 5.76× | **6.28×** |
+| RG1 (1841×1955) | 6.86 | 1.70× | 1.70× | 1.70× | 1.70× | 1.69× | 1.63× | **1.72×** |
+| RG2 (1760×2140) | 7.18 | 4.23× | 4.23× | 4.32× | 4.28× | 4.30× | 4.32× | **4.51×** |
+| RG3 (1760×1760) | 5.91 | 6.08× | 6.08× | 6.82× | 6.11× | 6.12× | 6.99× | **7.31×** |
+| SC1 (2048×2487) | 9.71 | 3.71× | 3.71× | 3.70× | 3.73× | 3.74× | 3.85× | **4.73×** |
+| XA1 (1024×1024) | 2.00 | 5.01× | 5.01× | 4.94× | 5.04× | 5.03× | 4.88× | **5.39×** |
 
-MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) but improves it on large CR/MG images where strip-local FSE table adaptation helps. PICA-4 (Parallel Image Compressed Adaptive) extends PICS with per-strip predictor selection (tries avg and grad, keeps smaller) and content-adaptive strip boundaries; it beats PICS-4 on 6/8 modalities and beats JPEG-LS on MG1/MG2. JPEG-LS consistently achieves the highest ratios but at 3–6× lower decompression throughput (see Performance table below).
+MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) but improves it on large CR/MG images where strip-local FSE table adaptation helps. JPEG-LS consistently achieves the highest ratios but at 3–6× lower decompression throughput (see Performance table below).
 
 `CompressSingleFrameGapRemoval` adds +0.45% on CT (2.237× → **2.247×**) by collapsing the 65536-symbol RLE alphabet to the 1782 symbols that actually occur, via a delta-encoded expand map (1798 bytes overhead). Other modalities are unaffected. See [docs/compression-results.md](./docs/compression-results.md).
 
@@ -216,28 +229,41 @@ For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compressio
 
 ## Performance
 
-**Decompression throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`). PICS-N decompresses a single image using N goroutines in parallel.
+**Decompression throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=5x`). PICS-N decompresses a single image using N goroutines in parallel.
 
 | Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-2 | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
 |-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:------:|:------:|:------:|:-----:|:-------:|
-| MR (256×256) | 0.13 | 148 | 205 | 353 | **347** | 240 | 320 | 313 | 283 ⚠ | 241 | 98 |
-| CT (512×512) | 0.50 | 201 | 240 | 389 | **383** | 321 | 341 | 495 | 477 | 314 | 140 |
-| CR (2140×1760) | 7.18 | 306 | 342 | **534** | 539 | 571 | 561 | 1010 | **1718** | 367 | 154 |
-| XR (2048×2577) | 10.1 | 310 | 347 | **540** | 539 | 632 | 574 | 1039 | **1367** | 132 | 99 |
-| MG1 (2457×1996) | 9.35 | 471 | 497 | 666 | **662** | 687 | 902 | 1477 | **2449** | 757 | 415 |
-| MG2 (2457×1996) | 9.35 | 482 | 525 | **692** | 682 | 708 | 901 | 1480 | **2414** | 794 | 416 |
-| MG3 (4774×3064) | 27.3 | 312 | 349 | **543** | 539 | 444 | 573 | 1097 | **1850** | 341 | 154 |
-| MG4 (4096×3328) | 26.0 | 420 | 456 | 626 | **640** | 530 | 790 | 1358 | **2437** | 542 | 185 |
+| MR (256×256) | 0.13 | 136 | 201 | 322 | _356_ | 248 | **299** | 262 | 245 ⚠ | 250 | 95 |
+| CT (512×512) | 0.50 | 188 | 234 | 368 | _384_ | 316 | 342 | **478** | 467 | 321 | 140 |
+| CR (2140×1760) | 7.18 | 299 | 341 | 541 | 540 | _567_ | 549 | 1002 | **1625** | 368 | 153 |
+| XR (2048×2577) | 10.1 | 305 | 345 | 545 | 542 | _627_ | 588 | 1066 | **1730** | 338 | 109 |
+| MG1 (2457×1996) | 9.35 | 487 | 518 | 692 | 692 | 678 | 888 | 1456 | **2411** | _809_ | 409 |
+| MG2 (2457×1996) | 9.35 | 476 | 502 | 685 | 685 | 697 | 877 | 1464 | **2376** | _797_ | 407 |
+| MG3 (4774×3064) | 27.3 | 311 | 346 | 529 | _534_ | 422 | 577 | 1110 | **1993** | 340 | 154 |
+| MG4 (4096×3328) | 26.0 | 421 | 454 | 639 | _640_ | 516 | 781 | 1369 | **2040** | 554 | 185 |
+| CT1 (512×512) | 0.50 | 245 | 293 | 433 | _440_ | 425 | 391 | **542** | 484 | 361 | 182 |
+| CT2 (512×512) | 0.50 | 238 | 278 | 416 | 444 | _481_ | 394 | **486** | 428 | 376 | 173 |
+| MG-N (3064×4664) | 27.3 | 323 | 359 | _556_ | 551 | 468 | 582 | 1092 | **1894** | 344 | 154 |
+| MR1 (512×512) | 0.50 | 274 | 319 | _525_ | 523 | 435 | 443 | 609 | **613** | 326 | 115 |
+| MR2 (1024×1024) | 2.00 | 339 | 378 | 585 | _586_ | 498 | 579 | 894 | **1163** | 368 | 167 |
+| MR3 (512×512) | 0.50 | 360 | 413 | 597 | _608_ | 507 | 530 | **774** | 753 | 426 | 230 |
+| MR4 (512×512) | 0.50 | 323 | 358 | 557 | _586_ | 479 | 479 | 664 | **688** | 402 | 198 |
+| NM1 (256×1024) | 0.50 | 330 | 384 | _618_ | 593 | 575 | 502 | 611 | **710** | 416 | 213 |
+| RG1 (1841×1955) | 6.86 | 241 | 304 | 419 | 417 | _584_ | 448 | 796 | **1269** | 334 | 104 |
+| RG2 (1760×2140) | 7.18 | 365 | 401 | 608 | 607 | _644_ | 635 | 1108 | **1715** | 442 | 178 |
+| RG3 (1760×1760) | 5.91 | 380 | 414 | 614 | 616 | _656_ | 657 | 1176 | **1635** | 554 | 245 |
+| SC1 (2048×2487) | 9.71 | 383 | 410 | 601 | _602_ | 388 | 699 | 1233 | **1996** | 399 | 221 |
+| XA1 (1024×1024) | 2.00 | 337 | 382 | 580 | _592_ | 459 | 589 | 912 | **1232** | 433 | 208 |
 
-MIC-4state-C/SIMD and PICS require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go. ⚠ MR (256×256) is too small for PICS — goroutine overhead dominates.
+MIC-4state-C/SIMD and PICS require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best multi-threaded (PICS) throughput per row. ⚠ MR (256×256) is too small for PICS — goroutine overhead eliminates the parallelism benefit.
 
 **When to use which:**
-- **Pure Go, simplest integration** → MIC-Go: ~300–480 MB/s, zero dependencies.
+- **Pure Go, simplest integration** → MIC-Go: ~135–490 MB/s, zero dependencies.
 - **Best single-core throughput** → MIC-4state-C or MIC-4state-SIMD: 1.5–1.8× faster than MIC-Go via CGO.
 - **High spatial-frequency images (XR, CR)** → Wavelet+SIMD: better compression and throughput than Delta+FSE on wavelet-friendly content.
 - **Latency-critical, multi-core available** → PICS-4/8: 1.9–3.9× over single-threaded MIC on images ≥ 0.5 MB; reaches 2.4 GB/s on MG modality with 8 strips.
 - **Maximum compression ratio, speed secondary** → JPEG-LS: best ratios across all modalities but 3–6× slower to decompress than MIC-4state-C.
-- **Interoperability with existing DICOM viewers** → HTJ2K: competitive ratios and speed on MG/MR, but significantly slower on XR (132 MB/s vs 540 MB/s for MIC).
+- **Interoperability with existing DICOM viewers** → HTJ2K: competitive ratios and speed on MG/MR, but significantly slower on XR (338 MB/s vs 545 MB/s for MIC).
 
 For multi-core scaling detail and wavelet SIMD analysis, see [docs/benchmarks.md](./docs/benchmarks.md). For comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
 
@@ -318,3 +344,4 @@ go build -o mic-compress ./cmd/mic-compress/
 - [x] Adaptive tableLog refinement — tableLog=13 branch for large symbol sets (symbolLen > 512); reduces probability quantization error on 12-16 bit images — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
 - [x] Content-adaptive strip partitioning — PICA places strip boundaries at entropy transitions (equal-cost on inter-row variance) for more uniform per-strip FSE tables — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
+- [ ] Ultrasound (US) image support — US DICOM frames are typically RGB (3 samples/pixel, 8-bit); requires extending the single-frame pipeline to handle multi-channel grayscale-equivalent encoding (similar to WSI YCoCg-R path) without the tiled container overhead

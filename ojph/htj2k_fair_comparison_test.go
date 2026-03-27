@@ -48,6 +48,21 @@ var testImages = []testImage{
 	{name: "MG2", fileName: "../testdata/MG_Image_2_frame.bin", isBinary: true, rows: 2457, cols: 1996},
 	{name: "MG3", fileName: "../testdata/MG1.RAW", isBinary: true, rows: 4774, cols: 3064},
 	{name: "MG4", fileName: "../testdata/mg-dcm-file.dcm", isBinary: false, rows: 4096, cols: 3328},
+	// DICOM conformance test images (NEMA compsamples)
+	{name: "CT1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/CT1_UNC", isBinary: false},
+	{name: "CT2", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/CT2_UNC", isBinary: false},
+	{name: "MG-N", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/MG1_UNC", isBinary: false},
+	{name: "MR1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/MR1_UNC", isBinary: false},
+	{name: "MR2", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/MR2_UNC", isBinary: false},
+	{name: "MR3", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/MR3_UNC", isBinary: false},
+	{name: "MR4", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/MR4_UNC", isBinary: false},
+	{name: "NM1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/NM1_UNC", isBinary: false},
+	{name: "RG1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/RG1_UNC", isBinary: false},
+	{name: "RG2", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/RG2_UNC", isBinary: false},
+	{name: "RG3", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/RG3_UNC", isBinary: false},
+	{name: "SC1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/SC1_UNC", isBinary: false},
+	{name: "XA1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/XA1_UNC", isBinary: false},
+	// US1_UNC and VL1–VL6_UNC are RGB (samples=3) — not yet supported; see roadmap
 }
 
 func loadImage(ti testImage) ([]byte, []uint16, uint16, int, int) {
