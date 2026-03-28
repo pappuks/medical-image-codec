@@ -582,18 +582,59 @@ All images verified pixel-perfect against the Go implementation:
 
 Times measured in Node.js v22 (V8). Browser performance varies by engine and device. Mammography images (MG1/MG2) achieve the best compression ratios because large areas of the detector are unexposed (uniform background), which delta encoding + RLE compress extremely well.
 
-### Throughput
+### Benchmark — Apple M2 Max (Node.js v24.8, 20 iterations)
 
-| Image | Pixels | JS MB/s | Pixels/s |
-|-------|--------|---------|----------|
-| MR | 65K | 5.1 | 2.6M |
-| CT | 262K | 5.7 | 2.9M |
-| CR | 3.8M | 21.8 | 11.4M |
-| MG1 | 4.9M | 62.7 | 32.7M |
-| MG2 | 4.9M | 63.6 | 33.2M |
-| MG3 | 14.6M | 22.8 | 12.2M |
+Run with `node bench-decoder.mjs`. Reports median decode time, throughput (decompressed MB/s), and megapixels/s.
 
-MG1/MG2 decode faster than their size suggests because their high compression ratio means less FSE bitstream to process.
+#### Single-threaded (pure JS decoder)
+
+| Image | Dimensions | Comp KB | Out MB | Ratio | Median ms | MB/s | MP/s |
+|-------|-----------|---------|--------|-------|-----------|------|------|
+| MR (1-state) | 256×256 | 54 | 0.13 | 2.35 | 3.6 | 35 | 18.3 |
+| CT (1-state) | 512×512 | 229 | 0.50 | 2.24 | 13.8 | 36 | 19.0 |
+| CR (1-state) | 1760×2140 | 1992 | 7.18 | 3.69 | 161.9 | 44 | 23.3 |
+| MG1 (1-state) | 1996×2457 | 1090 | 9.35 | 8.79 | 84.0 | 111 | 58.4 |
+| MG2 (1-state) | 1996×2457 | 1092 | 9.35 | 8.77 | 83.5 | 112 | 58.7 |
+| MG3 (1-state) | 3064×4774 | 12480 | 27.90 | 2.29 | 631.0 | 44 | 23.2 |
+| MR (4-state) | 256×256 | 54 | 0.13 | 2.35 | 3.0 | 42 | 21.8 |
+| CT (4-state) | 512×512 | 229 | 0.50 | 2.24 | 13.5 | 37 | 19.5 |
+| CR (4-state) | 1760×2140 | 1992 | 7.18 | 3.69 | 161.2 | 45 | 23.4 |
+| MG1 (4-state) | 1996×2457 | 1090 | 9.35 | 8.78 | 81.9 | 114 | 59.9 |
+| MG2 (4-state) | 1996×2457 | 1092 | 9.35 | 8.77 | 80.9 | 116 | 60.6 |
+| MG3 (4-state) | 3064×4774 | 12480 | 27.90 | 2.29 | 638.4 | 44 | 22.9 |
+| MR (PICS-4 seq) | 256×256 | 56 | 0.13 | 2.28 | 3.4 | 37 | 19.4 |
+| CT (PICS-4 seq) | 512×512 | 239 | 0.50 | 2.14 | 14.0 | 36 | 18.7 |
+| CR (PICS-8 seq) | 1760×2140 | 1981 | 7.18 | 3.71 | 167.0 | 43 | 22.6 |
+| MG1 (PICS-8 seq) | 1996×2457 | 1080 | 9.35 | 8.87 | 84.2 | 111 | 58.3 |
+
+Peak single-threaded throughput by modality: MR 42 MB/s · CT 37 MB/s · CR 45 MB/s · MG 116 MB/s.
+
+#### Parallel worker_threads (PICS strips, SharedArrayBuffer, 12 CPU cores)
+
+PICS files encode an image as independent strips, enabling parallel decoding across `worker_threads`. The table shows median decode time and throughput for 1–12 workers, with speedup relative to 1 worker.
+
+| Image | strips | workers | Median ms | MB/s | Speedup |
+|-------|--------|---------|-----------|------|---------|
+| MR 256×256 | 4 | 1 | 3.4 | 37 | 1.00× |
+| | | 2 | 2.0 | 62 | 1.69× |
+| | | 4 | 1.6 | 76 | 2.08× |
+| | | 8 | **1.3** | **94** | **2.57×** |
+| CT 512×512 | 4 | 1 | 14.6 | 34 | 1.00× |
+| | | 2 | 9.4 | 53 | 1.55× |
+| | | 4 | 6.1 | 82 | 2.38× |
+| | | 8 | **5.0** | **101** | **2.95×** |
+| CR 1760×2140 | 8 | 1 | 175.4 | 41 | 1.00× |
+| | | 2 | 88.8 | 81 | 1.98× |
+| | | 4 | 50.0 | 144 | 3.51× |
+| | | 8 | 34.6 | 208 | 5.07× |
+| | | 12 | **31.7** | **227** | **5.53×** |
+| MG1 1996×2457 | 8 | 1 | 84.4 | 111 | 1.00× |
+| | | 2 | 46.9 | 200 | 1.80× |
+| | | 4 | 31.8 | 294 | 2.65× |
+| | | 8 | 20.2 | 464 | 4.19× |
+| | | 12 | **19.4** | **483** | **4.36×** |
+
+Workers beyond the strip count (e.g., 8 workers for a 4-strip file) are capped to the strip count. For large images (CR, MG1) with 8 strips, scaling to 8–12 workers yields 4–5.5× speedup and pushes throughput to **227–483 MB/s** — well into real-time territory for diagnostic workloads.
 
 ## Troubleshooting
 
@@ -633,6 +674,8 @@ web/
 ├── mic-decoder-wasm.js    # WASM loader wrapper (same API as JS decoder)
 ├── index.html             # Demo: drag-and-drop, W/L controls, movie player
 ├── test-decoder.mjs       # Node.js pixel-perfect verification test
+├── bench-decoder.mjs      # Node.js throughput benchmark (single-threaded + worker_threads)
+├── bench-worker.mjs       # worker_threads worker used by bench-decoder.mjs
 ├── README.md              # This file
 ├── .gitignore             # Ignores generated files below
 ├── mic-decoder.wasm       # [generated] Go WASM binary (~2.5 MB)
