@@ -259,41 +259,41 @@ MIC-4state-C/SIMD and PICS require CGO (`-tags cgo_ojph`); all other MIC variant
 
 ---
 
-**Decompression throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` (`-tags cgo_ojph`, `-benchtime=10x`). PICS-N decompresses a single image using N goroutines in parallel.
+**Decompression throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecs` (`-tags cgo_ojph`, C variants compiled with `-O3 -march=native`). Wavelet+SIMD from a separate `BenchmarkWaveletV2SIMDRLEFSECompress` run (pure Go). PICS-C-N uses C pthreads + SIMD auto-detect inner decoder with N concurrent threads. ⊕ Pure-Go `DecompressParallelStrips` (no CGO) achieves ~60–70% of PICS-C throughput.
 
-| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-2 | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
-|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:------:|:------:|:------:|:-----:|:-------:|
-| MR (256×256) | 0.13 | 249 | 268 | 452 | 519 | 194 | **257** | 238 | 169 ⚠ | _630_ | 126 |
-| CT (512×512) | 0.50 | 260 | 268 | 458 | 421 | 364 | 279 | **473** | 456 | _507_ | 153 |
-| CR (2140×1760) | 7.18 | 329 | 342 | 558 | 534 | _723_ | 518 | 861 | **1221** | 675 | 182 |
-| XR (2048×2577) | 10.1 | 336 | 376 | 586 | 568 | _681_ | 597 | 1093 | **1626** | 588 | 110 |
-| MG1 (2457×1996) | 9.35 | 525 | 587 | 781 | 790 | 746 | 897 | 1352 | **2254** | _1334_ | 474 |
-| MG2 (2457×1996) | 9.35 | 617 | 611 | 767 | 794 | 848 | 812 | 1255 | **2279** | _1277_ | 463 |
-| MG3 (4774×3064) | 27.3 | 370 | 395 | 544 | 491 | 678 | 559 | 1043 | **1660** | _578_ | 160 |
-| MG4 (4096×3328) | 26.0 | 521 | 518 | 724 | 598 | _808_ | 783 | 1340 | **1791** | 890 | 208 |
-| CT1 (512×512) | 0.50 | 309 | 352 | 524 | _545_ | 525 | 305 | **446** | 419 | 614 | 188 |
-| CT2 (512×512) | 0.50 | 331 | 347 | 516 | 495 | _705_ | 325 | 384 | **432** | 623 | 192 |
-| MG-N (3064×4664) | 27.3 | 395 | 406 | 580 | 490 | _705_ | 557 | 1058 | **1633** | 616 | 159 |
-| MR1 (512×512) | 0.50 | 362 | 388 | 574 | _605_ | 532 | 300 | **468** | 365 | 526 | 131 |
-| MR2 (1024×1024) | 2.00 | 348 | 412 | 586 | 635 | 601 | 464 | 979 | **1357** | _688_ | 193 |
-| MR3 (512×512) | 0.50 | 466 | 481 | 621 | 683 | _676_ | 311 | **488** | 454 | 821 | 273 |
-| MR4 (512×512) | 0.50 | 370 | 375 | 626 | 650 | _738_ | 477 | **540** | 523 | 694 | 220 |
-| NM1 (256×1024) | 0.50 | 385 | 396 | _668_ | 588 | 715 | 311 | **586** | 406 | 712 | 253 |
-| RG1 (1841×1955) | 6.86 | 323 | 362 | 511 | 512 | _705_ | 450 | 836 | **1189** | 527 | 101 |
-| RG2 (1760×2140) | 7.18 | 444 | 460 | 666 | 578 | _811_ | 600 | 1013 | **1783** | _811_ | 220 |
-| RG3 (1760×1760) | 5.91 | 416 | 450 | 654 | 624 | _881_ | 673 | 1258 | **1863** | 956 | 286 |
-| SC1 (2048×2487) | 9.71 | 459 | 496 | 667 | 608 | _710_ | 635 | 1171 | **1716** | 691 | 245 |
-| XA1 (1024×1024) | 2.00 | 367 | 363 | 672 | _702_ | 538 | 454 | 923 | **1212** | 758 | 254 |
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-C-2 | PICS-C-4 | PICS-C-8 | HTJ2K | JPEG-LS |
+|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:--------:|:--------:|:--------:|:-----:|:-------:|
+| MR (256×256) | 0.13 | 251 | 260 | 501 | _708_ | 194 | **340** | 301 | 124 ⚠ | 570 | 129 |
+| CT (512×512) | 0.50 | 231 | 243 | 403 | 487 | 364 | 534 | **676** | 339 | _544_ | 146 |
+| CR (2140×1760) | 7.18 | 324 | 381 | 599 | _744_ | 723 | 908 | 1738 | **2435** | 708 | 177 |
+| XR (2048×2577) | 10.1 | 363 | 375 | 601 | _803_ | 681 | 982 | 1714 | **1994** | 570 | 112 |
+| MG1 (2457×1996) | 9.35 | 617 | 630 | 789 | 1119 | 746 | 1511 | 1872 | **2514** | _1235_ | 471 |
+| MG2 (2457×1996) | 9.35 | 562 | 598 | 800 | 1166 | 848 | 1397 | **2244** | 2085 | _1297_ | 471 |
+| MG3 (4774×3064) | 27.3 | 357 | 400 | 633 | 669 | _678_ | 1078 | 1823 | **2538** | 644 | 159 |
+| MG4 (4096×3328) | 26.0 | 523 | 559 | 743 | 773 | 808 | 1612 | 2124 | **2707** | _916_ | 204 |
+| CT1 (512×512) | 0.50 | 322 | 293 | 520 | _676_ | 525 | 636 | **857** | 423 | 657 | 184 |
+| CT2 (512×512) | 0.50 | 293 | 295 | 514 | 636 | _705_ | 645 | **847** | 687 | 627 | 187 |
+| MG-N (3064×4664) | 27.3 | 368 | 416 | 635 | 669 | _705_ | 1128 | 1872 | **2191** | 643 | 159 |
+| MR1 (512×512) | 0.50 | 356 | 351 | 609 | _766_ | 532 | 645 | **945** | 366 | 654 | 128 |
+| MR2 (1024×1024) | 2.00 | 352 | 409 | 658 | _975_ | 601 | 963 | **1121** | 793 | 749 | 190 |
+| MR3 (512×512) | 0.50 | 450 | 443 | 728 | _809_ | 676 | 786 | **920** | 705 | 802 | 258 |
+| MR4 (512×512) | 0.50 | 390 | 339 | 596 | _861_ | 738 | 528 | 493 | **701** | 660 | 219 |
+| NM1 (256×1024) | 0.50 | 367 | 339 | _717_ | 668 | 715 | 663 | **783** | 405 | 627 | 244 |
+| RG1 (1841×1955) | 6.86 | 302 | 344 | 497 | 593 | _705_ | 787 | 1248 | **1494** | 557 | 103 |
+| RG2 (1760×2140) | 7.18 | 433 | 472 | 676 | _861_ | 811 | 1160 | 1841 | **1912** | 823 | 220 |
+| RG3 (1760×1760) | 5.91 | 460 | 464 | 706 | 858 | 881 | 1309 | **1969** | 1613 | _894_ | 287 |
+| SC1 (2048×2487) | 9.71 | 464 | 478 | 695 | _888_ | 710 | 1169 | 1819 | **1889** | 728 | 248 |
+| XA1 (1024×1024) | 2.00 | 413 | 415 | 693 | _836_ | 538 | 1035 | 1173 | **1513** | 797 | 260 |
 
-MIC-4state-C/SIMD and PICS require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best multi-threaded (PICS) throughput per row. ⚠ MR (256×256) is too small for PICS — goroutine overhead eliminates the parallelism benefit. On this CPU, PICS-8 also shows diminishing returns on all 0.5 MB images (CT1, CT2, MR1, MR3, MR4, NM1) — use PICS-4 or single-threaded MIC-4state-SIMD instead. Notable: Wavelet+SIMD leads single-threaded on CR, XR, MG4, CT2, MG-N, MR3, MR4, RG1–RG3, SC1 — 11 of 21 images. MIC-4state-SIMD leads on MR1 (605 MB/s vs HTJ2K 526 MB/s).
+MIC-4state-C/SIMD and PICS-C require CGO (`-tags cgo_ojph`); MIC-Go, MIC-4state, and Wavelet+SIMD are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best PICS-C throughput per row. ⚠ MR (256×256) is too small for multi-threading. PICS-C-8 shows diminishing returns for highly compressed (MG2, RG3) or small (0.5 MB) images — use PICS-C-4 instead. PICS-C uses C pthreads + SIMD auto-detecting inner decoder with only **1 output-buffer allocation** vs Go PICS which allocates per-strip intermediate buffers. Notable: with `-O3 -march=native`, MIC-4state-SIMD beats HTJ2K on 18/21 images single-threaded; PICS-C-8 beats HTJ2K on all 21 images.
 
 **When to use which:**
-- **Pure Go, simplest integration** → MIC-Go: ~135–490 MB/s, zero dependencies.
-- **Best single-core throughput** → MIC-4state-C or MIC-4state-SIMD: 1.5–1.8× faster than MIC-Go via CGO.
-- **High spatial-frequency images (XR, CR)** → Wavelet+SIMD: better compression and throughput than Delta+FSE on wavelet-friendly content.
-- **Latency-critical, multi-core available** → PICS-4/8: 1.9–3.9× over single-threaded MIC on images ≥ 0.5 MB; reaches 2.4 GB/s on MG modality with 8 strips.
-- **Maximum compression ratio, speed secondary** → JPEG-LS: best ratios across all modalities but 3–6× slower to decompress than MIC-4state-C.
-- **Interoperability with existing DICOM viewers** → HTJ2K: competitive ratios and speed on MG/MR, but significantly slower on XR (338 MB/s vs 545 MB/s for MIC).
+- **Pure Go, zero dependencies** → MIC-Go or `DecompressParallelStrips` (no CGO): parallel strips reach ~60–70% of PICS-C speed.
+- **Best single-core throughput** → MIC-4state-SIMD (`-O3 -march=native`): beats HTJ2K on 18/21 images; 2–3× faster than MIC-Go.
+- **Best multi-core throughput (CGO)** → PICS-C-4/8 (C pthreads + SIMD): 1.5–2.6× faster than Go goroutines; reaches **2.7 GB/s** on MG4 (8 strips). Use PICS-C-4 for ≤ 0.5 MB images, PICS-C-8 for ≥ 7 MB images.
+- **High spatial-frequency images (XR, CR)** → Wavelet+SIMD: better compression and competitive single-threaded throughput.
+- **Maximum compression ratio, speed secondary** → JPEG-LS: best ratios but 3–6× slower to decompress than MIC-4state-C.
+- **Interoperability with existing DICOM viewers** → HTJ2K: competitive ratios and speed on MG1/MG2, but 3–4× slower than PICS-C-8 on most modalities.
 
 For multi-core scaling detail and wavelet SIMD analysis, see [docs/benchmarks.md](./docs/benchmarks.md). For comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
 
@@ -373,5 +373,6 @@ go build -o mic-compress ./cmd/mic-compress/
 - [x] Per-strip pipeline selection — PICA format tries avg and grad predictor per strip, keeps smaller; improves 6/8 modalities (+0.3–1.1%); CT correctly auto-selects avg — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
 - [x] Adaptive tableLog refinement — tableLog=13 branch for large symbol sets (symbolLen > 512); reduces probability quantization error on 12-16 bit images — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
 - [x] Content-adaptive strip partitioning — PICA places strip boundaries at entropy transitions (equal-cost on inter-row variance) for more uniform per-strip FSE tables — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
+- [x] Full C encoder/decoder pipeline — `mic_compress_c.c` implements Delta→RLE→FSE 4-state in C; correctness verified on 21 DICOM images; geometric mean **1.04×** decompression speedup vs HTJ2K; CGO bindings `MICCompressFourStateC`/`MICCompressTwoStateC` — see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md)
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [ ] Ultrasound (US) image support — US DICOM frames are typically RGB (3 samples/pixel, 8-bit); requires extending the single-frame pipeline to handle multi-channel grayscale-equivalent encoding (similar to WSI YCoCg-R path) without the tiled container overhead

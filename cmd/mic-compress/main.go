@@ -233,6 +233,18 @@ var dicomSeriesImages = []struct {
 	},
 }
 
+// PICS parallel strip test images
+var picsTestImages = []struct {
+	srcName   string
+	numStrips int
+	outName   string
+}{
+	{srcName: "MR", numStrips: 4, outName: "MR_pics4"},
+	{srcName: "CT", numStrips: 4, outName: "CT_pics4"},
+	{srcName: "CR", numStrips: 8, outName: "CR_pics8"},
+	{srcName: "MG1", numStrips: 8, outName: "MG1_pics8"},
+}
+
 // WSI test images (raw RGB files)
 var wsiTestImages = []struct {
 	name     string
@@ -330,6 +342,51 @@ func main() {
 			ratio := float64(len(byteData)) / float64(len(compressed))
 			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
 				img.name, len(byteData), len(compressed), ratio, outPath)
+		}
+
+		// Compress PICS parallel-strip test images (4-state FSE per strip)
+		srcMap := make(map[string]testImage)
+		for _, img := range testImages {
+			srcMap[img.name] = img
+		}
+		for _, p := range picsTestImages {
+			img, ok := srcMap[p.srcName]
+			if !ok {
+				continue
+			}
+			fmt.Printf("Compressing PICS %s (%d strips, 4-state)...\n", p.outName, p.numStrips)
+
+			byteData, err := os.ReadFile(img.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  skip %s: %v\n", p.outName, err)
+				continue
+			}
+
+			shortData := make([]uint16, img.cols*img.rows)
+			var maxValue uint16
+			for i := 0; i < len(byteData); i += 2 {
+				v := uint16(byteData[i]) | (uint16(byteData[i+1]) << 8)
+				shortData[i/2] = v
+				if v > maxValue {
+					maxValue = v
+				}
+			}
+
+			compressed, err := mic.CompressParallelStrips4State(shortData, img.cols, img.rows, maxValue, p.numStrips)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", p.outName, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, p.outName+".mic")
+			if err := os.WriteFile(outPath, compressed, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			ratio := float64(len(byteData)) / float64(len(compressed))
+			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				p.outName, len(byteData), len(compressed), ratio, outPath)
 		}
 
 		// Compress multiframe DICOM test images (MIC2)

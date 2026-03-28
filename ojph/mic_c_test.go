@@ -481,6 +481,8 @@ func BenchmarkAllCodecs(b *testing.B) {
 		})
 
 		// PICS — Parallel Image Compressed Strips (2, 4, 8 strips)
+		// PICS-N:   Go goroutines + Go decoder
+		// PICS-C-N: C pthreads  + C SIMD auto-detect decoder (same blob)
 		for _, strips := range []int{2, 4, 8} {
 			strips := strips
 			picsComp, err := mic.CompressParallelStrips(shortData, cols, rows, maxShort, strips)
@@ -496,6 +498,232 @@ func BenchmarkAllCodecs(b *testing.B) {
 				}
 				b.ReportMetric(picsRatio, "ratio")
 			})
+			b.Run(fmt.Sprintf("PICS-C-%d/%s", strips, ti.name), func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					MICDecompressParallelC(picsComp, cols, rows, strips)
+				}
+				b.ReportMetric(picsRatio, "ratio")
+			})
 		}
+	}
+}
+
+// TestMICFullPipelineC verifies that the C encoder + C decoder round-trips correctly.
+// Compresses with the C four-state encoder and decompresses with the C four-state
+// decoder (both scalar and SIMD), checking all pixels match the original.
+func TestMICFullPipelineC(t *testing.T) {
+	for _, ti := range testImages {
+		t.Run(ti.name, func(t *testing.T) {
+			_, shortData, _, cols, rows := loadTestImage(ti)
+			if len(shortData) == 0 {
+				t.Skip("could not load image")
+			}
+
+			// C compress (four-state).
+			comp, err := MICCompressFourStateC(shortData, cols, rows)
+			if err != nil {
+				t.Fatalf("C compress: %v", err)
+			}
+
+			// C decompress (scalar four-state).
+			got, err := MICDecompressFourStateC(comp, cols, rows)
+			if err != nil {
+				t.Fatalf("C scalar decompress: %v", err)
+			}
+			for i := range shortData {
+				if got[i] != shortData[i] {
+					t.Fatalf("scalar pixel %d: got %d, want %d", i, got[i], shortData[i])
+				}
+			}
+
+			// C decompress (SIMD four-state).
+			gotSIMD, err := MICDecompressFourStateSIMD(comp, cols, rows)
+			if err != nil {
+				t.Fatalf("C SIMD decompress: %v", err)
+			}
+			for i := range shortData {
+				if gotSIMD[i] != shortData[i] {
+					t.Fatalf("SIMD pixel %d: got %d, want %d", i, gotSIMD[i], shortData[i])
+				}
+			}
+
+			origBytes := cols * rows * 2
+			ratio := float64(origBytes) / float64(len(comp))
+			t.Logf("OK: %s (%dx%d) compressed %d→%d bytes (%.2fx)",
+				ti.name, cols, rows, origBytes, len(comp), ratio)
+		})
+	}
+}
+
+// BenchmarkMICFullCPipelineVsHTJ2K benchmarks the complete C pipeline
+// (C compress + C decompress) against HTJ2K (in-process OpenJPH).
+// This gives the fairest comparison: both codecs entirely in C/C++.
+func BenchmarkMICFullCPipelineVsHTJ2K(b *testing.B) {
+	const decompRuns = 10
+	for _, ti := range testImages {
+		byteData, shortData, maxShort, cols, rows := loadTestImage(ti)
+		if len(shortData) == 0 {
+			continue
+		}
+		origBytes := len(byteData)
+		bitDepth := bits.Len16(maxShort)
+		if bitDepth < 2 {
+			bitDepth = 2
+		}
+
+		// Pre-compress with C four-state.
+		micComp, err := MICCompressFourStateC(shortData, cols, rows)
+		if err != nil {
+			b.Logf("Skipping %s: C compress error: %v", ti.name, err)
+			continue
+		}
+
+		// Pre-compress with HTJ2K.
+		htj2kComp, err := CompressU16(shortData, cols, rows, bitDepth)
+		if err != nil {
+			b.Logf("Skipping %s: HTJ2K compress error: %v", ti.name, err)
+			continue
+		}
+
+		micRatio := float64(origBytes) / float64(len(micComp))
+		htj2kRatio := float64(origBytes) / float64(len(htj2kComp))
+
+		b.Run("MIC-4state-C/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				MICDecompressFourStateSIMD(micComp, cols, rows)
+			}
+			b.ReportMetric(micRatio, "ratio")
+		})
+
+		b.Run("HTJ2K/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				DecompressU16(htj2kComp, cols, rows)
+			}
+			b.ReportMetric(htj2kRatio, "ratio")
+		})
+		_ = decompRuns
+	}
+}
+
+// TestMICFullCPipelineSummary prints a human-readable comparison table of
+// the complete C encoder+decoder pipeline vs HTJ2K.
+func TestMICFullCPipelineSummary(t *testing.T) {
+	const decompRuns = 10
+
+	type result struct {
+		name                  string
+		w, h                  int
+		origBytes             int
+		micRatio, htj2kRatio  float64
+		micCompMs, htj2kCompMs float64
+		micDecompMs, htj2kDecompMs float64
+	}
+
+	var results []result
+
+	for _, ti := range testImages {
+		byteData, shortData, maxShort, cols, rows := loadTestImage(ti)
+		if len(shortData) == 0 {
+			t.Logf("Skipping %s: could not load", ti.name)
+			continue
+		}
+		origBytes := len(byteData)
+		bitDepth := bits.Len16(maxShort)
+		if bitDepth < 2 {
+			bitDepth = 2
+		}
+
+		// C compress (four-state).
+		cCompStart := time.Now()
+		micComp, err := MICCompressFourStateC(shortData, cols, rows)
+		if err != nil {
+			t.Logf("Skipping %s: C compress: %v", ti.name, err)
+			continue
+		}
+		micCompMs := float64(time.Since(cCompStart).Microseconds()) / 1000.0
+
+		// HTJ2K compress.
+		htj2kCompStart := time.Now()
+		htj2kComp, err := CompressU16(shortData, cols, rows, bitDepth)
+		if err != nil {
+			t.Logf("Skipping %s: HTJ2K compress: %v", ti.name, err)
+			continue
+		}
+		htj2kCompMs := float64(time.Since(htj2kCompStart).Microseconds()) / 1000.0
+
+		// MIC decompress (C SIMD, best of N).
+		micMin := time.Duration(math.MaxInt64)
+		for i := 0; i < decompRuns; i++ {
+			start := time.Now()
+			MICDecompressFourStateSIMD(micComp, cols, rows)
+			if d := time.Since(start); d < micMin {
+				micMin = d
+			}
+		}
+
+		// HTJ2K decompress (best of N).
+		htj2kMin := time.Duration(math.MaxInt64)
+		for i := 0; i < decompRuns; i++ {
+			start := time.Now()
+			DecompressU16(htj2kComp, cols, rows)
+			if d := time.Since(start); d < htj2kMin {
+				htj2kMin = d
+			}
+		}
+
+		results = append(results, result{
+			name:         ti.name,
+			w: cols, h: rows,
+			origBytes:    origBytes,
+			micRatio:     float64(origBytes) / float64(len(micComp)),
+			htj2kRatio:   float64(origBytes) / float64(len(htj2kComp)),
+			micCompMs:    micCompMs,
+			htj2kCompMs:  htj2kCompMs,
+			micDecompMs:  float64(micMin.Microseconds()) / 1000.0,
+			htj2kDecompMs: float64(htj2kMin.Microseconds()) / 1000.0,
+		})
+	}
+
+	fmt.Println()
+	fmt.Println("=== MIC (Full C 4-State Pipeline) vs HTJ2K — In-Process, No Subprocess ===")
+	fmt.Println()
+	fmt.Printf("MIC encoder: C (Delta→RLE→FSE 4-state). MIC decoder: C SIMD.\n")
+	fmt.Printf("HTJ2K: OpenJPH via CGO. Decompression = best of %d runs.\n", decompRuns)
+	fmt.Println()
+	fmt.Printf("%-6s  %8s  %10s  %7s  %7s  %9s  %9s  %9s  %9s  %8s  %10s  %8s\n",
+		"Image", "Orig(MB)", "WxH",
+		"MIC-r", "HTJ2K-r",
+		"MIC-c(ms)", "HTJ2K-c(ms)",
+		"MIC-d(ms)", "HTJ2K-d(ms)",
+		"MIC GB/s", "HTJ2K GB/s", "Speedup")
+	sep := "------  --------  ----------  -------  -------  ---------  -----------  ---------  -----------  --------  ----------  --------"
+	fmt.Println(sep)
+
+	var geoSpeedup float64
+	count := 0
+	for _, r := range results {
+		origMB := float64(r.origBytes) / (1 << 20)
+		micGBs := (float64(r.origBytes) / (1 << 30)) / (r.micDecompMs / 1000.0)
+		htj2kGBs := (float64(r.origBytes) / (1 << 30)) / (r.htj2kDecompMs / 1000.0)
+		speedup := micGBs / htj2kGBs
+		fmt.Printf("%-6s  %8.2f  %4dx%-4d  %7.2f  %7.2f  %9.1f  %11.1f  %9.2f  %11.2f  %8.2f  %10.2f  %7.2fx\n",
+			r.name, origMB, r.w, r.h,
+			r.micRatio, r.htj2kRatio,
+			r.micCompMs, r.htj2kCompMs,
+			r.micDecompMs, r.htj2kDecompMs,
+			micGBs, htj2kGBs, speedup)
+		geoSpeedup += math.Log(speedup)
+		count++
+	}
+	fmt.Println(sep)
+	if count > 0 {
+		fmt.Printf("\nGeometric mean decompression speedup (MIC-C-4state-SIMD / HTJ2K): %.2fx\n",
+			math.Exp(geoSpeedup/float64(count)))
 	}
 }

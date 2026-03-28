@@ -142,13 +142,20 @@
     <button id="loadTestCR4s" style="border-color:#2196f3;color:#2196f3">CR 4-state</button>
     <button id="loadTestMG14s" style="border-color:#2196f3;color:#2196f3">MG1 4-state</button>
     <span style="color:#555">|</span>
+    <button id="loadTestMRpics"  style="border-color:#ff9800;color:#ff9800">MR PICS-4</button>
+    <button id="loadTestCTpics"  style="border-color:#ff9800;color:#ff9800">CT PICS-4</button>
+    <button id="loadTestCRpics"  style="border-color:#ff9800;color:#ff9800">CR PICS-8</button>
+    <button id="loadTestMG1pics" style="border-color:#ff9800;color:#ff9800">MG1 PICS-8</button>
+    <span style="color:#555">|</span>
     <label>Decoder:
       <select id="decoderType">
-        <option value="js" selected>JavaScript</option>
+        <option value="js" selected>JavaScript (sequential)</option>
+        <option value="js-parallel">JS Parallel (Workers)</option>
         <option value="wasm">Go WASM</option>
       </select>
     </label>
     <span id="wasmStatus" style="font-size:0.75em;color:#555"></span>
+    <span id="parallelStatus" style="font-size:0.75em;color:#555"></span>
     <span style="color:#555">|</span>
     <label>Width: <input type="number" id="rawWidth" value="512" min="1"></label>
     <label>Height: <input type="number" id="rawHeight" value="512" min="1"></label>
@@ -211,8 +218,13 @@
 <script type="module">
 import { MICDecoder } from './mic-decoder.js';
 import { loadMICWasm } from './mic-decoder-wasm.js';
+import { createPICSDecoder } from './mic-decoder-parallel.js';
+
+const PICS_MAGIC_LE = 0x53434950; // "PICS"
 
 let wasmDecoder = null;
+let parallelDecoder = null;
+
 // Eagerly load WASM in background
 loadMICWasm().then(d => {
   wasmDecoder = d;
@@ -223,9 +235,23 @@ loadMICWasm().then(d => {
   document.getElementById('wasmStatus').style.color = '#f44336';
 });
 
+// Eagerly initialise the Web Worker pool
+createPICSDecoder().then(d => {
+  parallelDecoder = d;
+  const el = document.getElementById('parallelStatus');
+  const sab = d._sabAvailable;
+  el.textContent = sab ? '(Workers ready — SAB)' : '(Workers ready — transfer)';
+  el.style.color = sab ? '#ff9800' : '#aaa';
+}).catch(e => {
+  const el = document.getElementById('parallelStatus');
+  el.textContent = '(Workers unavailable)';
+  el.style.color = '#f44336';
+});
+
 function getDecoder() {
   const type = document.getElementById('decoderType').value;
   if (type === 'wasm' && wasmDecoder) return { impl: wasmDecoder, name: 'WASM' };
+  if (type === 'js-parallel' && parallelDecoder) return { impl: parallelDecoder, name: 'JS-Parallel' };
   return { impl: MICDecoder, name: 'JavaScript' };
 }
 
@@ -529,9 +555,45 @@ async function decodeMicFile(data) {
 
   try {
     const t0 = performance.now();
-    const result = decoder.decodeFile(fileBytes);
+    let result;
+    if (decoderName === 'JS-Parallel') {
+      const magic = new DataView(data).getUint32(0, true);
+      if (magic === PICS_MAGIC_LE) {
+        result = await parallelDecoder.decodePICS(fileBytes);
+      } else {
+        log('Not a PICS file — using JS sequential fallback', 'info');
+        result = MICDecoder.decodeFile(fileBytes);
+      }
+    } else {
+      result = decoder.decodeFile(fileBytes);
+    }
     const t1 = performance.now();
     const elapsed = t1 - t0;
+
+    // ─── PICS parallel strips path ──────────────────────────────
+    if (result.isPICS) {
+      currentPixels = result.pixels;
+      currentWidth = result.width;
+      currentHeight = result.height;
+      const origSize = result.width * result.height * 2;
+      const compSize = data.byteLength;
+      const modeTag = result.sabMode === true ? ' SAB' : result.sabMode === false ? ' transfer' : '';
+      log(`PICS: ${result.width}x${result.height}, ${result.numStrips} strips decoded in ${elapsed.toFixed(2)} ms${modeTag}`, 'success');
+      log(`Throughput: ${(origSize / elapsed / 1000).toFixed(1)} MB/s`, 'timing');
+      $('stats').style.display = 'grid';
+      $('statDims').textContent = `${result.width} x ${result.height} (${result.numStrips} strips)`;
+      $('statComp').textContent = formatBytes(compSize);
+      $('statOrig').textContent = formatBytes(origSize);
+      $('statRatio').textContent = (origSize / compSize).toFixed(2) + ':1';
+      $('statTime').textContent = elapsed.toFixed(2) + ' ms';
+      $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+      $('wlControls').style.display = 'flex';
+      const { window, level } = autoWindowLevel(currentPixels);
+      $('wlWindow').value = window;
+      $('wlLevel').value = level;
+      updateDisplay();
+      return;
+    }
 
     // ─── MIC3 WSI Path ──────────────────────────────────────────
     if (result.isMIC3) {
@@ -746,6 +808,11 @@ $('loadTestMR4s').addEventListener('click', () => loadTestFile('MR_4s'));
 $('loadTestCT4s').addEventListener('click', () => loadTestFile('CT_4s'));
 $('loadTestCR4s').addEventListener('click', () => loadTestFile('CR_4s'));
 $('loadTestMG14s').addEventListener('click', () => loadTestFile('MG1_4s'));
+
+$('loadTestMRpics').addEventListener('click',  () => loadTestFile('MR_pics4'));
+$('loadTestCTpics').addEventListener('click',  () => loadTestFile('CT_pics4'));
+$('loadTestCRpics').addEventListener('click',  () => loadTestFile('CR_pics8'));
+$('loadTestMG1pics').addEventListener('click', () => loadTestFile('MG1_pics8'));
 
 // WSI level selector
 $('wsiLevelSelect').addEventListener('change', () => {

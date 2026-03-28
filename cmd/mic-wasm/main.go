@@ -71,6 +71,21 @@ func decodeMicFile(_ js.Value, args []js.Value) interface{} {
 
 	magic := string(data[0:4])
 
+	if magic == "PICS" {
+		pixels, width, height, err := mic.DecompressParallelStrips(data)
+		if err != nil {
+			return jsError("PICS decompress: " + err.Error())
+		}
+		numStrips := int(binary.LittleEndian.Uint32(data[12:16]))
+		result := js.Global().Get("Object").New()
+		result.Set("pixels", uint16SliceToJS(pixels))
+		result.Set("width", width)
+		result.Set("height", height)
+		result.Set("isPICS", true)
+		result.Set("numStrips", numStrips)
+		return result
+	}
+
 	if magic == "MIC3" {
 		return decodeMIC3FileImpl(data)
 	}
@@ -182,6 +197,34 @@ func decodeMIC2Frame(_ js.Value, args []js.Value) interface{} {
 	result.Set("pixels", uint16SliceToJS(pixels))
 	result.Set("width", hdr.Width)
 	result.Set("height", hdr.Height)
+	return result
+}
+
+// decodePICSFile decodes a PICS parallel-strip container.
+// Args: fileBytes (Uint8Array)
+// Returns: {pixels: Uint16Array, width: number, height: number, isPICS: true, numStrips: number}
+func decodePICSFile(_ js.Value, args []js.Value) interface{} {
+	if len(args) < 1 {
+		return jsError("decodePICSFile requires 1 arg: fileBytes")
+	}
+
+	jsBytes := args[0]
+	data := make([]byte, jsBytes.Length())
+	js.CopyBytesToGo(data, jsBytes)
+
+	pixels, width, height, err := mic.DecompressParallelStrips(data)
+	if err != nil {
+		return jsError("PICS decompress: " + err.Error())
+	}
+
+	numStrips := int(binary.LittleEndian.Uint32(data[12:16]))
+
+	result := js.Global().Get("Object").New()
+	result.Set("pixels", uint16SliceToJS(pixels))
+	result.Set("width", width)
+	result.Set("height", height)
+	result.Set("isPICS", true)
+	result.Set("numStrips", numStrips)
 	return result
 }
 
@@ -310,7 +353,7 @@ func decodeWSILevel(_ js.Value, args []js.Value) interface{} {
 // getVersion returns codec version info.
 func getVersion(_ js.Value, _ []js.Value) interface{} {
 	_ = bits.Len16 // ensure import
-	return "MIC WASM Decoder v3.0 (Delta+RLE+FSE, 16-bit, MIC1+MIC2+MIC3 WSI)"
+	return "MIC WASM Decoder v3.1 (Delta+RLE+FSE, 16-bit, MIC1+MIC2+MIC3 WSI+PICS)"
 }
 
 func uint16SliceToJS(data []uint16) js.Value {
@@ -330,6 +373,7 @@ func main() {
 	micWasm := js.Global().Get("Object").New()
 	micWasm.Set("decode", js.FuncOf(decodeDeltaRleFSE))
 	micWasm.Set("decodeFile", js.FuncOf(decodeMicFile))
+	micWasm.Set("decodePICS", js.FuncOf(decodePICSFile))
 	micWasm.Set("fseDecompress", js.FuncOf(fseDecompress))
 	micWasm.Set("deltaDecompress", js.FuncOf(deltaDecompress))
 	micWasm.Set("parseMIC2Header", js.FuncOf(parseMIC2Header))

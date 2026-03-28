@@ -950,11 +950,13 @@ function rleDecompress(input) {
 //   Bytes 16-19: Compressed data length (uint32 LE)
 //   Bytes 20+:   FSE compressed data
 
-const MIC_MAGIC = 0x3143494D; // "MIC1" in LE
+const MIC_MAGIC = 0x3143494D;  // "MIC1" in LE
 const MIC2_MAGIC = 0x3243494D; // "MIC2" in LE
 const MIC3_MAGIC = 0x3343494D; // "MIC3" in LE
+const PICS_MAGIC = 0x53434950; // "PICS" in LE
 const MIC2_HEADER_SIZE = 20;
 const MIC2_ENTRY_SIZE = 8;
+const PICS_HEADER_BASE = 20;   // 4+4+4+4+4 bytes before offset table
 const PIPELINE_TEMPORAL = 0x02;
 
 // MIC3 WSI constants
@@ -965,6 +967,67 @@ const PLANE_CONSTANT_ZERO = 0;
 const PLANE_CONSTANT = 1;
 const PLANE_COMPRESSED = 2;
 const PLANE_RAW = 3;
+
+// ─── PICS Parallel Strip Support ─────────────────────────────────────────────
+
+/**
+ * Parse a PICS parallel-strip header without decompressing.
+ * @param {Uint8Array} fileBytes
+ * @returns {{ width: number, height: number, numStrips: number, stripH: number,
+ *             strips: Array<{offset: number, length: number}>, dataOffset: number }}
+ */
+function parsePICSHeader(fileBytes) {
+  const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
+  if (fileBytes.length < PICS_HEADER_BASE) throw new Error('PICS: file too small');
+  const magic = dv.getUint32(0, true);
+  if (magic !== PICS_MAGIC) throw new Error('PICS: bad magic');
+
+  const width     = dv.getUint32(4,  true);
+  const height    = dv.getUint32(8,  true);
+  const numStrips = dv.getUint32(12, true);
+  const stripH    = dv.getUint32(16, true);
+
+  const dataOffset = PICS_HEADER_BASE + numStrips * 8;
+  if (fileBytes.length < dataOffset) throw new Error('PICS: truncated offset table');
+
+  const strips = [];
+  for (let s = 0; s < numStrips; s++) {
+    const tbl = PICS_HEADER_BASE + s * 8;
+    strips.push({
+      offset: dv.getUint32(tbl,     true),
+      length: dv.getUint32(tbl + 4, true),
+    });
+  }
+
+  return { width, height, numStrips, stripH, strips, dataOffset };
+}
+
+/**
+ * Decode a PICS parallel-strip file sequentially (single-threaded).
+ * @param {Uint8Array} fileBytes
+ * @returns {{ pixels: Uint16Array, width: number, height: number, isPICS: true, numStrips: number }}
+ */
+function decodePICS(fileBytes) {
+  const hdr = parsePICSHeader(fileBytes);
+  const { width, height, numStrips, stripH, strips, dataOffset } = hdr;
+
+  const out = new Uint16Array(width * height);
+
+  for (let s = 0; s < numStrips; s++) {
+    const y0 = s * stripH;
+    const y1 = Math.min(y0 + stripH, height);
+    const sh = y1 - y0;
+    const blobStart = dataOffset + strips[s].offset;
+    const blob = fileBytes.subarray(blobStart, blobStart + strips[s].length);
+
+    const fse = new FSEDecompressor();
+    const rleSymbols = fse.decompress(blob);
+    const stripPixels = deltaRleDecompress(rleSymbols, width, sh);
+    out.set(stripPixels, y0 * width);
+  }
+
+  return { pixels: out, width, height, isPICS: true, numStrips };
+}
 
 // ─── MIC2 Multiframe Support ────────────────────────────────────────────────
 
@@ -1273,6 +1336,10 @@ export const MICDecoder = {
     const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
     const magic = dv.getUint32(0, true);
 
+    if (magic === PICS_MAGIC) {
+      return decodePICS(fileBytes);
+    }
+
     if (magic === MIC3_MAGIC) {
       const hdr = parseMIC3Header(fileBytes);
       const rgb = decompressMIC3Level(fileBytes, hdr, 0);
@@ -1317,6 +1384,15 @@ export const MICDecoder = {
    */
   parseMIC2Header(fileBytes) {
     return parseMIC2Header(fileBytes);
+  },
+
+  /**
+   * Parse a PICS parallel-strip header without decompressing.
+   * @param {Uint8Array} fileBytes
+   * @returns {{ width: number, height: number, numStrips: number, stripH: number, strips: Array, dataOffset: number }}
+   */
+  parsePICSHeader(fileBytes) {
+    return parsePICSHeader(fileBytes);
   },
 
   /**

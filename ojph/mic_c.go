@@ -9,10 +9,11 @@
 package ojph
 
 /*
-#cgo CFLAGS: -O2
-#cgo amd64 CFLAGS: -msse2 -mavx2
+#cgo CFLAGS: -O3
+#cgo amd64 CFLAGS: -march=native
 #cgo LDFLAGS: -lpthread
 #include "mic_decompress_c.h"
+#include "mic_compress_c.h"
 #include "mic_parallel.h"
 */
 import "C"
@@ -124,4 +125,45 @@ func MICDecompressParallelScalarC(pics []byte, width, height, maxThreads int) ([
 		return nil, fmt.Errorf("mic_decompress_parallel_scalar failed: rc=%d", rc)
 	}
 	return pixels, nil
+}
+
+// MICCompressFourStateC compresses 16-bit pixels using the full C pipeline:
+// Delta encode → RLE encode → FSE four-state encode.
+// The output is compatible with MICDecompressFourStateC and MICDecompressFourStateSIMD.
+func MICCompressFourStateC(pixels []uint16, width, height int) ([]byte, error) {
+	outCap := len(pixels)*2*2 + 4096
+	out := make([]byte, outCap)
+	var outLen C.size_t
+
+	rc := C.mic_compress_four_state(
+		(*C.uint16_t)(unsafe.Pointer(&pixels[0])),
+		C.int(width), C.int(height),
+		(*C.uint8_t)(unsafe.Pointer(&out[0])),
+		C.size_t(outCap),
+		&outLen,
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("mic_compress_four_state failed: rc=%d", rc)
+	}
+	return out[:outLen], nil
+}
+
+// MICCompressTwoStateC compresses 16-bit pixels using the C two-state pipeline.
+// The output is compatible with MICDecompressTwoStateC and MICDecompressTwoStateSIMD.
+func MICCompressTwoStateC(pixels []uint16, width, height int) ([]byte, error) {
+	outCap := len(pixels)*2*2 + 4096
+	out := make([]byte, outCap)
+	var outLen C.size_t
+
+	rc := C.mic_compress_two_state(
+		(*C.uint16_t)(unsafe.Pointer(&pixels[0])),
+		C.int(width), C.int(height),
+		(*C.uint8_t)(unsafe.Pointer(&out[0])),
+		C.size_t(outCap),
+		&outLen,
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("mic_compress_two_state failed: rc=%d", rc)
+	}
+	return out[:outLen], nil
 }

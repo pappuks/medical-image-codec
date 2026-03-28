@@ -90,6 +90,11 @@ const tests = [
   { mic: 'testdata/MG1_4s.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 4-state (1996x2457)' },
   { mic: 'testdata/MG2_4s.mic', raw: '../testdata/MG_Image_2_frame.bin', name: 'MG2 4-state (1996x2457)' },
   { mic: 'testdata/MG3_4s.mic', raw: '../testdata/MG1.RAW', name: 'MG3 4-state (3064x4774)' },
+  // PICS parallel strip variants (4-state FSE per strip, decoded sequentially in JS)
+  { mic: 'testdata/MR_pics4.mic', raw: '../testdata/MR_256_256_image.bin', name: 'MR PICS-4 (256x256)' },
+  { mic: 'testdata/CT_pics4.mic', raw: '../testdata/CT_512_512_image.bin', name: 'CT PICS-4 (512x512)' },
+  { mic: 'testdata/CR_pics8.mic', raw: '../testdata/CR_1760_2140_image.bin', name: 'CR PICS-8 (1760x2140)' },
+  { mic: 'testdata/MG1_pics8.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 PICS-8 (1996x2457)' },
 ];
 
 let passed = 0;

@@ -123,6 +123,76 @@ func CompressParallelStrips(pixels []uint16, width, height int, maxValue uint16,
 	return out, nil
 }
 
+// CompressParallelStrips4State is like CompressParallelStrips but compresses each
+// strip with the 4-state FSE encoder instead of the default 2-state encoder.
+func CompressParallelStrips4State(pixels []uint16, width, height int, maxValue uint16, numStrips int) ([]byte, error) {
+	if len(pixels) != width*height {
+		return nil, fmt.Errorf("parallelstrips: pixel count %d != width*height %d", len(pixels), width*height)
+	}
+	if numStrips <= 0 {
+		numStrips = runtime.GOMAXPROCS(0)
+	}
+	if numStrips > height {
+		numStrips = height
+	}
+	if numStrips < 1 {
+		numStrips = 1
+	}
+
+	stripH := (height + numStrips - 1) / numStrips
+	actual := (height + stripH - 1) / stripH
+
+	results := make([][]byte, actual)
+	errs := make([]error, actual)
+
+	var wg sync.WaitGroup
+	for s := 0; s < actual; s++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			y0 := idx * stripH
+			y1 := y0 + stripH
+			if y1 > height {
+				y1 = height
+			}
+			sh := y1 - y0
+			blob, err := CompressSingleFrame4State(pixels[y0*width:y1*width], width, sh, maxValue)
+			results[idx] = blob
+			errs[idx] = err
+		}(s)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			return nil, fmt.Errorf("parallelstrips: strip %d: %w", i, err)
+		}
+	}
+
+	headerSize := picsHeaderBase + actual*8
+	totalData := 0
+	for _, r := range results {
+		totalData += len(r)
+	}
+
+	out := make([]byte, headerSize+totalData)
+	copy(out[0:4], picsMagic)
+	binary.LittleEndian.PutUint32(out[4:8], uint32(width))
+	binary.LittleEndian.PutUint32(out[8:12], uint32(height))
+	binary.LittleEndian.PutUint32(out[12:16], uint32(actual))
+	binary.LittleEndian.PutUint32(out[16:20], uint32(stripH))
+
+	offset := 0
+	for s, r := range results {
+		tblOff := picsHeaderBase + s*8
+		binary.LittleEndian.PutUint32(out[tblOff:tblOff+4], uint32(offset))
+		binary.LittleEndian.PutUint32(out[tblOff+4:tblOff+8], uint32(len(r)))
+		copy(out[headerSize+offset:], r)
+		offset += len(r)
+	}
+	return out, nil
+}
+
 // DecompressParallelStrips recovers an image from a PICS blob produced by
 // CompressParallelStrips.  All strips are decompressed concurrently.
 // Returns pixels (row-major, uint16), width, height.

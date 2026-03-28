@@ -116,6 +116,17 @@ export async function loadMICWasm(wasmPath = 'mic-decoder.wasm') {
     },
 
     /**
+     * Decode a PICS parallel-strip container.
+     * @param {Uint8Array} fileBytes
+     * @returns {{ pixels: Uint16Array, width: number, height: number, isPICS: true, numStrips: number }}
+     */
+    decodePICS(fileBytes) {
+      const result = wasm.decodePICS(fileBytes);
+      if (result instanceof Error) throw result;
+      return result;
+    },
+
+    /**
      * Decode all tiles at a specific WSI pyramid level.
      * @param {Uint8Array} fileBytes - Complete MIC3 file
      * @param {number} levelIdx - Pyramid level (0 = full resolution)

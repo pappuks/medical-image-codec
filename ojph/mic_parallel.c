@@ -189,28 +189,47 @@ static int decompress_parallel_impl(const uint8_t *compressed, size_t compressed
 }
 
 // ---------------------------------------------------------------------------
+// Auto-detecting inner decoder
+// ---------------------------------------------------------------------------
+//
+// MIC strip blobs carry a format byte at offset 1:
+//   0x02 → two-state FSE (produced by CompressSingleFrame / Go PICS)
+//   0x04 → four-state FSE (produced by MICCompressFourStateC / C pipeline)
+//
+// mic_decompress_auto_simd inspects that byte and dispatches to the
+// appropriate SIMD-optimised decoder, so mic_decompress_parallel works
+// transparently with PICS blobs produced by either the Go or C encoder.
+
+static int mic_decompress_auto_simd(const uint8_t *data, size_t len,
+                                    uint16_t *out, int w, int h) {
+    if (len >= 2 && data[1] == 0x04)
+        return mic_decompress_four_state_simd(data, len, out, w, h);
+    return mic_decompress_two_state_simd(data, len, out, w, h);
+}
+
+static int mic_decompress_auto_scalar(const uint8_t *data, size_t len,
+                                      uint16_t *out, int w, int h) {
+    if (len >= 2 && data[1] == 0x04)
+        return mic_decompress_four_state(data, len, out, w, h);
+    return mic_decompress_two_state(data, len, out, w, h);
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-
-// Choose the best available inner decoder for this platform.
-// On AMD64: four-state SIMD (SSE2 RLE/delta fill + scalar FSE).
-// On ARM64 and others: scalar four-state (NEON acceleration is not yet wired
-//   into mic_decompress_four_state_simd; use the scalar path which is already
-//   fast due to the 4-state FSE ILP).
-static decomp_fn_t best_decomp_fn(void) {
-#if defined(__x86_64__) || defined(_M_X64)
-    return mic_decompress_four_state_simd;
-#else
-    return mic_decompress_four_state;
-#endif
-}
 
 int mic_decompress_parallel(const uint8_t *compressed, size_t compressed_len,
                             uint16_t *pixels_out, int width, int height,
                             int max_threads) {
+#if defined(__x86_64__) || defined(_M_X64)
     return decompress_parallel_impl(compressed, compressed_len,
                                     pixels_out, width, height,
-                                    max_threads, best_decomp_fn());
+                                    max_threads, mic_decompress_auto_simd);
+#else
+    return decompress_parallel_impl(compressed, compressed_len,
+                                    pixels_out, width, height,
+                                    max_threads, mic_decompress_auto_scalar);
+#endif
 }
 
 int mic_decompress_parallel_scalar(const uint8_t *compressed, size_t compressed_len,
@@ -218,5 +237,5 @@ int mic_decompress_parallel_scalar(const uint8_t *compressed, size_t compressed_
                                    int max_threads) {
     return decompress_parallel_impl(compressed, compressed_len,
                                     pixels_out, width, height,
-                                    max_threads, mic_decompress_four_state);
+                                    max_threads, mic_decompress_auto_scalar);
 }
