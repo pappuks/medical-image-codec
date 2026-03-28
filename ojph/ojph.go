@@ -12,8 +12,8 @@
 package ojph
 
 /*
-#cgo CXXFLAGS: -O2 -I/usr/local/include
-#cgo LDFLAGS: -L/usr/local/lib -lopenjph -lstdc++ -Wl,-rpath,/usr/local/lib
+#cgo CXXFLAGS: -O2 -I/usr/local/include -I/home/dibba/.local/include
+#cgo LDFLAGS: -L/usr/local/lib -L/home/dibba/.local/lib -lopenjph -lstdc++ -Wl,-rpath,/usr/local/lib -Wl,-rpath,/home/dibba/.local/lib
 #include <stdint.h>
 #include <stddef.h>
 

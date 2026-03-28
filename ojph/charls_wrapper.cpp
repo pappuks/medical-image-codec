@@ -1,7 +1,7 @@
 // charls_wrapper.cpp — C wrapper around CharLS C++ API for JPEG-LS compress/decompress.
 
 #include "charls_wrapper.h"
-#include <charls/charls.h>
+#include <charls/charls.hpp>
 #include <cstring>
 #include <vector>
 

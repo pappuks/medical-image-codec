@@ -257,6 +257,36 @@ For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compressio
 
 MIC-4state-C/SIMD and PICS require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best multi-threaded (PICS) throughput per row. ⚠ MR (256×256) is too small for PICS — goroutine overhead eliminates the parallelism benefit.
 
+---
+
+**Decompression throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` (`-tags cgo_ojph`, `-benchtime=10x`). PICS-N decompresses a single image using N goroutines in parallel.
+
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-2 | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
+|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:------:|:------:|:------:|:-----:|:-------:|
+| MR (256×256) | 0.13 | 249 | 268 | 452 | 519 | 194 | **257** | 238 | 169 ⚠ | _630_ | 126 |
+| CT (512×512) | 0.50 | 260 | 268 | 458 | 421 | 364 | 279 | **473** | 456 | _507_ | 153 |
+| CR (2140×1760) | 7.18 | 329 | 342 | 558 | 534 | _723_ | 518 | 861 | **1221** | 675 | 182 |
+| XR (2048×2577) | 10.1 | 336 | 376 | 586 | 568 | _681_ | 597 | 1093 | **1626** | 588 | 110 |
+| MG1 (2457×1996) | 9.35 | 525 | 587 | 781 | 790 | 746 | 897 | 1352 | **2254** | _1334_ | 474 |
+| MG2 (2457×1996) | 9.35 | 617 | 611 | 767 | 794 | 848 | 812 | 1255 | **2279** | _1277_ | 463 |
+| MG3 (4774×3064) | 27.3 | 370 | 395 | 544 | 491 | 678 | 559 | 1043 | **1660** | _578_ | 160 |
+| MG4 (4096×3328) | 26.0 | 521 | 518 | 724 | 598 | _808_ | 783 | 1340 | **1791** | 890 | 208 |
+| CT1 (512×512) | 0.50 | 309 | 352 | 524 | _545_ | 525 | 305 | **446** | 419 | 614 | 188 |
+| CT2 (512×512) | 0.50 | 331 | 347 | 516 | 495 | _705_ | 325 | 384 | **432** | 623 | 192 |
+| MG-N (3064×4664) | 27.3 | 395 | 406 | 580 | 490 | _705_ | 557 | 1058 | **1633** | 616 | 159 |
+| MR1 (512×512) | 0.50 | 362 | 388 | 574 | _605_ | 532 | 300 | **468** | 365 | 526 | 131 |
+| MR2 (1024×1024) | 2.00 | 348 | 412 | 586 | 635 | 601 | 464 | 979 | **1357** | _688_ | 193 |
+| MR3 (512×512) | 0.50 | 466 | 481 | 621 | 683 | _676_ | 311 | **488** | 454 | 821 | 273 |
+| MR4 (512×512) | 0.50 | 370 | 375 | 626 | 650 | _738_ | 477 | **540** | 523 | 694 | 220 |
+| NM1 (256×1024) | 0.50 | 385 | 396 | _668_ | 588 | 715 | 311 | **586** | 406 | 712 | 253 |
+| RG1 (1841×1955) | 6.86 | 323 | 362 | 511 | 512 | _705_ | 450 | 836 | **1189** | 527 | 101 |
+| RG2 (1760×2140) | 7.18 | 444 | 460 | 666 | 578 | _811_ | 600 | 1013 | **1783** | _811_ | 220 |
+| RG3 (1760×1760) | 5.91 | 416 | 450 | 654 | 624 | _881_ | 673 | 1258 | **1863** | 956 | 286 |
+| SC1 (2048×2487) | 9.71 | 459 | 496 | 667 | 608 | _710_ | 635 | 1171 | **1716** | 691 | 245 |
+| XA1 (1024×1024) | 2.00 | 367 | 363 | 672 | _702_ | 538 | 454 | 923 | **1212** | 758 | 254 |
+
+MIC-4state-C/SIMD and PICS require CGO (`-tags cgo_ojph`); all other MIC variants are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best multi-threaded (PICS) throughput per row. ⚠ MR (256×256) is too small for PICS — goroutine overhead eliminates the parallelism benefit. On this CPU, PICS-8 also shows diminishing returns on all 0.5 MB images (CT1, CT2, MR1, MR3, MR4, NM1) — use PICS-4 or single-threaded MIC-4state-SIMD instead. Notable: Wavelet+SIMD leads single-threaded on CR, XR, MG4, CT2, MG-N, MR3, MR4, RG1–RG3, SC1 — 11 of 21 images. MIC-4state-SIMD leads on MR1 (605 MB/s vs HTJ2K 526 MB/s).
+
 **When to use which:**
 - **Pure Go, simplest integration** → MIC-Go: ~135–490 MB/s, zero dependencies.
 - **Best single-core throughput** → MIC-4state-C or MIC-4state-SIMD: 1.5–1.8× faster than MIC-Go via CGO.
