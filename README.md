@@ -1,6 +1,8 @@
 # MIC — Medical Image Codec
 
-A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC achieves JPEG 2000–comparable compression ratios with significantly higher decompression throughput — up to **16 GB/s** on mammography (best case; geometric mean ~7.5 GB/s across modalities on 64 cores).
+A **lossless compression codec for 16-bit DICOM images** with implementations in Go, C/SIMD assembly, and browser-native JavaScript/WebAssembly. MIC beats HTJ2K (High-Throughput JPEG 2000) in decompression speed on all tested modalities while matching or exceeding its compression ratio on 7 of 8 — packaged in ~500 lines of core Go and a 15 KB zero-dependency JS decoder.
+
+The key insight: DICOM stores pixels at 10–16 bits per sample, but every mainstream codec (Zstandard, JPEG 2000, JPEG-LS) was designed for 8-bit byte streams. Treating a 16-bit residual as two bytes discards the mutual information between them, inflating compressed output by 10–22%. MIC's 16-bit-native RLE+FSE pipeline closes that gap directly.
 
 | Branch | Status |
 |--------|--------|
@@ -11,11 +13,17 @@ A **lossless compression codec for 16-bit DICOM images**, implemented in Go. MIC
 | Property | Value |
 |----------|-------|
 | Compression ratio | 1.7× – 8.9× greyscale; 3–5× RGB tissue tiles (lossless) |
+| vs. HTJ2K ratio | Matches or exceeds on 7/8 modalities (wavelet pipeline) |
 | Peak decompression speed | up to 16 GB/s (ARM64, 64 cores); ~7.5 GB/s geometric mean |
+| vs. HTJ2K speed | Faster on all 8 modalities (single-thread); PICS-C-8 exceeds HTJ2K on all 21 test images |
+| vs. JPEG-LS | Consistently faster decompression; better or equal ratio |
+| vs. Delta+Zstandard | 10–22% better compression ratio (16-bit alphabet advantage) |
+| Implementations | Pure Go · C + pthreads + BMI2/NEON SIMD · JavaScript ES module · Go WebAssembly |
+| Browser throughput | up to 483 MB/s (12-core, PICS parallel strips via `worker_threads`) |
 | Supported formats | 8–16 bit greyscale; 8-bit RGB (WSI/pathology) |
 | Multi-frame support | MIC2 container (random access or temporal prediction) |
 | WSI support | MIC3 tiled container with pyramid levels and parallel encode/decode |
-| Browser support | JavaScript + WASM decoder (greyscale + RGB WSI) |
+| Footprint | ~15 KB JS decoder (zero dependencies); no native libs required for browser use |
 
 ---
 
