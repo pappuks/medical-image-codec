@@ -136,6 +136,13 @@
     <button id="loadTestCTMulti">CT Multi (203 frames)</button>
     <span style="color:#555">|</span>
     <button id="loadTestWSI" style="border-color:#4caf50;color:#4caf50">WSI Tissue (512x384)</button>
+    <button id="loadTestUS1" style="border-color:#ce93d8;color:#ce93d8">US1</button>
+    <button id="loadTestVL1" style="border-color:#ce93d8;color:#ce93d8">VL1</button>
+    <button id="loadTestVL2" style="border-color:#ce93d8;color:#ce93d8">VL2</button>
+    <button id="loadTestVL3" style="border-color:#ce93d8;color:#ce93d8">VL3</button>
+    <button id="loadTestVL4" style="border-color:#ce93d8;color:#ce93d8">VL4</button>
+    <button id="loadTestVL5" style="border-color:#ce93d8;color:#ce93d8">VL5</button>
+    <button id="loadTestVL6" style="border-color:#ce93d8;color:#ce93d8">VL6</button>
     <span style="color:#555">|</span>
     <button id="loadTestMR4s" style="border-color:#2196f3;color:#2196f3">MR 4-state</button>
     <button id="loadTestCT4s" style="border-color:#2196f3;color:#2196f3">CT 4-state</button>
@@ -225,6 +232,7 @@ import { loadMICWasm } from './mic-decoder-wasm.js';
 import { createPICSDecoder } from './mic-decoder-parallel.js';
 
 const PICS_MAGIC_LE = 0x53434950; // "PICS"
+const MICR_MAGIC_LE = 0x5243494D; // "MICR"
 
 let wasmDecoder = null;
 let parallelDecoder = null;
@@ -564,8 +572,10 @@ async function decodeMicFile(data) {
       const magic = new DataView(data).getUint32(0, true);
       if (magic === PICS_MAGIC_LE) {
         result = await parallelDecoder.decodePICS(fileBytes);
+      } else if (magic === MICR_MAGIC_LE) {
+        result = await parallelDecoder.decodeRGBParallel(fileBytes);
       } else {
-        log('Not a PICS file — using JS sequential fallback', 'info');
+        log('Not a PICS or MICR file — using JS sequential fallback', 'info');
         result = MICDecoder.decodeFile(fileBytes);
       }
     } else {
@@ -596,6 +606,30 @@ async function decodeMicFile(data) {
       $('wlWindow').value = window;
       $('wlLevel').value = level;
       updateDisplay();
+      return;
+    }
+
+    // ─── MICR Single-Frame RGB Path (US/VL) ─────────────────────
+    if (result.isMICR) {
+      currentRGB = result.rgb;
+      currentWidth = result.width;
+      currentHeight = result.height;
+
+      const origSize = result.width * result.height * 3;
+      const compSize = data.byteLength;
+
+      log(`MICR RGB: ${result.width}x${result.height} decoded in ${elapsed.toFixed(2)} ms`, 'success');
+      log(`Throughput: ${(origSize / elapsed / 1000).toFixed(1)} MB/s`, 'timing');
+
+      $('stats').style.display = 'grid';
+      $('statDims').textContent = `${result.width} x ${result.height} (RGB)`;
+      $('statComp').textContent = formatBytes(compSize);
+      $('statOrig').textContent = formatBytes(origSize);
+      $('statRatio').textContent = (origSize / compSize).toFixed(2) + ':1';
+      $('statTime').textContent = elapsed.toFixed(2) + ' ms';
+      $('statThroughput').textContent = (origSize / elapsed / 1000).toFixed(1) + ' MB/s';
+
+      renderRGBImage(currentRGB, currentWidth, currentHeight);
       return;
     }
 
@@ -808,6 +842,13 @@ $('loadTestMG3').addEventListener('click', () => loadTestFile('MG3'));
 $('loadTestTOMO').addEventListener('click', () => loadTestFile('MG_TOMO'));
 $('loadTestCTMulti').addEventListener('click', () => loadTestFile('CT_MULTI'));
 $('loadTestWSI').addEventListener('click', () => loadTestFile('WSI_TISSUE'));
+$('loadTestUS1').addEventListener('click', () => loadTestFile('US1'));
+$('loadTestVL1').addEventListener('click', () => loadTestFile('VL1'));
+$('loadTestVL2').addEventListener('click', () => loadTestFile('VL2'));
+$('loadTestVL3').addEventListener('click', () => loadTestFile('VL3'));
+$('loadTestVL4').addEventListener('click', () => loadTestFile('VL4'));
+$('loadTestVL5').addEventListener('click', () => loadTestFile('VL5'));
+$('loadTestVL6').addEventListener('click', () => loadTestFile('VL6'));
 $('loadTestMR4s').addEventListener('click', () => loadTestFile('MR_4s'));
 $('loadTestCT4s').addEventListener('click', () => loadTestFile('CT_4s'));
 $('loadTestCR4s').addEventListener('click', () => loadTestFile('CR_4s'));

@@ -88,6 +88,18 @@ export class PICSSABDecoder {
 
   /** @private */
   _onWorkerMessage(msg) {
+    if (msg.type === 'plane-done') {
+      const entry = this._pending.get(`plane-${msg.planeIndex}`);
+      if (!entry) return;
+      this._pending.delete(`plane-${msg.planeIndex}`);
+      if (msg.error) {
+        entry.reject(new Error(`plane ${msg.planeIndex}: ${msg.error}`));
+      } else {
+        entry.resolve(msg.planeBuf);
+      }
+      return;
+    }
+
     if (msg.type !== 'strip-done') return;
 
     const entry = this._pending.get(msg.stripIndex);
@@ -202,6 +214,57 @@ export class PICSSABDecoder {
       numStrips,
       sabMode: this._sabAvailable,
     };
+  }
+
+  /**
+   * Decode a MICR single-frame RGB file by dispatching Y, Co, Cg planes to
+   * three workers in parallel, then applying the YCoCg-R inverse on the main
+   * thread once all planes are ready.
+   *
+   * Always uses transferable ArrayBuffers (the plane blobs are small enough
+   * that SAB gives no meaningful advantage over a single copy per plane).
+   *
+   * @param {Uint8Array} fileBytes - Complete MICR file.
+   * @returns {Promise<{ rgb: Uint8Array, width: number, height: number, isMICR: true }>}
+   */
+  async decodeRGBParallel(fileBytes) {
+    if (!this._ready) await this.init();
+
+    const { width, height, yBlob, coBlob, cgBlob } =
+      MICDecoder.parseMICRPlanes(fileBytes);
+
+    const planeBlobs = [yBlob, coBlob, cgBlob];
+    const planeBufs  = new Array(3);
+
+    const promises = planeBlobs.map((blob, i) => {
+      const key = `plane-${i}`;
+      return new Promise((resolve, reject) => {
+        this._pending.set(key, {
+          resolve: (buf) => { planeBufs[i] = buf; resolve(); },
+          reject,
+        });
+
+        // Copy this plane's bytes into a fresh ArrayBuffer so we can transfer it.
+        const planeBlobBuffer = blob.buffer.slice(
+          blob.byteOffset,
+          blob.byteOffset + blob.byteLength,
+        );
+        const worker = this._workers[i % this._workers.length];
+        worker.postMessage(
+          { type: 'decode-rgb-plane', planeIndex: i, width, height, planeBlobBuffer },
+          [planeBlobBuffer],
+        );
+      });
+    });
+
+    await Promise.all(promises);
+
+    const y  = new Uint16Array(planeBufs[0]);
+    const co = new Uint16Array(planeBufs[1]);
+    const cg = new Uint16Array(planeBufs[2]);
+    const rgb = MICDecoder.applyYCoCgRInverse(y, co, cg, width, height);
+
+    return { rgb, width, height, isMICR: true };
   }
 
   /**

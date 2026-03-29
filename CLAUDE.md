@@ -263,6 +263,33 @@ Key functions: `CompressWSI`, `DecompressWSITile`, `DecompressWSIRegion`, `ReadW
 
 Per-plane encoding modes: `planeConstantZero` (1 byte), `planeConstant` (3 bytes: mode + uint16), `planeCompressed` (CompressSingleFrame), `planeRaw` (fallback for incompressible data).
 
+### Single-Frame RGB / MICR Format (Ultrasound, Visible Light)
+
+Single-frame RGB images (US, VL) use `CompressRGB`/`DecompressRGB` — **not** `CompressWSI`. The pipeline is identical (YCoCg-R → Delta+RLE+FSE per plane) but operates on the whole image without tiling.
+
+**Critical**: Using `CompressWSI` for single-frame US/VL images causes 30–45% ratio loss because the delta predictor restarts at every 256×256 tile boundary, destroying spatial correlation. Always use `CompressRGB` for non-tiled images.
+
+The output blob has no magic or dimension metadata; for browser delivery it is wrapped in a **MICR container** written by `cmd/mic-compress`:
+
+```
+MICR format:
+  Bytes 0-3:  Magic "MICR" (0x4D 0x49 0x43 0x52)
+  Bytes 4-7:  Width  (uint32 LE)
+  Bytes 8-11: Height (uint32 LE)
+  Bytes 12+:  CompressRGB blob ([Y_len][Co_len][Cg_len][Y_data][Co_data][Cg_data])
+```
+
+The JS decoder (`web/mic-decoder.js`) detects `MICR_MAGIC` in `decodeFile` and calls `decompressRGBTileBlob(blob, width, height, true)` — the same function used for MIC3 tiles. `index.html` handles `result.isMICR` separately from `result.isMIC3` (no pyramid level selector shown).
+
+Compression ratios on NEMA compsamples (lossless, Delta+RLE+FSE with YCoCg-R):
+- US1 (640×480): 6.24×
+- VL1–VL3 (756×486): 3.2–3.5×
+- VL4 (2226×1868): 1.86×
+- VL5 (2670×3340): 1.56×
+- VL6 (756×486): 1.93×
+
+Key files: `rgbcompress.go` (`CompressRGB`/`DecompressRGB`), `rgbbench_test.go` (benchmarks + `ReadTIFFRGB`), `cmd/mic-compress/main.go` (`writeMICRFile`, `readTIFFRGB`, `rgbTIFFTestImages`).
+
 ## Test Data
 
 Test images in `testdata/`:

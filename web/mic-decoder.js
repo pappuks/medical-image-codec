@@ -950,9 +950,10 @@ function rleDecompress(input) {
 //   Bytes 16-19: Compressed data length (uint32 LE)
 //   Bytes 20+:   FSE compressed data
 
-const MIC_MAGIC = 0x3143494D;  // "MIC1" in LE
+const MIC_MAGIC  = 0x3143494D; // "MIC1" in LE
 const MIC2_MAGIC = 0x3243494D; // "MIC2" in LE
 const MIC3_MAGIC = 0x3343494D; // "MIC3" in LE
+const MICR_MAGIC = 0x5243494D; // "MICR" in LE — single-frame RGB (US/VL)
 const PICS_MAGIC = 0x53434950; // "PICS" in LE
 const MIC2_HEADER_SIZE = 20;
 const MIC2_ENTRY_SIZE = 8;
@@ -1340,6 +1341,17 @@ export const MICDecoder = {
       return decodePICS(fileBytes);
     }
 
+    if (magic === MICR_MAGIC) {
+      // MICR: single-frame RGB (Ultrasound, Visible Light)
+      // Header: [MICR magic 4B][width 4B][height 4B][CompressRGB blob...]
+      if (fileBytes.length < 12) throw new Error('MICR: file too small');
+      const width  = dv.getUint32(4, true);
+      const height = dv.getUint32(8, true);
+      const blob   = fileBytes.subarray(12);
+      const rgb    = decompressRGBTileBlob(blob, width, height, true);
+      return { rgb, width, height, channels: 3, isMICR: true };
+    }
+
     if (magic === MIC3_MAGIC) {
       const hdr = parseMIC3Header(fileBytes);
       const rgb = decompressMIC3Level(fileBytes, hdr, 0);
@@ -1486,6 +1498,55 @@ export const MICDecoder = {
     }
     const rgb = decompressMIC3Level(fileBytes, hdr, levelIdx);
     return { rgb, width: hdr.levels[levelIdx].width, height: hdr.levels[levelIdx].height };
+  },
+
+  /**
+   * Decode a single RGB plane blob (mode byte + payload) to a uint16 plane.
+   * Used by parallel workers to decode Y, Co, or Cg independently.
+   * @param {Uint8Array} planeBlob
+   * @param {number} width
+   * @param {number} height
+   * @returns {Uint16Array}
+   */
+  decodeRGBPlane(planeBlob, width, height) {
+    return decompressWSIPlane(planeBlob, width, height);
+  },
+
+  /**
+   * Apply the YCoCg-R inverse color transform to three decoded planes.
+   * Called on the main thread after workers have decoded all planes in parallel.
+   * @param {Uint16Array} y
+   * @param {Uint16Array} co
+   * @param {Uint16Array} cg
+   * @param {number} width
+   * @param {number} height
+   * @returns {Uint8Array} interleaved RGB bytes
+   */
+  applyYCoCgRInverse(y, co, cg, width, height) {
+    return yCoCgRInverse(y, co, cg, width, height);
+  },
+
+  /**
+   * Parse a MICR single-frame RGB header.
+   * @param {Uint8Array} fileBytes
+   * @returns {{ width: number, height: number, yBlob: Uint8Array, coBlob: Uint8Array, cgBlob: Uint8Array }}
+   */
+  parseMICRPlanes(fileBytes) {
+    if (fileBytes.length < 12) throw new Error('MICR: file too small');
+    const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
+    const width  = dv.getUint32(4, true);
+    const height = dv.getUint32(8, true);
+    const blob   = fileBytes.subarray(12);
+    if (blob.length < 12) throw new Error('MICR: blob too small');
+    const bdv   = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+    const yLen  = bdv.getUint32(0, true);
+    const coLen = bdv.getUint32(4, true);
+    const cgLen = bdv.getUint32(8, true);
+    let off = 12;
+    const yBlob  = blob.subarray(off, off + yLen);  off += yLen;
+    const coBlob = blob.subarray(off, off + coLen); off += coLen;
+    const cgBlob = blob.subarray(off, off + cgLen);
+    return { width, height, yBlob, coBlob, cgBlob };
   },
 };
 

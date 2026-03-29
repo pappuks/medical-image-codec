@@ -58,6 +58,38 @@ func writeMicFile(filename string, width, height int, compressed []byte) error {
 	return nil
 }
 
+// writeMICRFile writes a MICR single-frame RGB container file.
+//
+// MICR format:
+//
+//	Bytes 0-3:   Magic "MICR" (0x5243494D)
+//	Bytes 4-7:   Width  (uint32 LE)
+//	Bytes 8-11:  Height (uint32 LE)
+//	Bytes 12+:   CompressRGB blob ([Y_len][Co_len][Cg_len][Y_data][Co_data][Cg_data])
+func writeMICRFile(filename string, width, height int, blob []byte) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	header := make([]byte, 12)
+	header[0] = 'M'
+	header[1] = 'I'
+	header[2] = 'C'
+	header[3] = 'R'
+	binary.LittleEndian.PutUint32(header[4:8], uint32(width))
+	binary.LittleEndian.PutUint32(header[8:12], uint32(height))
+
+	if _, err := f.Write(header); err != nil {
+		return err
+	}
+	if _, err := f.Write(blob); err != nil {
+		return err
+	}
+	return nil
+}
+
 func compressImage(shortData []uint16, width, height int, maxValue uint16) ([]byte, error) {
 	return mic.CompressSingleFrame(shortData, width, height, maxValue)
 }
@@ -256,6 +288,118 @@ var wsiTestImages = []struct {
 	channels int
 }{
 	{name: "WSI_TISSUE", file: "testdata/wsi_tissue_512x384.rgb", width: 512, height: 384, channels: 3},
+}
+
+// RGB TIFF test images (Ultrasound and Visible Light from NEMA compsamples)
+var rgbTIFFTestImages = []struct {
+	name string
+	file string
+}{
+	{name: "US1", file: "testdata/compsamples_refanddir/images/ref/US1_UNC"},
+	{name: "VL1", file: "testdata/compsamples_refanddir/images/ref/VL1_UNC"},
+	{name: "VL2", file: "testdata/compsamples_refanddir/images/ref/VL2_UNC"},
+	{name: "VL3", file: "testdata/compsamples_refanddir/images/ref/VL3_UNC"},
+	{name: "VL4", file: "testdata/compsamples_refanddir/images/ref/VL4_UNC"},
+	{name: "VL5", file: "testdata/compsamples_refanddir/images/ref/VL5_UNC"},
+	{name: "VL6", file: "testdata/compsamples_refanddir/images/ref/VL6_UNC"},
+}
+
+// readTIFFRGB reads an uncompressed 8-bit RGB TIFF and returns interleaved RGB bytes.
+// The NEMA compsamples TIFFs use BitsPerSample with count=1 (a non-standard shorthand),
+// so we parse the IFD directly and copy raw strip data.
+func readTIFFRGB(fileName string) ([]byte, int, int, error) {
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if len(data) < 8 {
+		return nil, 0, 0, fmt.Errorf("file too small")
+	}
+
+	var order binary.ByteOrder
+	if data[0] == 'I' {
+		order = binary.LittleEndian
+	} else {
+		order = binary.BigEndian
+	}
+
+	readU16 := func(off int) uint16 { return order.Uint16(data[off:]) }
+	readU32 := func(off int) uint32 { return order.Uint32(data[off:]) }
+
+	ifdOffset := int(readU32(4))
+	numEntries := int(readU16(ifdOffset))
+
+	var width, height, compression, samplesPerPixel int
+	var stripOffsets, stripByteCounts []uint32
+
+	pos := ifdOffset + 2
+	for i := 0; i < numEntries; i++ {
+		tag := readU16(pos)
+		ftype := readU16(pos + 2)
+		count := int(readU32(pos + 4))
+		valueOff := pos + 8
+
+		readShort := func() uint16 {
+			if ftype == 3 {
+				return readU16(valueOff)
+			}
+			return uint16(readU32(valueOff))
+		}
+
+		readShortArray := func() []uint32 {
+			out := make([]uint32, count)
+			if count == 1 {
+				if ftype == 3 {
+					out[0] = uint32(readU16(valueOff))
+				} else {
+					out[0] = readU32(valueOff)
+				}
+				return out
+			}
+			offset := int(readU32(valueOff))
+			for k := 0; k < count; k++ {
+				if ftype == 3 {
+					out[k] = uint32(readU16(offset + k*2))
+				} else {
+					out[k] = readU32(offset + k*4)
+				}
+			}
+			return out
+		}
+
+		switch tag {
+		case 256:
+			width = int(readShort())
+		case 257:
+			height = int(readShort())
+		case 259:
+			compression = int(readShort())
+		case 273:
+			stripOffsets = readShortArray()
+		case 277:
+			samplesPerPixel = int(readShort())
+		case 279:
+			stripByteCounts = readShortArray()
+		}
+		pos += 12
+	}
+
+	if compression != 1 || samplesPerPixel != 3 || width == 0 || height == 0 {
+		return nil, 0, 0, fmt.Errorf("unsupported TIFF (compression=%d, spp=%d, %dx%d)", compression, samplesPerPixel, width, height)
+	}
+
+	rgb := make([]byte, 0, width*height*3)
+	for i, off := range stripOffsets {
+		end := int(off) + int(stripByteCounts[i])
+		if end > len(data) {
+			return nil, 0, 0, fmt.Errorf("strip out of bounds")
+		}
+		rgb = append(rgb, data[off:end]...)
+	}
+	if len(rgb) != width*height*3 {
+		return nil, 0, 0, fmt.Errorf("unexpected RGB size: got %d, want %d", len(rgb), width*height*3)
+	}
+	return rgb, width, height, nil
 }
 
 func main() {
@@ -462,6 +606,34 @@ func main() {
 			ratio := float64(rawSize) / float64(len(compressed))
 			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
 				img.name, rawSize, len(compressed), ratio, outPath)
+		}
+
+		// Compress RGB TIFF test images as MICR (US, VL modalities)
+		for _, img := range rgbTIFFTestImages {
+			fmt.Printf("Compressing RGB TIFF %s...\n", img.name)
+
+			rgb, w, h, err := readTIFFRGB(img.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  skip %s: %v\n", img.name, err)
+				continue
+			}
+
+			compressed, err := mic.CompressRGB(rgb, w, h)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", img.name, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, img.name+".mic")
+			if err := writeMICRFile(outPath, w, h, compressed); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			rawSize := len(rgb)
+			ratio := float64(rawSize) / float64(len(compressed))
+			fmt.Printf("  %s: %dx%d  %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				img.name, w, h, rawSize, len(compressed), ratio, outPath)
 		}
 
 		// Compress WSI test images (MIC3)

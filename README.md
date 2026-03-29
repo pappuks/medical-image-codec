@@ -190,6 +190,18 @@ The pipeline is identical to WSI tile compression — YCoCg-R color transform fo
 [Cg plane blob  ]  (Delta+RLE+FSE, ZigZag-mapped chrominance)
 ```
 
+**Important:** `CompressRGB` operates on the full image without tiling. Using `CompressWSI` for US/VL images (which tiles into 256×256 blocks) breaks spatial correlation across tile boundaries — the delta predictor restarts at each tile corner — and reduces compression ratios by 30–45%. Always use `CompressRGB` for single-frame images.
+
+For browser delivery, the `mic-compress -testdata` tool wraps the blob in a lightweight **MICR container** (magic `MICR`, 12-byte header) that the JS/WASM decoder can identify:
+
+```
+MICR format:
+  Bytes 0-3:  Magic "MICR" (0x4D 0x49 0x43 0x52)
+  Bytes 4-7:  Width  (uint32 LE)
+  Bytes 8-11: Height (uint32 LE)
+  Bytes 12+:  CompressRGB blob ([Y_len][Co_len][Cg_len][Y_data][Co_data][Cg_data])
+```
+
 **Compression ratios on NEMA compsamples RGB images** (lossless, Delta+RLE+FSE with YCoCg-R):
 
 | Image | Dimensions | Raw (MB) | Compressed (MB) | Ratio |
@@ -362,9 +374,10 @@ A browser-based decoder lives in [`web/`](./web/):
 
 - **Pure JavaScript** ES module (~20 KB, zero dependencies)
 - **Go WASM** build for maximum throughput
-- Drag-and-drop `.mic` file loading (MIC1, MIC2, MIC3)
+- Drag-and-drop `.mic` file loading (MIC1, MIC2, MIC3, MICR, PICS)
 - **16-bit greyscale** — Window/Level controls for diagnostic viewing
-- **RGB WSI** — full-color tile rendering with pyramid level selector
+- **RGB WSI** (MIC3) — full-color tile rendering with pyramid level selector
+- **Single-frame RGB** (MICR) — US/VL images rendered directly without WSI controls
 - **Multi-frame movie player** — play/pause, frame slider, configurable FPS, keyboard shortcuts
 
 See the **[Web Decoder README](./web/README.md)** for the full API reference and integration guide.
