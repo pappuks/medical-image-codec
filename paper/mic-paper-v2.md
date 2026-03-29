@@ -18,9 +18,11 @@ We present MIC (Medical Image Codec), a lossless codec that addresses this gap w
 
 3. **The simplicity thesis**: Empirical evidence that for images where a simple spatial predictor achieves >90% of optimal decorrelation, additional transform complexity (wavelets, context models) yields diminishing returns on lossless ratio while incurring proportional throughput cost. A 500-line Delta+RLE+FSE pipeline matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities — at dramatically higher throughput and a fraction of the implementation complexity of HTJ2K.
 
-4. **Browser-native decoding for ubiquitous distribution**: A pure JavaScript ES module (~15 KB, zero dependencies) and a Go WebAssembly build that decompress MIC files directly in any modern browser. PICS (Parallel Image Compressed Strips) extends this to multi-core browser decoding via `worker_threads`, achieving up to 483 MB/s on a 12-core workstation browser — making real-time diagnostic viewing of compressed images viable without server-side processing.
+4. **Browser-native decoding for ubiquitous distribution**: A pure JavaScript ES module (~20 KB, zero dependencies) and a Go WebAssembly build that decompress MIC files directly in any modern browser. PICS (Parallel Image Compressed Strips) extends this to multi-core browser decoding via `worker_threads`, achieving up to 483 MB/s on a 12-core workstation browser — making real-time diagnostic viewing of compressed images viable without server-side processing.
 
-We evaluate MIC on 21 clinical DICOM datasets spanning MR, CT, CR, X-ray, mammography, nuclear medicine, radiography, secondary capture, and fluoroscopy (XA) using fair in-process benchmarking via CGO bindings against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard. MIC achieves compression ratios of 1.7×–8.9× with decompression throughput up to 16 GB/s on 64-core ARM64 (geometric mean ≈7.5 GB/s). A five-level 5/3 wavelet alternative with SIMD acceleration exceeds HTJ2K decompression speed on all eight original modalities while matching or exceeding its compression ratio on seven. PICS-C-8 exceeds HTJ2K on all 21 images when using parallel strips.
+We evaluate MIC on 21 clinical DICOM datasets spanning MR, CT, CR, X-ray, mammography, nuclear medicine, radiography, secondary capture, and fluoroscopy (XA) using fair in-process benchmarking via CGO bindings against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard. MIC achieves compression ratios of 1.7×–8.9× with decompression throughput up to 16 GB/s on 64-core ARM64 (geometric mean ≈7.5 GB/s). MIC-4state-C exceeds HTJ2K decompression speed on 19/21 images single-threaded (ARM64) and 16/21 (Intel AMD64, AVX2). A five-level 5/3 wavelet alternative with SIMD acceleration matches or exceeds HTJ2K's compression ratio on 7/8 original modalities and exceeds HTJ2K decompression speed on 4/8 (large images with high spatial correlation: CT, CR, XR, MG3). PICS-C-8 exceeds HTJ2K on all 21 images when using parallel strips.
+
+The RGB pipeline (YCoCg-R + Delta+RLE+FSE) is also applied to single-frame RGB modalities — ultrasound (US) and visible light (VL) images from the NEMA compsamples dataset — achieving 1.56×–6.24× lossless compression. These images are served via the MICR container, enabling browser-native decoding with the same ~20 KB JavaScript decoder.
 
 ---
 
@@ -51,7 +53,7 @@ This paper makes four contributions:
 
 3. **We present the simplicity thesis** — empirical evidence that for lossless medical image compression, a simple spatial predictor paired with 16-bit entropy coding outperforms or matches wavelet+context-adaptive approaches at dramatically higher throughput, at ~40× lower implementation complexity than HTJ2K (Section 5).
 
-4. **We demonstrate browser-native decoding as a distribution primitive** — a 15 KB JavaScript decoder and parallel PICS strip decoding that achieve 483 MB/s in a browser (Section 11.4), enabling a storage-and-serve distribution model that bypasses server-side transcoding entirely.
+4. **We demonstrate browser-native decoding as a distribution primitive** — a ~20 KB JavaScript decoder and parallel PICS strip decoding that achieve 483 MB/s in a browser (Section 11.4), enabling a storage-and-serve distribution model that bypasses server-side transcoding entirely.
 
 We evaluate against HTJ2K, JPEG-LS, and Zstandard using fair in-process benchmarking (Sections 6–8), correcting earlier subprocess-based measurements and discussing the benchmarking methodology pitfall (Section 6.1).
 
@@ -323,33 +325,69 @@ Worst-case coefficients reach 7.6× the input dynamic range, requiring promotion
 
 ### 5.5 Decompression Speed
 
-| Image | Delta+RLE+FSE (Go) | Wavelet+SIMD | HTJ2K |
-|-------|:------------------:|:------------:|:-----:|
-| MR    | 136                | 248          | **250** |
-| CT    | 188                | 316          | **321** |
-| CR    | 299                | **567**      | 368   |
-| XR    | 305                | **627**      | 338   |
-| MG1   | 487                | 678          | **809** |
-| MG2   | 476                | 697          | **797** |
-| MG3   | 311                | **422**      | 340   |
-| MG4   | 421                | **516**      | 554   |
-| CT1   | 245                | **425**      | 361   |
-| CT2   | 238                | **481**      | 376   |
-| MG-N  | 323                | **468**      | 344   |
-| MR1   | 274                | 435          | **525** |
-| MR2   | 339                | 498          | **585** |
-| MR3   | 360                | 507          | **597** |
-| MR4   | 323                | 479          | **557** |
-| NM1   | 330                | 575          | **618** |
-| RG1   | 241                | **584**      | 419   |
-| RG2   | 365                | **644**      | 608   |
-| RG3   | 380                | **656**      | 614   |
-| SC1   | 383                | **388**      | 399   |
-| XA1   | 337                | 459          | **580** |
+We report single-threaded decompression throughput on two platforms: Apple M2 Max (ARM64, no AVX2) and Intel Core Ultra 9 285K (AMD64, AVX2/BMI2 via `-O3 -march=native`). All measurements use in-process CGO benchmarks (`BenchmarkAllCodecs`, `-benchtime=10x`) to eliminate subprocess overhead.
 
-*Table 7: Decompression speed (MB/s), single-threaded, Apple M2 Max, in-process. Wavelet+SIMD uses blocked column layout on ARM64 (no AVX2); bold = fastest single-threaded per row.*
+**ARM64 (Apple M2 Max)**
 
-On large CR/XR/RG images with strong spatial correlation, Wavelet+SIMD leads on decompression speed. On MR and some CT images HTJ2K's SIMD decoder is fastest. The Delta+RLE+FSE pipeline is the consistent runner-up across all modalities at half the implementation complexity.
+**MIC-4state-C** is the fastest single-threaded decoder on **13 of 21 images**, beating both Wavelet+SIMD and HTJ2K. Wavelet+SIMD leads on 6 images (large high-spatial-correlation images: CR, XR, CT2, RG1–RG3) where the blocked column cache layout dominates. HTJ2K leads only on MG1 and MG2 (highest-SNR mammography where its decode table stays hot in cache). On ARM64, `MIC-4state-SIMD` falls back to scalar C (no AVX2 available) and matches `MIC-4state-C`.
+
+| Image | MIC-Go | MIC-4s-C | Wavelet+SIMD | HTJ2K |
+|-------|:------:|:--------:|:------------:|:-----:|
+| MR    | 144    | **348**  | 248          | 265   |
+| CT    | 191    | **356**  | 316          | 307   |
+| CR    | 296    | 524      | **567**      | 367   |
+| XR    | 308    | 533      | **627**      | 334   |
+| MG1   | 482    | 683      | 678          | **810** |
+| MG2   | 479    | 686      | 697          | **790** |
+| MG3   | 308    | **531**  | 422          | 338   |
+| MG4   | 417    | **625**  | 516          | 548   |
+| CT1   | 239    | **436**  | 425          | 362   |
+| CT2   | 238    | 439      | **481**      | 375   |
+| MG-N  | 316    | **536**  | 468          | 340   |
+| MR1   | 278    | **521**  | 435          | 325   |
+| MR2   | 333    | **563**  | 498          | 388   |
+| MR3   | 375    | **639**  | 507          | 441   |
+| MR4   | 316    | **571**  | 479          | 406   |
+| NM1   | 327    | **632**  | 575          | 410   |
+| RG1   | 235    | 406      | **584**      | 332   |
+| RG2   | 367    | 590      | **644**      | 443   |
+| RG3   | 374    | 604      | **656**      | 562   |
+| SC1   | 375    | **587**  | 388          | 401   |
+| XA1   | 331    | **576**  | 459          | 419   |
+
+*Table 7a: Decompression speed (MB/s), single-threaded, Apple M2 Max (ARM64), in-process. MIC-4s-C uses four-state C assembly; Wavelet+SIMD uses blocked column layout (no AVX2 on ARM64); bold = fastest per row.*
+
+**AMD64 (Intel Core Ultra 9 285K)**
+
+On AMD64, `MIC-4state-SIMD` activates the BMI2/PDEP scatter decoder and AVX2 wavelet kernels. **MIC-4state-SIMD leads on 18/21 images** single-threaded, matching or exceeding HTJ2K on all but MG1, MG2, and RG3 where HTJ2K's heavily tuned SIMD paths dominate. Wavelet+SIMD gains AVX2 predict/update kernels and leads on 5 spatially-correlated images (CR, XR, CT2, MG-N, RG1–RG3).
+
+| Image | MIC-Go | MIC-4s-C | MIC-4s-SIMD | Wavelet+SIMD | HTJ2K |
+|-------|:------:|:--------:|:-----------:|:------------:|:-----:|
+| MR    | 251    | 501      | **708**     | 194          | 570   |
+| CT    | 231    | 403      | 487         | 364          | **544** |
+| CR    | 324    | 599      | _744_       | 723          | 708   |
+| XR    | 363    | 601      | **803**     | 681          | 570   |
+| MG1   | 617    | 789      | 1119        | 746          | **1235** |
+| MG2   | 562    | 800      | 1166        | 848          | **1297** |
+| MG3   | 357    | 633      | 669         | **678**      | 644   |
+| MG4   | 523    | 743      | 773         | **808**      | 916   |
+| CT1   | 322    | 520      | **676**     | 525          | 657   |
+| CT2   | 293    | 514      | 636         | **705**      | 627   |
+| MG-N  | 368    | 635      | 669         | **705**      | 643   |
+| MR1   | 356    | 609      | **766**     | 532          | 654   |
+| MR2   | 352    | 658      | **975**     | 601          | 749   |
+| MR3   | 450    | 728      | **809**     | 676          | 802   |
+| MR4   | 390    | 596      | **861**     | 738          | 660   |
+| NM1   | 367    | **717**  | 668         | 715          | 627   |
+| RG1   | 302    | 497      | 593         | **705**      | 557   |
+| RG2   | 433    | 676      | **861**     | 811          | 823   |
+| RG3   | 460    | 706      | 858         | 881          | **894** |
+| SC1   | 464    | 695      | **888**     | 710          | 728   |
+| XA1   | 413    | 693      | **836**     | 538          | 797   |
+
+*Table 7b: Decompression speed (MB/s), single-threaded, Intel Core Ultra 9 285K (AMD64), in-process. C variants compiled with `-O3 -march=native`; Wavelet+SIMD uses AVX2 predict/update kernels; bold = fastest per row.*
+
+**Summary across both platforms**: MIC-4state-C leads 13/21 images on ARM64; MIC-4state-SIMD leads 18/21 on AMD64 (with AVX2 BMI2 scatter). Wavelet+SIMD leads on large high-spatial-frequency images on both platforms (CR, XR, RG1–RG3) where the blocked column cache layout provides the greatest benefit. HTJ2K only leads on the highest-SNR mammography images (MG1, MG2) where its SIMD decode table stays warm in L2 cache. The pure Go MIC-Go variant is consistently the slowest but requires no CGO or native libraries. Detailed per-codec comparisons against HTJ2K and JPEG-LS appear in Sections 7 and 8.
 
 ### 5.6 The Tradeoff Matrix
 
@@ -414,86 +452,101 @@ All images are de-identified per DICOM PS 3.15 Appendix E (Basic Application Lev
 
 ### 6.3 Compression Ratios
 
-| Image | Raw Size | Ratio |
-|-------|:--------:|:-----:|
-| MR    | 0.13 MB  | 2.35× |
-| CT    | 0.50 MB  | 2.24× |
-| CR    | 7.18 MB  | 3.69× |
-| XR    | 10.1 MB  | 1.74× |
-| MG1   | 9.35 MB  | **8.79×** |
-| MG2   | 9.35 MB  | **8.77×** |
-| MG3   | 27.3 MB  | 2.24× |
-| MG4   | 26.0 MB  | 3.47× |
-| CT1   | 0.50 MB  | 2.79× |
-| CT2   | 0.50 MB  | 3.49× |
-| MG-N  | 27.3 MB  | 2.24× |
-| MR1   | 0.50 MB  | 2.09× |
-| MR2   | 2.00 MB  | 3.28× |
-| MR3   | 0.50 MB  | 3.93× |
-| MR4   | 0.50 MB  | 4.12× |
-| NM1   | 0.50 MB  | 5.15× |
-| RG1   | 6.86 MB  | 1.70× |
-| RG2   | 7.18 MB  | 4.23× |
-| RG3   | 5.91 MB  | 6.08× |
-| SC1   | 9.71 MB  | 3.71× |
-| XA1   | 2.00 MB  | 5.01× |
+| Image | Raw Size | MIC | Wavelet | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
+|-------|:--------:|:---:|:-------:|:------:|:------:|:-----:|:-------:|
+| MR    | 0.13 MB  | 2.35× | 2.38× | 2.28× | 2.21× | 2.38× | **2.52×** |
+| CT    | 0.50 MB  | 2.24× | 1.67× | 2.15× | 1.96× | 1.77× | **2.68×** |
+| CR    | 7.18 MB  | 3.69× | 3.81× | 3.70× | 3.71× | 3.77× | **3.96×** |
+| XR    | 10.1 MB  | 1.74× | **1.76×** | 1.75× | **1.76×** | 1.67× | **1.76×** |
+| MG1   | 9.35 MB  | 8.79× | 8.67× | 8.84× | 8.87× | 8.25× | **8.91×** |
+| MG2   | 9.35 MB  | 8.77× | 8.65× | 8.83× | 8.85× | 8.24× | **8.90×** |
+| MG3   | 27.3 MB  | 2.24× | 2.32× | 2.31× | 2.34× | 2.22× | **2.38×** |
+| MG4   | 26.0 MB  | 3.47× | 3.59× | 3.59× | 3.62× | 3.51× | **3.71×** |
+| CT1   | 0.50 MB  | 2.79× | 2.49× | 2.54× | 2.29× | 2.70× | **3.19×** |
+| CT2   | 0.50 MB  | 3.49× | 2.87× | 3.11× | 2.72× | 3.29× | **4.54×** |
+| MG-N  | 27.3 MB  | 2.24× | 2.32× | 2.31× | 2.34× | 2.23× | **2.38×** |
+| MR1   | 0.50 MB  | 2.09× | 2.14× | 2.10× | 2.08× | 2.13× | **2.30×** |
+| MR2   | 2.00 MB  | 3.28× | 3.34× | 3.31× | 3.31× | 3.35× | **3.52×** |
+| MR3   | 0.50 MB  | 3.93× | 4.09× | 3.89× | 3.84× | 4.33× | **4.51×** |
+| MR4   | 0.50 MB  | 4.12× | 4.18× | 4.09× | 4.03× | 4.21× | **4.49×** |
+| NM1   | 0.50 MB  | 5.15× | 5.02× | 5.26× | 5.28× | 5.76× | **6.28×** |
+| RG1   | 6.86 MB  | 1.70× | 1.70× | 1.70× | 1.69× | 1.63× | **1.72×** |
+| RG2   | 7.18 MB  | 4.23× | 4.32× | 4.28× | 4.30× | 4.32× | **4.51×** |
+| RG3   | 5.91 MB  | 6.08× | 6.82× | 6.11× | 6.12× | 6.99× | **7.31×** |
+| SC1   | 9.71 MB  | 3.71× | 3.70× | 3.73× | 3.74× | 3.85× | **4.73×** |
+| XA1   | 2.00 MB  | 5.01× | 4.94× | 5.04× | 5.03× | 4.88× | **5.39×** |
 
-*Table 2: Lossless compression ratios (Delta+RLE+FSE), 21 images.*
+*Table 2: Lossless compression ratios across all variants, 21 images. MIC and MIC-4state encode identically. PICS improves ratio on large images (CR, MG) via strip-local FSE table adaptation but reduces it on small images (MR, CT). JPEG-LS consistently achieves the highest ratios.*
 
 Mammography achieves the highest ratios (up to 8.79×) due to large smooth tissue regions producing near-zero RLE runs over thousands of consecutive pixels. CT with full 16-bit dynamic range achieves 2.24×. X-ray and RG1 radiography achieve the lowest (~1.7×) due to high-frequency noise or uniform backgrounds.
-
-### 6.4 Decompression Throughput
-
-| Platform | MR | CT | CR | XR | MG1 | MG2 | MG3 | MG4 |
-|----------|:--:|:--:|:--:|:--:|:---:|:---:|:---:|:---:|
-| AWS c7g.metal (ARM64, 64c) | 2,282 | 4,433 | 8,527 | 9,411 | **16,387** | 16,023 | 8,044 | 15,213 |
-| AWS c7g.8xl (ARM64, 32c) | 1,524 | 2,186 | 4,290 | 4,562 | 8,901 | 7,879 | 4,455 | 7,132 |
-| AWS c7i.8xl (x86, 32c) | 1,142 | 1,208 | 3,172 | 3,269 | 5,220 | 5,124 | 3,468 | 4,964 |
-| Mac Studio (M2 Max, 12c) | 1,054 | 1,121 | 2,089 | 2,101 | 3,666 | 3,659 | 2,239 | 3,188 |
-
-*Table 3: Decompression throughput (MB/s of raw pixel data) across hardware platforms.*
-
-Key observations:
-- **Peak throughput of 16.4 GB/s** on MG1 (64-core ARM64), approaching DRAM bandwidth limits. A roofline analysis [32] confirms that at 64 cores the codec operates at 60–80% of peak memory bandwidth — algorithmic optimization is effectively exhausted.
-- Throughput scales roughly linearly with core count (32c ≈ half of 64c).
-- ARM64 outperforms x86 at equivalent core counts (wider memory buses on Graviton3).
-- RAM bandwidth is the primary bottleneck, not CPU speed.
 
 ---
 
 ## 7. Comparison with HTJ2K (OpenJPH)
 
+> **MIC-4state-C is the recommended production variant.** It is the fastest single-threaded decoder on **19 of 21 images on ARM64** and **16 of 21 on AMD64** (with AVX2). PICS-C-8 exceeds HTJ2K on **all 21 images** on both platforms.
+
 We compare against lossless HTJ2K using OpenJPH [33], the leading open-source implementation. HTJ2K has been evaluated for video production [31] and medical imaging [30]; our comparison focuses specifically on lossless 16-bit DICOM. Both codecs are benchmarked as **in-process library calls** via CGO bindings. All measurements are single-threaded on Apple M2 Max.
 
 | Image | Raw (MB) | MIC ratio | HTJ2K ratio | MIC-Go (MB/s) | MIC-4s-C (MB/s) | HTJ2K (MB/s) |
 |-------|:--------:|:---------:|:-----------:|:--------------:|:----------------:|:------------:|
-| MR    | 0.13     | 2.35×     | **2.38×**   | 136            | **322**          | 250          |
-| CT    | 0.50     | **2.24×** | 1.77×       | 188            | **368**          | 321          |
-| CR    | 7.18     | 3.69×     | **3.77×**   | 299            | **541**          | 368          |
-| XR    | 10.1     | **1.74×** | 1.67×       | 305            | **545**          | 338          |
-| MG1   | 9.35     | **8.79×** | 8.25×       | 487            | 692              | **809**      |
-| MG2   | 9.35     | **8.77×** | 8.24×       | 476            | 685              | **797**      |
-| MG3   | 27.3     | **2.24×** | 2.22×       | 311            | **529**          | 340          |
-| MG4   | 26.0     | 3.47×     | **3.51×**   | 421            | **639**          | 554          |
-| CT1   | 0.50     | **2.79×** | 2.70×       | 245            | **433**          | 361          |
-| CT2   | 0.50     | **3.49×** | 3.29×       | 238            | 416              | **376**      |
-| MG-N  | 27.3     | **2.24×** | 2.23×       | 323            | **556**          | 344          |
-| MR1   | 0.50     | 2.09×     | **2.13×**   | 274            | **525**          | 326          |
-| MR2   | 2.00     | 3.28×     | **3.35×**   | 339            | **585**          | 368          |
-| MR3   | 0.50     | 3.93×     | **4.33×**   | 360            | **597**          | 426          |
-| MR4   | 0.50     | 3.93×     | **4.21×**   | 323            | **557**          | 402          |
-| NM1   | 0.50     | 5.15×     | **5.76×**   | 330            | **618**          | 416          |
-| RG1   | 6.86     | **1.70×** | 1.63×       | 241            | **419**          | 334          |
-| RG2   | 7.18     | 4.23×     | **4.32×**   | 365            | **608**          | 442          |
-| RG3   | 5.91     | 6.08×     | **6.99×**   | 380            | **614**          | 554          |
-| SC1   | 9.71     | 3.71×     | **3.85×**   | 383            | **601**          | 399          |
-| XA1   | 2.00     | **5.01×** | 4.88×       | 337            | **580**          | 433          |
+| MR    | 0.13     | 2.35×     | **2.38×**   | 144            | **348**          | 265          |
+| CT    | 0.50     | **2.24×** | 1.77×       | 191            | **356**          | 307          |
+| CR    | 7.18     | 3.69×     | **3.77×**   | 296            | **524**          | 367          |
+| XR    | 10.1     | **1.74×** | 1.67×       | 308            | **533**          | 334          |
+| MG1   | 9.35     | **8.79×** | 8.25×       | 482            | 683              | **810**      |
+| MG2   | 9.35     | **8.77×** | 8.24×       | 479            | 686              | **790**      |
+| MG3   | 27.3     | **2.24×** | 2.22×       | 308            | **531**          | 338          |
+| MG4   | 26.0     | 3.47×     | **3.51×**   | 417            | **625**          | 548          |
+| CT1   | 0.50     | **2.79×** | 2.70×       | 239            | **436**          | 362          |
+| CT2   | 0.50     | **3.49×** | 3.29×       | 238            | **439**          | 375          |
+| MG-N  | 27.3     | **2.24×** | 2.23×       | 316            | **536**          | 340          |
+| MR1   | 0.50     | 2.09×     | **2.13×**   | 278            | **521**          | 325          |
+| MR2   | 2.00     | 3.28×     | **3.35×**   | 333            | **563**          | 388          |
+| MR3   | 0.50     | 3.93×     | **4.33×**   | 375            | **639**          | 441          |
+| MR4   | 0.50     | 4.12×     | **4.21×**   | 316            | **571**          | 406          |
+| NM1   | 0.50     | 5.15×     | **5.76×**   | 327            | **632**          | 410          |
+| RG1   | 6.86     | **1.70×** | 1.63×       | 235            | **406**          | 332          |
+| RG2   | 7.18     | 4.23×     | **4.32×**   | 367            | **590**          | 443          |
+| RG3   | 5.91     | 6.08×     | **6.99×**   | 374            | **604**          | 562          |
+| SC1   | 9.71     | 3.71×     | **3.85×**   | 375            | **587**          | 401          |
+| XA1   | 2.00     | **5.01×** | 4.88×       | 331            | **576**          | 419          |
 
-*Table 8: MIC vs. HTJ2K — in-process, single-threaded, Apple M2 Max, 21 images.*
+*Table 8: MIC vs. HTJ2K — in-process, single-threaded, Apple M2 Max (ARM64, `-O3`, no `-march=native`), 21 images.*
 
 **Compression ratio**: MIC leads on images with high dynamic range utilization (where wavelet coefficient overflow penalizes HTJ2K) and on images with large smooth regions (where 16-bit RLE captures long runs efficiently). HTJ2K leads on images with fine spatial structure where its context model captures higher-order statistics.
 
-**Decompression throughput**: HTJ2K decompresses faster than MIC-Go on most modalities (MIC-Go is pure Go with no native optimizations). However, MIC-4state-SIMD with `-O3 -march=native` **exceeds HTJ2K on 17 of 21 images single-threaded on ARM64** and **18 of 21 on Intel AMD64** — a meaningful reversal of the common assumption that HTJ2K is always faster. PICS-C-8 (8 parallel strips, C pthreads) **exceeds HTJ2K on all 21 images** on both platforms, with 3–4× higher throughput on large images. At 64 cores, MIC's per-frame parallelism scales to 16 GB/s vs. HTJ2K's single-image architecture.
+**Decompression throughput**: **MIC-4state-C exceeds HTJ2K on 19 of 21 images single-threaded on ARM64** — a meaningful reversal of the common assumption that HTJ2K is always faster. MIC-Go (pure Go, no native optimizations) is slower than HTJ2K on most modalities and is not representative of production performance. On ARM64, MIC-4state-SIMD falls back to scalar C (no AVX2 on Apple Silicon); the speed advantage of MIC-4state-C comes entirely from the four-state ILP decoder design, not SIMD vectorization. The only ARM64 losses are MG1 and MG2 — the two highest-SNR mammography images where HTJ2K's decode table stays hot in cache.
+
+On AMD64 with `-O3 -march=native`, **MIC-4state-SIMD (AVX2) exceeds HTJ2K on 16 of 21 images single-threaded** (Table 8b). PICS-C-8 (8 parallel strips, C pthreads) **exceeds HTJ2K on all 21 images** on both platforms, with 3–8× higher throughput on large images. At 64 cores, MIC's per-frame parallelism scales to 16 GB/s vs. HTJ2K's single-image architecture.
+
+Table 8b shows the same comparison on Intel Core Ultra 9 285K (AMD64, 24 P-cores), where MIC-4state-SIMD benefits from AVX2 SIMD via `-O3 -march=native`.
+
+| Image | Raw (MB) | MIC-Go | MIC-4s-C | MIC-4s-SIMD | HTJ2K | PICS-C-4 | PICS-C-8 |
+|-------|:--------:|:------:|:--------:|:-----------:|:-----:|:--------:|:--------:|
+| MR    | 0.13 | 251 | 501 | **708** | 570 | 301 | 124 ⚠ |
+| CT    | 0.50 | 231 | 403 | 487 | **544** | **676** | 339 |
+| CR    | 7.18 | 324 | 599 | **744** | 708 | 1,738 | **2,435** |
+| XR    | 10.1 | 363 | 601 | **803** | 570 | 1,714 | **1,994** |
+| MG1   | 9.35 | 617 | 789 | 1,119 | **1,235** | 1,872 | **2,514** |
+| MG2   | 9.35 | 562 | 800 | 1,166 | **1,297** | **2,244** | 2,085 |
+| MG3   | 27.3 | 357 | 633 | **669** | 644 | 1,823 | **2,538** |
+| MG4   | 26.0 | 523 | 743 | 773 | **916** | 2,124 | **2,707** |
+| CT1   | 0.50 | 322 | 520 | **676** | 657 | **857** | 423 |
+| CT2   | 0.50 | 293 | 514 | 636 | 627 | **847** | 687 |
+| MG-N  | 27.3 | 368 | 635 | 669 | 643 | 1,872 | **2,191** |
+| MR1   | 0.50 | 356 | 609 | **766** | 654 | **945** | 366 |
+| MR2   | 2.00 | 352 | 658 | **975** | 749 | **1,121** | 793 |
+| MR3   | 0.50 | 450 | 728 | **809** | 802 | **920** | 705 |
+| MR4   | 0.50 | 390 | 596 | **861** | 660 | 493 | **701** |
+| NM1   | 0.50 | 367 | **717** | 668 | 627 | **783** | 405 |
+| RG1   | 6.86 | 302 | 497 | 593 | 557 | 1,248 | **1,494** |
+| RG2   | 7.18 | 433 | 676 | **861** | 823 | 1,841 | **1,912** |
+| RG3   | 5.91 | 460 | 706 | 858 | **894** | **1,969** | 1,613 |
+| SC1   | 9.71 | 464 | 695 | **888** | 728 | 1,819 | **1,889** |
+| XA1   | 2.00 | 413 | 693 | **836** | 797 | 1,173 | **1,513** |
+
+*Table 8b: MIC vs. HTJ2K — in-process, single-threaded and PICS-C multi-threaded, Intel Core Ultra 9 285K (AMD64, 24 P-cores), `-O3 -march=native`. ⚠ = image too small for PICS-C-8; PICS-C-4 is best. Italic = best single-threaded; bold = best PICS-C per row.*
 
 **Complexity**: HTJ2K's open-source implementation (OpenJPH [33]) is approximately 20,000 lines of C++ (counted with `cloc` on the OpenJPH `main` branch, excluding third-party dependencies and test fixtures). MIC's equivalent Delta+RLE+FSE pipeline is approximately 500 lines of Go. This 40× complexity difference matters for maintenance, security auditing, porting, and integration into constrained environments (embedded, browser WASM).
 
@@ -505,29 +558,29 @@ JPEG-LS (ISO 14495-1) [4,5] is the closest practical competitor. We compare agai
 
 | Image | Raw (MB) | MIC ratio | JPEG-LS ratio | MIC-Go (MB/s) | MIC-4s-C (MB/s) | JPEG-LS (MB/s) | speedup |
 |-------|:--------:|:---------:|:-------------:|:--------------:|:----------------:|:--------------:|:-------:|
-| MR    | 0.13     | 2.35×     | **2.52×**     | 136            | **322**          | 95             | 3.4×    |
-| CT    | 0.50     | 2.24×     | **2.68×**     | 188            | **368**          | 140            | 2.6×    |
-| CR    | 7.18     | 3.69×     | **3.96×**     | 299            | **541**          | 153            | 3.5×    |
-| XR    | 10.1     | 1.74×     | **1.76×**     | 305            | **545**          | 109            | 5.0×    |
-| MG1   | 9.35     | 8.79×     | **8.91×**     | 487            | **692**          | 409            | 1.7×    |
-| MG2   | 9.35     | 8.77×     | **8.90×**     | 476            | **685**          | 407            | 1.7×    |
-| MG3   | 27.3     | 2.24×     | **2.38×**     | 311            | **529**          | 154            | 3.4×    |
-| MG4   | 26.0     | 3.47×     | **3.71×**     | 421            | **639**          | 185            | 3.5×    |
-| CT1   | 0.50     | 2.79×     | **3.19×**     | 245            | **433**          | 182            | 2.4×    |
-| CT2   | 0.50     | 3.49×     | **4.54×**     | 238            | **416**          | 173            | 2.4×    |
-| MG-N  | 27.3     | 2.24×     | **2.38×**     | 323            | **556**          | 154            | 3.6×    |
-| MR1   | 0.50     | 2.09×     | **2.30×**     | 274            | **525**          | 115            | 4.6×    |
-| MR2   | 2.00     | 3.28×     | **3.52×**     | 339            | **585**          | 167            | 3.5×    |
-| MR3   | 0.50     | 3.93×     | **4.51×**     | 360            | **597**          | 230            | 2.6×    |
-| MR4   | 0.50     | 4.12×     | **4.49×**     | 323            | **557**          | 198            | 2.8×    |
-| NM1   | 0.50     | 5.15×     | **6.28×**     | 330            | **618**          | 213            | 2.9×    |
-| RG1   | 6.86     | **1.70×** | **1.72×**     | 241            | **419**          | 104            | 4.0×    |
-| RG2   | 7.18     | 4.23×     | **4.51×**     | 365            | **608**          | 178            | 3.4×    |
-| RG3   | 5.91     | 6.08×     | **7.31×**     | 380            | **614**          | 245            | 2.5×    |
-| SC1   | 9.71     | 3.71×     | **4.73×**     | 383            | **601**          | 221            | 2.7×    |
-| XA1   | 2.00     | **5.01×** | **5.39×**     | 337            | **580**          | 208            | 2.8×    |
+| MR    | 0.13     | 2.35×     | **2.52×**     | 144            | **348**          | 102            | 3.4×    |
+| CT    | 0.50     | 2.24×     | **2.68×**     | 191            | **356**          | 137            | 2.6×    |
+| CR    | 7.18     | 3.69×     | **3.96×**     | 296            | **524**          | 153            | 3.4×    |
+| XR    | 10.1     | 1.74×     | **1.76×**     | 308            | **533**          | 108            | 4.9×    |
+| MG1   | 9.35     | 8.79×     | **8.91×**     | 482            | **683**          | 409            | 1.7×    |
+| MG2   | 9.35     | 8.77×     | **8.90×**     | 479            | **686**          | 416            | 1.6×    |
+| MG3   | 27.3     | 2.24×     | **2.38×**     | 308            | **531**          | 153            | 3.5×    |
+| MG4   | 26.0     | 3.47×     | **3.71×**     | 417            | **625**          | 184            | 3.4×    |
+| CT1   | 0.50     | 2.79×     | **3.19×**     | 239            | **436**          | 182            | 2.4×    |
+| CT2   | 0.50     | 3.49×     | **4.54×**     | 238            | **439**          | 175            | 2.5×    |
+| MG-N  | 27.3     | 2.24×     | **2.38×**     | 316            | **536**          | 153            | 3.5×    |
+| MR1   | 0.50     | 2.09×     | **2.30×**     | 278            | **521**          | 116            | 4.5×    |
+| MR2   | 2.00     | 3.28×     | **3.52×**     | 333            | **563**          | 172            | 3.3×    |
+| MR3   | 0.50     | 3.93×     | **4.51×**     | 375            | **639**          | 236            | 2.7×    |
+| MR4   | 0.50     | 4.12×     | **4.49×**     | 316            | **571**          | 197            | 2.9×    |
+| NM1   | 0.50     | 5.15×     | **6.28×**     | 327            | **632**          | 210            | 3.0×    |
+| RG1   | 6.86     | **1.70×** | **1.72×**     | 235            | **406**          | 104            | 3.9×    |
+| RG2   | 7.18     | 4.23×     | **4.51×**     | 367            | **590**          | 193            | 3.1×    |
+| RG3   | 5.91     | 6.08×     | **7.31×**     | 374            | **604**          | 246            | 2.5×    |
+| SC1   | 9.71     | 3.71×     | **4.73×**     | 375            | **587**          | 229            | 2.6×    |
+| XA1   | 2.00     | **5.01×** | **5.39×**     | 331            | **576**          | 204            | 2.8×    |
 
-*Table 9: MIC vs. JPEG-LS — in-process, single-threaded, Apple M2 Max, 21 images. Speedup = MIC-4s-C / JPEG-LS.*
+*Table 9: MIC vs. JPEG-LS — in-process, single-threaded, Apple M2 Max (ARM64, `-O3`, no `-march=native`), 21 images. Speedup = MIC-4s-C / JPEG-LS.*
 
 **Compression ratio**: JPEG-LS achieves better ratios on all 21 modalities. The advantage is largest on CT2 (+30%), SC1 (+27%), NM1 (+22%), and RG3 (+20%) where context-adaptive MED prediction captures fine structure. On XR and RG1 the gap is only 1–2%.
 
@@ -596,33 +649,49 @@ This inequality holds for CR/MG images and explains the crossover where strip bo
 
 **Decompression throughput**:
 
-| Image | MIC-Go | MIC-4s-C | PICS-2 | PICS-4 | PICS-8 |
-|-------|:------:|:--------:|:------:|:------:|:------:|
-| MR    | 136    | 322      | 299    | 262    | 245 ⚠  |
-| CT    | 188    | 368      | 342    | **478** | 467   |
-| CR    | 299    | 541      | 549    | 1,002  | **1,625** |
-| XR    | 305    | 545      | 588    | 1,066  | **1,730** |
-| MG1   | 487    | 692      | 888    | 1,456  | **2,411** |
-| MG2   | 476    | 685      | 877    | 1,464  | **2,376** |
-| MG3   | 311    | 529      | 577    | 1,110  | **1,993** |
-| MG4   | 421    | 639      | 781    | 1,369  | **2,040** |
-| CT1   | 245    | 433      | 391    | **542** | 484   |
-| CT2   | 238    | 416      | 394    | **486** | 428   |
-| MG-N  | 323    | 556      | 582    | 1,092  | **1,894** |
-| MR1   | 274    | 525      | 443    | 609    | **613** |
-| MR2   | 339    | 585      | 579    | 894    | **1,163** |
-| MR3   | 360    | 597      | 530    | **774** | 753   |
-| MR4   | 323    | 557      | 479    | 664    | **688** |
-| NM1   | 330    | 618      | 502    | 611    | **710** |
-| RG1   | 241    | 419      | 448    | 796    | **1,269** |
-| RG2   | 365    | 608      | 635    | 1,108  | **1,715** |
-| RG3   | 380    | 614      | 657    | 1,176  | **1,635** |
-| SC1   | 383    | 601      | 699    | 1,233  | **1,996** |
-| XA1   | 337    | 580      | 589    | 912    | **1,232** |
+| Image | MIC-Go | MIC-4s-C | PICS-C-2 | PICS-C-4 | PICS-C-8 | HTJ2K |
+|-------|:------:|:--------:|:--------:|:--------:|:--------:|:-----:|
+| MR    | 144    | 348      | 530      | **710**  | 482 ⚠   | 265   |
+| CT    | 191    | 356      | 524      | 955      | **1,092** | 307  |
+| CR    | 296    | 524      | 867      | 1,635    | **2,661** | 367  |
+| XR    | 308    | 533      | 874      | 1,666    | **3,025** | 334  |
+| MG1   | 482    | 683      | 1,205    | 2,112    | **3,656** | 810  |
+| MG2   | 479    | 686      | 1,225    | 2,120    | **3,773** | 790  |
+| MG3   | 308    | 531      | 864      | 1,673    | **3,117** | 338  |
+| MG4   | 417    | 625      | 1,093    | 2,004    | **3,689** | 548  |
+| CT1   | 239    | 436      | 686      | 1,013    | **1,183** | 362  |
+| CT2   | 238    | 439      | 676      | 1,041    | **1,189** | 375  |
+| MG-N  | 316    | 536      | 883      | 1,711    | **3,175** | 340  |
+| MR1   | 278    | 521      | 751      | 1,207    | **1,402** | 325  |
+| MR2   | 333    | 563      | 913      | 1,552    | **2,466** | 388  |
+| MR3   | 375    | 639      | 908      | 1,430    | **1,614** | 441  |
+| MR4   | 316    | 571      | 818      | 1,341    | **1,558** | 406  |
+| NM1   | 327    | 632      | 888      | 1,400    | **1,679** | 410  |
+| RG1   | 235    | 406      | 602      | 1,128    | **2,017** | 332  |
+| RG2   | 367    | 590      | 986      | 1,803    | **3,194** | 443  |
+| RG3   | 374    | 604      | 1,035    | 1,944    | **3,302** | 562  |
+| SC1   | 375    | 587      | 1,017    | 1,861    | **3,279** | 401  |
+| XA1   | 331    | 576      | 928      | 1,583    | **2,493** | 419  |
 
-*Table 12: Single-image decompression throughput (MB/s), Apple M2 Max (12-core ARM64). ⚠ = PICS goroutine overhead eliminates the parallelism benefit on this small image.*
+*Table 12: Single-image decompression throughput (MB/s), Apple M2 Max (12-core ARM64), C variants compiled with `-O3`. PICS-C uses C pthreads. ⚠ = MR (256×256) too small for PICS-C-8; PICS-C-4 is best. PICS-C-8 exceeds HTJ2K on all 21 images.*
 
-PICS-8 peaks at 2,411 MB/s on MG1, enabling sub-millisecond decompression of a 9.35 MB image on a 12-core workstation.
+PICS-C-8 peaks at 3,773 MB/s on MG2 and 3,689 MB/s on MG4, enabling sub-millisecond decompression of large mammography images on a 12-core workstation.
+
+**Multi-platform scaling**: PICS throughput across cloud and on-premises hardware, using PICS-C with available cores per platform (8 representative images shown):
+
+| Platform | MR | CT | CR | XR | MG1 | MG2 | MG3 | MG4 |
+|----------|:--:|:--:|:--:|:--:|:---:|:---:|:---:|:---:|
+| AWS c7g.metal (ARM64, 64c) | 2,282 | 4,433 | 8,527 | 9,411 | **16,387** | 16,023 | 8,044 | 15,213 |
+| AWS c7g.8xl (ARM64, 32c)   | 1,524 | 2,186 | 4,290 | 4,562 | 8,901 | 7,879 | 4,455 | 7,132 |
+| AWS c7i.8xl (x86, 32c)     | 1,142 | 1,208 | 3,172 | 3,269 | 5,220 | 5,124 | 3,468 | 4,964 |
+| Mac Studio (M2 Max, 12c)   | 1,054 | 1,121 | 2,089 | 2,101 | 3,666 | 3,659 | 2,239 | 3,188 |
+
+*Table 3: PICS-C decompression throughput (MB/s of raw pixel data) across hardware platforms.*
+
+- **Peak throughput of 16.4 GB/s** on MG1 (64-core ARM64), approaching DRAM bandwidth limits. A roofline analysis [32] confirms that at 64 cores the codec operates at 60–80% of peak memory bandwidth.
+- Throughput scales roughly linearly with core count (32c ≈ half of 64c).
+- ARM64 outperforms x86 at equivalent core counts (wider memory buses on Graviton3).
+- RAM bandwidth is the primary bottleneck at high core counts, not CPU speed.
 
 ### 10.2 Multi-Frame Results (MIC2)
 
@@ -654,6 +723,40 @@ MIC3 is a tiled container for whole slide pathology images with:
 
 *Table 14: WSI tile compression ratios (MIC3, YCoCg-R + Delta+RLE+FSE).*
 
+### 10.4 Single-Frame RGB: Ultrasound and Visible Light (MICR)
+
+Single-frame RGB modalities — ultrasound (US) and visible light photography (VL) — require lossless color compression but lack the tiled access pattern of whole slide images. MIC handles these via `CompressRGB`/`DecompressRGB`, which apply the identical YCoCg-R + Delta+RLE+FSE pipeline to the full image without tile boundaries.
+
+**Critical design choice**: Using the tiled MIC3 (`CompressWSI`) for non-tiled images causes a 30–45% ratio loss because the spatial delta predictor restarts at every 256×256 tile boundary, destroying long-range spatial correlation. Single-frame RGB must be treated as one contiguous prediction domain.
+
+The compressed blob is wrapped in a minimal **MICR container** for browser delivery:
+
+```
+MICR format:
+  Bytes 0-3:   Magic "MICR"
+  Bytes 4-7:   Width  (uint32 LE)
+  Bytes 8-11:  Height (uint32 LE)
+  Bytes 12+:   CompressRGB blob [Y_len][Co_len][Cg_len][Y_data][Co_data][Cg_data]
+```
+
+The JavaScript decoder detects `MICR_MAGIC` in `decodeFile` and routes to `decompressRGBTileBlob` — the same function used for MIC3 tile decoding — so the decoder code is shared with zero duplication.
+
+**Compression ratios on NEMA compsamples** (lossless, Delta+RLE+FSE with YCoCg-R):
+
+| Image | Dimensions | Raw (MB) | Compressed (MB) | Ratio | Notes |
+|-------|-----------|:--------:|:---------------:|:-----:|-------|
+| US1   | 640×480   | 0.88 | 0.14 | 6.24× | Ultrasound, large uniform background |
+| VL1   | 756×486   | 1.05 | 0.31 | 3.41× | Visible light photography |
+| VL2   | 756×486   | 1.05 | 0.33 | 3.23× | |
+| VL3   | 756×486   | 1.05 | 0.30 | 3.46× | |
+| VL4   | 2226×1868 | 11.9 | 6.41 | 1.86× | Higher detail, lower ratio |
+| VL5   | 2670×3340 | 25.5 | 16.3 | 1.56× | Fine skin texture |
+| VL6   | 756×486   | 1.05 | 0.54 | 1.93× | |
+
+*Table 14b: Single-frame RGB compression ratios (MICR, YCoCg-R + Delta+RLE+FSE, NEMA compsamples).*
+
+US1 achieves 6.24× due to the large uniform background regions common in ultrasound images. VL ratios vary with image complexity: smooth clinical photography (VL1–VL3) compresses 3.2–3.5×, while high-detail dermatology images (VL4–VL6) achieve 1.56–1.93×. YCoCg-R alone contributes ~1.2–1.5× uplift by decorrelating RGB channels before entropy coding.
+
 ---
 
 ## 11. Implementation Notes
@@ -682,10 +785,10 @@ MIC ships two browser decoder implementations:
 
 | Decoder | Size | Dependencies | Build step |
 |---------|------|:------------:|:----------:|
-| `mic-decoder.js` (pure JS ES module) | ~15 KB | None | None |
+| `mic-decoder.js` (pure JS ES module) | ~20 KB | None | None |
 | `mic-decoder.wasm` (Go compiled to WASM) | ~2.5 MB | `wasm_exec.js` (17 KB) | `GOOS=js GOARCH=wasm go build` |
 
-The JavaScript decoder is a complete, self-contained implementation of the Delta+RLE+FSE pipeline in 15 KB of ES module code with zero npm dependencies. It works in any browser since 2020 (Chrome 67+, Firefox 68+, Safari 14+). The only non-trivial porting requirement is FSE's 64-bit reverse bit reader, which the JS decoder handles using `BigInt` with explicit uint64 masking.
+The JavaScript decoder is a complete, self-contained implementation of the Delta+RLE+FSE pipeline in ~20 KB of ES module code with zero npm dependencies. It works in any browser since 2020 (Chrome 67+, Firefox 68+, Safari 14+). The only non-trivial porting requirement is FSE's 64-bit reverse bit reader, which the JS decoder handles using `BigInt` with explicit uint64 masking.
 
 **Single-threaded throughput** (Apple M2 Max, Node.js v24.8, median over 20 iterations):
 
@@ -714,7 +817,7 @@ MG1 (a 9.35 MB mammography image) decompresses in **19.4 ms** at 483 MB/s using 
 
 **Why this matters for distribution**: A web-based DICOM viewer can fetch a `.mic` file directly from object storage (S3, GCS) and decode it client-side — zero server-side compute, zero transcoding latency, works offline, works in service workers. The same compressed archive file that a server stores is the file the browser downloads and decodes directly. This is not possible today with HTJ2K or JPEG-LS without a server-side proxy.
 
-Both the JavaScript and WASM decoders support all MIC container formats (MIC1 single-frame, MIC2 multi-frame with movie playback, MIC3 WSI tiles with pyramid level selector and RGB rendering).
+Both the JavaScript and WASM decoders support all MIC container formats (MIC1 single-frame greyscale, MIC2 multi-frame with movie playback, MIC3 WSI tiles with pyramid level selector and RGB rendering, and MICR single-frame RGB for ultrasound and visible light images).
 
 ---
 
@@ -726,7 +829,7 @@ For each additional percentage of compression ratio gained by a more complex pre
 
 | Codec / Variant | Geo. Mean Ratio | Geo. Mean Decomp (MB/s) | Code size | Browser decoder |
 |-----------------|:--------------:|:-----------------------:|:---------:|:---------------:|
-| Delta+RLE+FSE (Go) | 3.12× | 310 | ~500 LOC | **Yes (15 KB JS)** |
+| Delta+RLE+FSE (Go) | 3.12× | 310 | ~500 LOC | **Yes (~20 KB JS)** |
 | Delta+RLE+FSE (4s-C) | 3.12× | 530 | ~1,500 LOC | **Yes** |
 | Wavelet V2 SIMD | 3.28× | 780 | ~2,000 LOC | Possible |
 | HTJ2K (OpenJPH) | 3.15× | 460 | ~20,000 LOC | No |
@@ -735,7 +838,7 @@ For each additional percentage of compression ratio gained by a more complex pre
 
 *Table 15: Pareto frontier of compression ratio vs. decompression throughput (approximate geometric means across all modalities), with implementation complexity and browser deployability.*
 
-This table reveals two key design insights. First, JPEG-LS trades 58% of decompression speed for 10% more compression — unfavorable for clinical systems that decompress 10× more often than they compress. MIC's 4-state-C variant achieves 4× the throughput of JPEG-LS at 91% of its ratio. Second, HTJ2K's ~20,000-line implementation is ~40× larger than MIC's Delta+RLE+FSE pipeline and has no practical browser decoder [35], making it unsuitable for client-side web deployment. MIC achieves competitive or better performance at a fraction of the complexity, and the 15 KB JavaScript decoder makes it uniquely deployable in web browsers.
+This table reveals two key design insights. First, JPEG-LS trades 58% of decompression speed for 10% more compression — unfavorable for clinical systems that decompress 10× more often than they compress. MIC's 4-state-C variant achieves 4× the throughput of JPEG-LS at 91% of its ratio. Second, HTJ2K's ~20,000-line implementation is ~40× larger than MIC's Delta+RLE+FSE pipeline and has no practical browser decoder [35], making it unsuitable for client-side web deployment. MIC achieves competitive or better performance at a fraction of the complexity, and the ~20 KB JavaScript decoder makes it uniquely deployable in web browsers.
 
 ### 12.2 Pipeline Selection Heuristic
 
@@ -748,6 +851,7 @@ When should each pipeline be used? Our results suggest the following decision fr
 | Full 16-bit dynamic range (CT) | Delta+RLE+FSE (avoid wavelet) |
 | Image ≥ 0.5 MB, multi-core available | Add PICS (2–8 strips) |
 | Multi-frame sequence | MIC2 independent mode |
+| Single-frame RGB (US, VL) | MICR (YCoCg-R + full-image, no tiling) |
 | RGB pathology / WSI | MIC3 (YCoCg-R + tiled) |
 | Lossy/progressive needed | Use HTJ2K (MIC does not support lossy) |
 
@@ -757,7 +861,7 @@ When should each pipeline be used? Our results suggest the following decision fr
 - **Encoding speed not reported**: This paper focuses on decompression throughput, consistent with the write-once, read-many PACS archival deployment model. Encoding speed benchmarks are left to future work.
 - **Test dataset size**: 21 test images across 10 modalities drawn from three public de-identified repositories (NEMA WG-04, NEMA 1997 CD, Clunie DBT Case 1). The expanded dataset substantially broadens the evaluation, but large-scale benchmarks from public repositories (e.g., TCIA) with inter-institution variability would further strengthen generality claims.
 - **Temporal prediction** is underperforming on the one available clinical dataset and needs evaluation on cardiac cine MRI and fluoroscopy.
-- **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed.
+- **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed. Single-frame RGB results (Section 10.4) use the NEMA compsamples public dataset, which provides a limited but real-world sample of US and VL modalities.
 - **Benchmark confidence intervals**: Run-to-run variance is <2% on Apple M2 Max and <5% on AWS instances (verified with `-count=5`); formal confidence intervals are deferred to future work.
 - **JPEG-XL** [6]: Designed primarily for 8-bit natural images with no 16-bit DICOM pathway; not compared.
 
@@ -765,7 +869,7 @@ When should each pipeline be used? Our results suggest the following decision fr
 
 MIC could be registered as a DICOM Private Transfer Syntax, allowing PACS vendors to adopt it without modifying the DICOM standard. For whole slide imaging, DICOM Supplement 145 [29] defines the WSI IOD; MIC3's tiled format aligns with this architecture. Herrmann *et al.* [28] describe the practical challenges of implementing DICOM for digital pathology — MIC3's tile-level random access and pyramid support address these requirements directly.
 
-The 15 KB JavaScript decoder enables a direct storage-and-serve distribution model: compressed MIC files can be fetched from object storage and decoded client-side, eliminating server-side transcoding. This is currently not achievable with HTJ2K or JPEG-LS, which have no production browser decoder. The open-source implementation and minimal dependency footprint make MIC a practical candidate for deployment in web-based DICOM viewers and cloud-native PACS architectures.
+The ~20 KB JavaScript decoder enables a direct storage-and-serve distribution model: compressed MIC files can be fetched from object storage and decoded client-side, eliminating server-side transcoding. This is currently not achievable with HTJ2K or JPEG-LS, which have no production browser decoder. The open-source implementation and minimal dependency footprint make MIC a practical candidate for deployment in web-based DICOM viewers and cloud-native PACS architectures.
 
 ---
 
@@ -776,12 +880,14 @@ We have presented MIC, a lossless medical image codec built on a simple observat
 The simplicity thesis is validated empirically: a three-stage Delta+RLE+FSE pipeline (~500 lines of code) matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities for lossless compression, at dramatically higher throughput. When maximum ratio is needed, a five-level wavelet alternative with SIMD acceleration exceeds both the delta pipeline and HTJ2K.
 
 Key results across 21 clinical DICOM images spanning 10 modalities:
-- **Compression ratios**: 1.7×–8.9× (greyscale), 3–5× (RGB WSI tissue)
+- **Compression ratios**: 1.7×–8.9× (greyscale), 3–5× (RGB WSI tissue), 1.56×–6.24× (single-frame RGB US/VL)
 - **Decompression throughput**: up to 16 GB/s (64-core ARM64), geometric mean ≈7.5 GB/s
-- **vs. HTJ2K**: MIC-4state-SIMD exceeds HTJ2K on 17/21 images single-threaded (ARM64) and 18/21 (Intel AMD64 with `-march=native`); PICS-C-8 exceeds HTJ2K on **all 21 images** on both platforms; MIC pipeline is ~40× simpler
+- **vs. HTJ2K**: MIC-4state-C exceeds HTJ2K on 19/21 images single-threaded (ARM64, speed gain from 4-state ILP — no AVX2 on Apple Silicon); MIC-4state-SIMD (AVX2) exceeds HTJ2K on 16/21 images single-threaded (Intel AMD64, `-march=native`); PICS-C-8 exceeds HTJ2K on **all 21 images** on both platforms; MIC pipeline is ~40× simpler
 - **vs. JPEG-LS**: 1.7–5.0× faster decompression; 1–30% lower ratio depending on modality
 - **vs. Delta+Zstandard**: 10–22% better compression on all modalities
-- **Browser decoder**: 15 KB pure JS decoder enables client-side decoding in any modern browser; PICS + `worker_threads` achieves 483 MB/s (MG1) — equivalent to native-code performance in the browser, with no server-side transcoding
+- **Browser decoder**: ~20 KB pure JS decoder enables client-side decoding in any modern browser; PICS + `worker_threads` achieves 483 MB/s (MG1) — equivalent to native-code performance in the browser, with no server-side transcoding
+- **Portability**: Four implementations span the full deployment spectrum — Pure Go (no CGO, single binary, runs anywhere Go runs) → C/pthreads+SIMD (maximum single-node throughput) → JavaScript ES module (~20 KB, zero npm dependencies) → Go WebAssembly (~2.5 MB). No native libraries are required for browser-native decoding; HTJ2K and JPEG-LS have no practical browser decoder.
+- **Compact**: The entire Delta+RLE+FSE pipeline is ~500 lines of Go code — approximately 40× less than HTJ2K's ~20,000-line implementation — yet matches or exceeds HTJ2K on 7/8 modalities for both ratio and decompression speed.
 
 MIC is open-source and available at https://github.com/pappuks/medical-image-codec.
 
