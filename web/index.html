@@ -141,11 +141,15 @@
     <button id="loadTestCT4s" style="border-color:#2196f3;color:#2196f3">CT 4-state</button>
     <button id="loadTestCR4s" style="border-color:#2196f3;color:#2196f3">CR 4-state</button>
     <button id="loadTestMG14s" style="border-color:#2196f3;color:#2196f3">MG1 4-state</button>
+    <button id="loadTestMG24s" style="border-color:#2196f3;color:#2196f3">MG2 4-state</button>
+    <button id="loadTestMG34s" style="border-color:#2196f3;color:#2196f3">MG3 4-state</button>
     <span style="color:#555">|</span>
     <button id="loadTestMRpics"  style="border-color:#ff9800;color:#ff9800">MR PICS-4</button>
     <button id="loadTestCTpics"  style="border-color:#ff9800;color:#ff9800">CT PICS-4</button>
     <button id="loadTestCRpics"  style="border-color:#ff9800;color:#ff9800">CR PICS-8</button>
     <button id="loadTestMG1pics" style="border-color:#ff9800;color:#ff9800">MG1 PICS-8</button>
+    <button id="loadTestMG2pics" style="border-color:#ff9800;color:#ff9800">MG2 PICS-8</button>
+    <button id="loadTestMG3pics" style="border-color:#ff9800;color:#ff9800">MG3 PICS-8</button>
     <span style="color:#555">|</span>
     <label>Decoder:
       <select id="decoderType">
@@ -808,11 +812,17 @@ $('loadTestMR4s').addEventListener('click', () => loadTestFile('MR_4s'));
 $('loadTestCT4s').addEventListener('click', () => loadTestFile('CT_4s'));
 $('loadTestCR4s').addEventListener('click', () => loadTestFile('CR_4s'));
 $('loadTestMG14s').addEventListener('click', () => loadTestFile('MG1_4s'));
+$('loadTestMG24s').addEventListener('click', () => loadTestFile('MG2_4s'));
+$('loadTestMG34s').addEventListener('click', () => loadTestFile('MG3_4s'));
+
 
 $('loadTestMRpics').addEventListener('click',  () => loadTestFile('MR_pics4'));
 $('loadTestCTpics').addEventListener('click',  () => loadTestFile('CT_pics4'));
 $('loadTestCRpics').addEventListener('click',  () => loadTestFile('CR_pics8'));
 $('loadTestMG1pics').addEventListener('click', () => loadTestFile('MG1_pics8'));
+$('loadTestMG2pics').addEventListener('click', () => loadTestFile('MG2_pics8'));
+$('loadTestMG3pics').addEventListener('click', () => loadTestFile('MG3_pics8'));
+
 
 // WSI level selector
 $('wsiLevelSelect').addEventListener('change', () => {

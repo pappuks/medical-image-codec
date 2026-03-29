@@ -243,6 +243,8 @@ var picsTestImages = []struct {
 	{srcName: "CT", numStrips: 4, outName: "CT_pics4"},
 	{srcName: "CR", numStrips: 8, outName: "CR_pics8"},
 	{srcName: "MG1", numStrips: 8, outName: "MG1_pics8"},
+	{srcName: "MG2", numStrips: 8, outName: "MG2_pics8"},
+	{srcName: "MG3", numStrips: 8, outName: "MG3_pics8"},
 }
 
 // WSI test images (raw RGB files)
