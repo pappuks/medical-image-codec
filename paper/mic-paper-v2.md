@@ -311,17 +311,15 @@ The 2D transform applies 1D transforms to all rows, de-interleaves into the Mall
 
 *Table 6: Compression ratio — Delta+RLE+FSE vs. Wavelet V2 SIMD vs. HTJ2K, 21 images.*
 
-Across the original 8 modalities, Wavelet V2 matches or exceeds both Delta+RLE+FSE and HTJ2K on **7 of 8** — the sole exception is CT. On the expanded 21-image dataset the pattern holds: CT images consistently favor Delta+RLE+FSE due to overflow; MR, RG3, NM1 favor HTJ2K's higher-precision wavelet; MG and CR favour the Wavelet V2 or Delta pipeline depending on image statistics.
+Across the original 8 modalities, Wavelet V2 matches or exceeds both Delta+RLE+FSE and HTJ2K on **7 of 8**. On the expanded 21-image dataset the pattern holds: images with high dynamic range utilization favor Delta+RLE+FSE due to coefficient overflow (Section 5.4); images with fine spatial structure (MR, NM, some RG) favor HTJ2K's higher-precision context model; images with smooth, broad-field content (MG, CR, RG) favor Wavelet V2 or the Delta pipeline.
 
-### 5.4 The CT Anomaly: A Case Study in Coefficient Overflow
+### 5.4 Coefficient Overflow on Wide-Dynamic-Range Images
 
-CT images use the full 16-bit dynamic range. The 5/3 lifting predict step can expand coefficients by a factor of 3/2 per level. For L=5 levels:
+When the input uses the full 16-bit dynamic range, the 5/3 lifting predict step expands coefficients by up to 3/2 per level. For L=5 levels:
 
 $$(3/2)^5 \approx 7.6$$
 
-This means worst-case coefficients can reach 7.6× the input dynamic range — well beyond uint16. CT's wavelet ratio drops from 2.24× (delta) to 1.67× (wavelet): a **25% compression penalty** caused entirely by escape encoding of overflowed int32 coefficients.
-
-This is a **fundamental limitation of wavelet-based lossless coding on wide-dynamic-range images** that the JPEG 2000 community rarely discusses. HTJ2K handles it by operating natively in int32 throughout, but this doubles memory bandwidth. MIC's delta pipeline avoids the issue entirely: delta residuals for CT are tightly bounded (90% within ±64), never requiring int32 promotion.
+Worst-case coefficients reach 7.6× the input dynamic range, requiring promotion to int32 and escape coding of out-of-range values — inflating the compressed stream. This is a fundamental constraint of wavelet-based lossless coding on images with high dynamic range utilization. HTJ2K handles it by operating natively in int32 throughout, doubling memory bandwidth. The delta pipeline avoids the issue entirely: residuals are bounded by the predictor's accuracy, not the input dynamic range, so uint16 storage suffices and no escape coding is needed.
 
 ### 5.5 Decompression Speed
 
@@ -361,7 +359,7 @@ On large CR/XR/RG images with strong spatial correlation, Wavelet+SIMD leads on 
 | Decompression speed | Faster (uint16, single-pass) | Slower (int32, two passes) |
 | Memory bandwidth | 2 bytes/sample | 4 bytes/sample |
 | Implementation complexity | ~500 LOC | ~2,000 LOC |
-| CT handling | Excellent (2.24×) | Poor (1.67×, overflow) |
+| Wide dynamic range images | Excellent (no overflow) | Poor (coefficient escape coding) |
 | Lossy extension path | None | Natural (quantize subbands) |
 
 **Recommendation**: Use Delta+RLE+FSE for production lossless workflows prioritizing simplicity and portability. Use Wavelet V2 SIMD when compression ratio is the priority and native acceleration is available. The wavelet pipeline is also the natural foundation for future lossy and progressive modes.
@@ -493,7 +491,7 @@ We compare against lossless HTJ2K using OpenJPH [33], the leading open-source im
 
 *Table 8: MIC vs. HTJ2K — in-process, single-threaded, Apple M2 Max, 21 images.*
 
-**Compression ratio**: MIC achieves better or equal ratios on CT images, XR, MG1/MG2, RG1, and XA1. HTJ2K leads on MR, CR, RG2/RG3, NM1, and some MR variants where its context modelling captures fine structure. The CT advantage stems from MIC's overflow delimiter scheme — over 90% of CT residuals fall within ±64, keeping the effective alphabet small.
+**Compression ratio**: MIC leads on images with high dynamic range utilization (where wavelet coefficient overflow penalizes HTJ2K) and on images with large smooth regions (where 16-bit RLE captures long runs efficiently). HTJ2K leads on images with fine spatial structure where its context model captures higher-order statistics.
 
 **Decompression throughput**: HTJ2K decompresses faster than MIC-Go on most modalities (MIC-Go is pure Go with no native optimizations). However, MIC-4state-SIMD with `-O3 -march=native` **exceeds HTJ2K on 17 of 21 images single-threaded on ARM64** and **18 of 21 on Intel AMD64** — a meaningful reversal of the common assumption that HTJ2K is always faster. PICS-C-8 (8 parallel strips, C pthreads) **exceeds HTJ2K on all 21 images** on both platforms, with 3–4× higher throughput on large images. At 64 cores, MIC's per-frame parallelism scales to 16 GB/s vs. HTJ2K's single-image architecture.
 
