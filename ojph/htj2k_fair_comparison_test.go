@@ -62,7 +62,7 @@ var testImages = []testImage{
 	{name: "RG3", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/RG3_UNC", isBinary: false},
 	{name: "SC1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/SC1_UNC", isBinary: false},
 	{name: "XA1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/XA1_UNC", isBinary: false},
-	// US1_UNC and VL1–VL6_UNC are RGB (samples=3) — not yet supported; see roadmap
+	// US1_UNC and VL1–VL6_UNC are RGB (samples=3) — see mic.CompressRGB / rgbbench_test.go
 }
 
 func loadImage(ti testImage) ([]byte, []uint16, uint16, int, int) {

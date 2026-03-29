@@ -20,7 +20,7 @@ The key insight: DICOM stores pixels at 10–16 bits per sample, but every mains
 | vs. Delta+Zstandard | 10–22% better compression ratio (16-bit alphabet advantage) |
 | Implementations | Pure Go · C + pthreads + BMI2/NEON SIMD · JavaScript ES module · Go WebAssembly |
 | Browser throughput | up to 483 MB/s (12-core, PICS parallel strips via `worker_threads`) |
-| Supported formats | 8–16 bit greyscale; 8-bit RGB (WSI/pathology) |
+| Supported formats | 8–16 bit greyscale; 8-bit RGB (single-frame US/VL + WSI/pathology tiled) |
 | Multi-frame support | MIC2 container (random access or temporal prediction) |
 | WSI support | MIC3 tiled container with pyramid levels and parallel encode/decode |
 | Footprint | ~15 KB JS decoder (zero dependencies); no native libs required for browser use |
@@ -164,6 +164,55 @@ region, err := mic.DecompressWSIRegion(compressed, level, x, y, w, h)
 ```
 
 For format specification, see [docs/architecture.md](./docs/architecture.md).
+
+---
+
+### Single-Frame RGB — `CompressRGB` / `DecompressRGB`
+
+For single-frame RGB images (Ultrasound, Visible Light, fluoroscopy overlays) that don't need the tiled WSI container, MIC provides a lightweight direct API:
+
+```go
+// Compress an 8-bit interleaved RGB image (RGBRGB...)
+compressed, err := mic.CompressRGB(rgbBytes, width, height)
+
+// Decompress back to RGBRGB... bytes
+rgbBytes, err := mic.DecompressRGB(compressed, width, height)
+```
+
+The pipeline is identical to WSI tile compression — YCoCg-R color transform followed by Delta+RLE+FSE on each of the three resulting planes — but without any tiling, pyramid, or container overhead. The output blob is a plain three-plane stream:
+
+```
+[Y_len  uint32 LE]
+[Co_len uint32 LE]
+[Cg_len uint32 LE]
+[Y  plane blob  ]  (Delta+RLE+FSE)
+[Co plane blob  ]  (Delta+RLE+FSE, ZigZag-mapped chrominance)
+[Cg plane blob  ]  (Delta+RLE+FSE, ZigZag-mapped chrominance)
+```
+
+**Compression ratios on NEMA compsamples RGB images** (lossless, Delta+RLE+FSE with YCoCg-R):
+
+| Image | Dimensions | Raw (MB) | Compressed (MB) | Ratio |
+|-------|:----------:|:--------:|:---------------:|:-----:|
+| US1 (Ultrasound) | 640×480 | 0.88 | 0.14 | **6.24×** |
+| VL1 (Visible Light) | 756×486 | 1.05 | 0.31 | **3.41×** |
+| VL2 | 756×486 | 1.05 | 0.33 | **3.23×** |
+| VL3 | 756×486 | 1.05 | 0.30 | **3.46×** |
+| VL4 | 2226×1868 | 11.9 | 6.41 | **1.86×** |
+| VL5 | 2670×3340 | 25.5 | 16.3 | **1.56×** |
+| VL6 | 756×486 | 1.05 | 0.54 | **1.93×** |
+
+US1 (ultrasound) achieves 6.24× because ultrasound frames have large uniform regions and limited color range. VL images are full-color natural photography and compress at 1.6–3.5×, consistent with typical photographic content. YCoCg-R alone contributes ~1.2–1.5× uplift by decorrelating the RGB channels before entropy coding.
+
+Benchmarks across all 8 pipeline variants for US/VL images are in `BenchmarkRGBDeltaRLEFSECompress` et al. in [rgbbench_test.go](rgbbench_test.go):
+
+```bash
+# Single best pipeline (Delta+RLE+FSE with YCoCg-R)
+go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkRGBDeltaRLEFSECompress$ mic
+
+# All 8 pipeline variants on RGB images
+go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkRGB mic
+```
 
 ---
 
@@ -383,4 +432,4 @@ go build -o mic-compress ./cmd/mic-compress/
 - [x] Content-adaptive strip partitioning — PICA places strip boundaries at entropy transitions (equal-cost on inter-row variance) for more uniform per-strip FSE tables — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
 - [x] Full C encoder/decoder pipeline — `mic_compress_c.c` implements Delta→RLE→FSE 4-state in C; correctness verified on 21 DICOM images; geometric mean **1.04×** decompression speedup vs HTJ2K; CGO bindings `MICCompressFourStateC`/`MICCompressTwoStateC` — see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md)
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
-- [ ] Ultrasound (US) image support — US DICOM frames are typically RGB (3 samples/pixel, 8-bit); requires extending the single-frame pipeline to handle multi-channel grayscale-equivalent encoding (similar to WSI YCoCg-R path) without the tiled container overhead
+- [x] Ultrasound (US) and Visible Light (VL) RGB support — `CompressRGB`/`DecompressRGB` provide single-frame YCoCg-R + Delta+RLE+FSE compression without tiled container overhead; 1.56×–6.24× on NEMA compsamples US1/VL1–VL6 — see [rgbcompress.go](rgbcompress.go)
