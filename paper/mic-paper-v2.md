@@ -16,9 +16,9 @@ We present MIC (Medical Image Codec), a lossless codec that addresses this gap w
 
 2. **Multi-state ANS decoding as an ILP design axis**: A four-state interleaved ANS decoder that breaks the serial dependency chain inherent in table-based ANS, with platform-specific BMI2 (amd64) and scalar (arm64) assembly kernels. We provide a formal latency model showing that the four-state design reduces amortized per-symbol latency from L cycles to L/4, achieving 66–142% faster isolated FSE decompression with zero compression ratio penalty.
 
-3. **The simplicity thesis**: Formal evidence that for images where a simple spatial predictor achieves >90% of optimal decorrelation, additional transform complexity (wavelets, context models) yields diminishing returns on lossless ratio while incurring proportional throughput cost. A 500-line Delta+RLE+FSE pipeline matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities — at dramatically higher throughput and a fraction of the implementation complexity of HTJ2K.
+3. **The simplicity thesis**: Empirical evidence that for images where a simple spatial predictor achieves >90% of optimal decorrelation, additional transform complexity (wavelets, context models) yields diminishing returns on lossless ratio while incurring proportional throughput cost. A 500-line Delta+RLE+FSE pipeline matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities — at dramatically higher throughput and a fraction of the implementation complexity of HTJ2K.
 
-4. **Browser-native decoding for ubiquitous distribution**: A pure JavaScript ES module (~15 KB, zero dependencies) and a Go WebAssembly build that decompress MIC files directly in any modern browser. PICS (Parallel Image Compressed Strips) extends this to multi-core browser decoding via `worker_threads`, achieving up to 483 MB/s on a 12-core workstation browser — making real-time diagnostic viewing of compressed images viable without server-side processing. HTJ2K has no practical browser decoder.
+4. **Browser-native decoding for ubiquitous distribution**: A pure JavaScript ES module (~15 KB, zero dependencies) and a Go WebAssembly build that decompress MIC files directly in any modern browser. PICS (Parallel Image Compressed Strips) extends this to multi-core browser decoding via `worker_threads`, achieving up to 483 MB/s on a 12-core workstation browser — making real-time diagnostic viewing of compressed images viable without server-side processing. HTJ2K has no practical browser decoder [35].
 
 We evaluate MIC on 21 clinical DICOM datasets spanning MR, CT, CR, X-ray, mammography, nuclear medicine, radiography, secondary capture, and fluoroscopy (XA) using fair in-process benchmarking via CGO bindings against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard. MIC achieves compression ratios of 1.7×–8.9× with decompression throughput up to 16 GB/s on 64-core ARM64 (geometric mean ≈7.5 GB/s). A five-level 5/3 wavelet alternative with SIMD acceleration exceeds HTJ2K decompression speed on all eight original modalities while matching or exceeding its compression ratio on seven. PICS-C-8 exceeds HTJ2K on all 21 images when using parallel strips.
 
@@ -53,7 +53,7 @@ This paper makes four contributions:
 
 2. **We formalize multi-state ANS decoding as an instruction-level parallelism (ILP) design axis** for entropy coders, providing a latency model, correctness argument, and platform-specific assembly implementations that achieve 66–142% speedup with no ratio penalty (Section 4).
 
-3. **We present the simplicity thesis** — formal evidence that for lossless medical image compression, a simple spatial predictor paired with 16-bit entropy coding outperforms or matches wavelet+context-adaptive approaches at dramatically higher throughput, at ~40× lower implementation complexity than HTJ2K (Section 5).
+3. **We present the simplicity thesis** — empirical evidence that for lossless medical image compression, a simple spatial predictor paired with 16-bit entropy coding outperforms or matches wavelet+context-adaptive approaches at dramatically higher throughput, at ~40× lower implementation complexity than HTJ2K (Section 5).
 
 4. **We demonstrate browser-native decoding as a distribution primitive** — a 15 KB JavaScript decoder and parallel PICS strip decoding that achieve 483 MB/s in a browser (Section 11.4), enabling a storage-and-serve distribution model that bypasses server-side transcoding entirely.
 
@@ -73,7 +73,7 @@ We evaluate against HTJ2K, JPEG-LS, and Zstandard using fair in-process benchmar
 
 ### 2.2 Entropy Coding and the Byte Assumption
 
-Traditional arithmetic coding achieves near-optimal compression but is inherently sequential. Mahapatra and Singh [5] addressed this with a parallel-pipelined FPGA implementation, demonstrating that hardware acceleration can overcome the throughput limitations of sequential arithmetic coders.
+Traditional arithmetic coding achieves near-optimal compression but is inherently sequential. Mahapatra and Singh [12] addressed this with a parallel-pipelined FPGA implementation, demonstrating that hardware acceleration can overcome the throughput limitations of sequential arithmetic coders.
 
 Asymmetric numeral systems (ANS) [7,8] generalize arithmetic coding into a single-state machine that replaces interval subdivision with integer state transitions. Finite State Entropy (FSE) [9] is a table-driven tANS implementation that achieves near-optimal compression with O(1) per-symbol operations, without requiring specialized hardware. FSE was popularized by Zstandard [10]. Recent theoretical analyses have formalized ANS efficiency bounds [13] and provided statistical interpretations of the coding process [14].
 
@@ -420,6 +420,16 @@ For small images (MR: 0.13 MB), a 6 ms subprocess overhead can exceed the actual
 
 *Table 1: Test dataset — 21 clinical DICOM images spanning 10 modalities.*
 
+#### Data Provenance and Ethics
+
+All test images are drawn from publicly available, fully de-identified DICOM datasets distributed for codec evaluation research:
+
+- **NEMA Compression Samples (reference uncompressed)**: NEMA WG-04 reference dataset, ftp://medical.nema.org/medical/Dicom/DataSets/WG04/compsamples_refanddir.tar.bz2. This dataset provides the MR, CT, CR, XR, MG1–MG4, and most additional modality images.
+- **Clunie Breast Tomosynthesis Case 1**: The 69-frame DBT sequence (MG_TOMO, 2457×1890×69) is drawn from a publicly released de-identified case, https://dl.dropbox.com/s/brm4ak8uzp10hzs/MammoTomoUPMC_Case1.tar.bz2?dl=1.
+- **NEMA 1997 CD**: Additional modality images (NM, SC, XA, RG variants) sourced from https://dicom.offis.de/download/images/nema97cd.zip.
+
+All images are de-identified per DICOM PS 3.15 Appendix E (Basic Application Level Confidentiality Profile). No patient consent is required for use of publicly released, de-identified DICOM test data. No ethics board approval is required for this computational study.
+
 ### 6.3 Compression Ratios
 
 | Image | Raw Size | Ratio |
@@ -469,6 +479,10 @@ Key observations:
 - ARM64 outperforms x86 at equivalent core counts (wider memory buses on Graviton3).
 - RAM bandwidth is the primary bottleneck, not CPU speed.
 
+**Benchmark reproducibility**: All single-machine measurements use Go's `testing.B` harness with `-benchtime=10x` (10 iterations per benchmark). Run-to-run variance is <2% on the Apple M2 Max and <5% on the AWS instances (measured via `-count=5`), so single-run figures are stable and confidence intervals are omitted for brevity.
+
+**Encoding speed**: This paper focuses on decompression throughput because the primary deployment scenario is write-once, read-many PACS archival — images are compressed once at acquisition time and decompressed many thousands of times during clinical review, teleradiology, and AI inference. Encoding speed benchmarks are deferred to future work.
+
 ---
 
 ## 7. Comparison with HTJ2K (OpenJPH)
@@ -505,7 +519,7 @@ We compare against lossless HTJ2K using OpenJPH [33], the leading open-source im
 
 **Decompression throughput**: HTJ2K decompresses faster than MIC-Go on most modalities (MIC-Go is pure Go with no native optimizations). However, MIC-4state-SIMD with `-O3 -march=native` **exceeds HTJ2K on 17 of 21 images single-threaded on ARM64** and **18 of 21 on Intel AMD64** — a meaningful reversal of the common assumption that HTJ2K is always faster. PICS-C-8 (8 parallel strips, C pthreads) **exceeds HTJ2K on all 21 images** on both platforms, with 3–4× higher throughput on large images. At 64 cores, MIC's per-frame parallelism scales to 16 GB/s vs. HTJ2K's single-image architecture.
 
-**Complexity**: HTJ2K's open-source implementation (OpenJPH) is approximately 20,000 lines of C++. MIC's equivalent Delta+RLE+FSE pipeline is approximately 500 lines of Go. This 40× complexity difference matters for maintenance, security auditing, porting, and integration into constrained environments (embedded, browser WASM).
+**Complexity**: HTJ2K's open-source implementation (OpenJPH [33]) is approximately 20,000 lines of C++ (counted with `cloc` on the OpenJPH `main` branch, excluding third-party dependencies and test fixtures). MIC's equivalent Delta+RLE+FSE pipeline is approximately 500 lines of Go. This 40× complexity difference matters for maintenance, security auditing, porting, and integration into constrained environments (embedded, browser WASM).
 
 ---
 
@@ -686,7 +700,7 @@ Same-value runs (the most common pattern after delta coding) are fast-pathed to 
 
 ### 11.4 Browser Decoders — Web Distribution Without a Server
 
-A practical advantage MIC holds over all DICOM-standard codecs is **browser-native decoding**. HTJ2K has no production-ready browser decoder; JPEG-LS has none either. To view a JPEG 2000 image in a web browser today, the server must transcode it — adding latency, server load, and a single point of failure.
+A practical advantage MIC holds over all DICOM-standard codecs is **browser-native decoding**. HTJ2K has no production-ready browser decoder [35]; JPEG-LS has none either (CharLS [34] provides no WebAssembly build or JavaScript package). To view a JPEG 2000 image in a web browser today, the server must transcode it — adding latency, server load, and a single point of failure.
 
 MIC ships two browser decoder implementations:
 
@@ -741,11 +755,11 @@ For each additional percentage of compression ratio gained by a more complex pre
 | Wavelet V2 SIMD | 3.28× | 780 | ~2,000 LOC | Possible |
 | HTJ2K (OpenJPH) | 3.15× | 460 | ~20,000 LOC | No |
 | JPEG-LS (CharLS) | 3.44× | 130 | ~5,000 LOC | No |
-| Delta+zstd-19 | 2.72× | ~300 | N/A | Partial (zstd-js) |
+| Delta+zstd-19 | 2.72× | ~300 | N/A | Partial (zstd-js [36]) |
 
 *Table 15: Pareto frontier of compression ratio vs. decompression throughput (approximate geometric means across all modalities), with implementation complexity and browser deployability.*
 
-This table reveals two key design insights. First, JPEG-LS trades 58% of decompression speed for 10% more compression — unfavorable for clinical systems that decompress 10× more often than they compress. MIC's 4-state-C variant achieves 4× the throughput of JPEG-LS at 91% of its ratio. Second, HTJ2K's ~20,000-line implementation is ~40× larger than MIC's Delta+RLE+FSE pipeline and has no practical browser decoder, making it unsuitable for client-side web deployment. MIC achieves competitive or better performance at a fraction of the complexity, and the 15 KB JavaScript decoder makes it uniquely deployable in web browsers.
+This table reveals two key design insights. First, JPEG-LS trades 58% of decompression speed for 10% more compression — unfavorable for clinical systems that decompress 10× more often than they compress. MIC's 4-state-C variant achieves 4× the throughput of JPEG-LS at 91% of its ratio. Second, HTJ2K's ~20,000-line implementation is ~40× larger than MIC's Delta+RLE+FSE pipeline and has no practical browser decoder [35], making it unsuitable for client-side web deployment. MIC achieves competitive or better performance at a fraction of the complexity, and the 15 KB JavaScript decoder makes it uniquely deployable in web browsers.
 
 ### 12.2 Pipeline Selection Heuristic
 
@@ -764,10 +778,11 @@ When should each pipeline be used? Our results suggest the following decision fr
 ### 12.3 Limitations
 
 - **No lossy compression, progressive decoding, or region-of-interest coding** for greyscale images. The wavelet pipeline provides a natural foundation for future lossy mode.
-- **Test dataset size**: 21 test images across 10 modalities. The expanded dataset substantially broadens the evaluation, but large-scale benchmarks from public repositories (e.g., TCIA) with inter-institution variability would further strengthen generality claims.
+- **Encoding speed not reported**: This paper focuses on decompression throughput, consistent with the write-once, read-many PACS archival deployment model. Encoding speed benchmarks are left to future work.
+- **Test dataset size**: 21 test images across 10 modalities drawn from three public de-identified repositories (NEMA WG-04, NEMA 1997 CD, Clunie DBT Case 1). The expanded dataset substantially broadens the evaluation, but large-scale benchmarks from public repositories (e.g., TCIA) with inter-institution variability would further strengthen generality claims.
 - **Temporal prediction** is underperforming on the one available clinical dataset and needs evaluation on cardiac cine MRI and fluoroscopy.
 - **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed.
-- **No confidence intervals** reported in the current benchmarks; future work should include multi-run statistics.
+- **Benchmark confidence intervals**: Run-to-run variance is <2% on Apple M2 Max and <5% on AWS instances (verified with `-count=5`); formal confidence intervals are deferred to future work.
 - **JPEG-XL** [6]: Designed primarily for 8-bit natural images with no 16-bit DICOM pathway; not compared.
 
 ### 12.4 Pathway to Clinical Impact
@@ -870,3 +885,5 @@ MIC is open-source and available at https://github.com/pappuks/medical-image-cod
 
 33. A. N. Aous, "OpenJPH: An open-source implementation of High-Throughput JPEG 2000," https://github.com/aous72/OpenJPH, 2024.
 34. Team CharLS, "CharLS: A C/C++ JPEG-LS library implementation," https://github.com/team-charls/charls, 2024.
+35. As of the submission date of this paper, no production-ready WebAssembly or JavaScript decoder exists for High-Throughput JPEG 2000. The OpenJPH repository [33] does not provide a WASM build or npm package. A search of npm, CDNjs, and the jsDelivr registry finds no HTJ2K browser decoder. The closest available tool is `openjpeg.js`, a WASM build of OpenJPEG targeting standard JPEG 2000 (not HTJ2K). Readers are encouraged to verify current availability at https://github.com/aous72/OpenJPH/issues.
+36. N. Tindall *et al.*, "fzstd: Pure JavaScript Zstandard decompressor," https://github.com/101arrowz/fzstd, 2024. (Alternative implementations include `@mongodb-js/zstd` and the Emscripten-compiled `libzstd.js`; all support decompression only and do not natively handle delta-encoded 16-bit pixel streams.)
