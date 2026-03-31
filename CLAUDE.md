@@ -64,6 +64,35 @@ go test -tags cgo_ojph -run TestMICCorrectnessFourStateC -v ./ojph/
 go test -bench=. -benchtime=10x
 ```
 
+## Web / JavaScript Minification
+
+The `web/` directory ships pre-minified JS files alongside the sources. After editing any of the three source files, regenerate the minified versions:
+
+```bash
+cd web
+
+# Minify core decoder
+npx terser mic-decoder.js --compress --mangle --output mic-decoder.min.js
+
+# Minify parallel decoder and fix import paths
+npx terser mic-decoder-parallel.js --compress --mangle --output mic-decoder-parallel.min.js
+sed -i 's|./mic-decoder.js|./mic-decoder.min.js|g' mic-decoder-parallel.min.js
+sed -i 's|./mic-worker.js|./mic-worker.min.js|g' mic-decoder-parallel.min.js
+
+# Minify worker and fix import path
+npx terser mic-worker.js --compress --mangle --output mic-worker.min.js
+sed -i 's|./mic-decoder.js|./mic-decoder.min.js|g' mic-worker.min.js
+```
+
+`index.html` imports the `.min.js` versions. Sizes (terser, no gzip):
+
+| File | Source | Minified |
+|------|--------|----------|
+| `mic-decoder.js` | ~49 KB | ~17 KB |
+| `mic-decoder-parallel.js` | ~9.5 KB | ~3.3 KB |
+| `mic-worker.js` | ~4 KB | ~1 KB |
+| **Total** | **~62 KB** | **~22 KB** |
+
 ## Architecture
 
 ### Compression Pipeline

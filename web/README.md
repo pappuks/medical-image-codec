@@ -83,7 +83,7 @@ A pure ES module with zero dependencies. Works in any modern browser or Node.js 
 
 | Property | Value |
 |----------|-------|
-| Bundle size | ~15 KB (unminified) |
+| Bundle size | ~49 KB source, ~17 KB minified (`mic-decoder.min.js`) |
 | Dependencies | None |
 | Build step | None required |
 | Browser requirement | `BigInt` support (all major browsers since 2020) |
@@ -345,6 +345,35 @@ worker.onmessage = (e) => {
   renderToCanvas(pixels, 512, 512);
 };
 ```
+
+## Minification
+
+Pre-minified versions of the three JavaScript files are checked into the repository and are what `index.html` imports. After editing any source file, regenerate them:
+
+```bash
+cd web
+
+# Core decoder
+npx terser mic-decoder.js --compress --mangle --output mic-decoder.min.js
+
+# Parallel decoder — patch both import paths after minifying
+npx terser mic-decoder-parallel.js --compress --mangle --output mic-decoder-parallel.min.js
+sed -i 's|./mic-decoder.js|./mic-decoder.min.js|g' mic-decoder-parallel.min.js
+sed -i 's|./mic-worker.js|./mic-worker.min.js|g' mic-decoder-parallel.min.js
+
+# Worker — patch import path after minifying
+npx terser mic-worker.js --compress --mangle --output mic-worker.min.js
+sed -i 's|./mic-decoder.js|./mic-decoder.min.js|g' mic-worker.min.js
+```
+
+| File | Source | Minified |
+|------|--------|----------|
+| `mic-decoder.js` | ~49 KB | ~17 KB |
+| `mic-decoder-parallel.js` | ~9.5 KB | ~3.3 KB |
+| `mic-worker.js` | ~4 KB | ~1 KB |
+| **Total** | **~62 KB** | **~22 KB** |
+
+> The `sed` step is required because terser does not rewrite string literals — the `import … from './mic-decoder.js'` and `new URL('./mic-worker.js', …)` references inside the source files must be updated to point to the `.min.js` counterparts.
 
 ## .mic Container Formats
 
@@ -670,17 +699,22 @@ Run `go run ./cmd/mic-compress/ -testdata` from the repository root to generate 
 
 ```
 web/
-├── mic-decoder.js         # Pure JS decoder (ES module, MIC1 + MIC2 support)
-├── mic-decoder-wasm.js    # WASM loader wrapper (same API as JS decoder)
-├── index.html             # Demo: drag-and-drop, W/L controls, movie player
-├── test-decoder.mjs       # Node.js pixel-perfect verification test
-├── bench-decoder.mjs      # Node.js throughput benchmark (single-threaded + worker_threads)
-├── bench-worker.mjs       # worker_threads worker used by bench-decoder.mjs
-├── README.md              # This file
-├── .gitignore             # Ignores generated files below
-├── mic-decoder.wasm       # [generated] Go WASM binary (~2.5 MB)
-├── wasm_exec.js           # [generated] Go WASM runtime glue (~17 KB)
-└── testdata/              # [generated] compressed test images
+├── mic-decoder.js             # Pure JS decoder — source (~49 KB)
+├── mic-decoder.min.js         # Pure JS decoder — minified (~17 KB, used by index.html)
+├── mic-decoder-parallel.js    # Parallel PICS/RGB decoder — source (~9.5 KB)
+├── mic-decoder-parallel.min.js# Parallel PICS/RGB decoder — minified (~3.3 KB, used by index.html)
+├── mic-worker.js              # Web Worker for parallel decoding — source (~4 KB)
+├── mic-worker.min.js          # Web Worker — minified (~1 KB, used by mic-decoder-parallel.min.js)
+├── mic-decoder-wasm.js        # WASM loader wrapper (same API as JS decoder)
+├── index.html                 # Demo: drag-and-drop, W/L controls, movie player
+├── test-decoder.mjs           # Node.js pixel-perfect verification test
+├── bench-decoder.mjs          # Node.js throughput benchmark (single-threaded + worker_threads)
+├── bench-worker.mjs           # worker_threads worker used by bench-decoder.mjs
+├── README.md                  # This file
+├── .gitignore                 # Ignores generated files below
+├── mic-decoder.wasm           # [generated] Go WASM binary (~2.5 MB)
+├── wasm_exec.js               # [generated] Go WASM runtime glue (~17 KB)
+└── testdata/                  # [generated] compressed test images
     ├── MR.mic             #   MR brain MRI, 256x256 (MIC1)
     ├── CT.mic             #   CT scan, 512x512 (MIC1)
     ├── CR.mic             #   Computed radiography, 1760x2140 (MIC1)
