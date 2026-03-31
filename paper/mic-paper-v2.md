@@ -16,7 +16,7 @@ We present MIC (Medical Image Codec), a lossless codec that addresses this gap w
 
 2. **Multi-state ANS decoding as an ILP design axis**: A four-state interleaved ANS decoder that breaks the serial dependency chain inherent in table-based ANS, with platform-specific BMI2 (amd64) and scalar (arm64) assembly kernels. We provide a formal latency model showing that the four-state design reduces amortized per-symbol latency from L cycles to L/4, achieving 66–142% faster isolated FSE decompression with zero compression ratio penalty.
 
-3. **The simplicity thesis**: Empirical evidence that for images where a simple spatial predictor achieves >90% of optimal decorrelation, additional transform complexity (wavelets, context models) yields diminishing returns on lossless ratio while incurring proportional throughput cost. A 500-line Delta+RLE+FSE pipeline matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities — at dramatically higher throughput and a fraction of the implementation complexity of HTJ2K.
+3. **The simplicity thesis**: Empirical evidence that for images where a simple spatial predictor achieves >90% of optimal decorrelation, additional transform complexity (wavelets, context models) yields diminishing returns on lossless ratio while incurring proportional throughput cost. A ~1,100-line Delta+RLE+FSE pipeline matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities — at dramatically higher throughput and a fraction of the implementation complexity of HTJ2K.
 
 4. **Browser-native decoding for ubiquitous distribution**: A pure JavaScript ES module (~20 KB, zero dependencies) and a Go WebAssembly build that decompress MIC files directly in any modern browser. PICS (Parallel Image Compressed Strips) extends this to multi-core browser decoding via `worker_threads`, achieving up to 483 MB/s on a 12-core workstation browser — making real-time diagnostic viewing of compressed images viable without server-side processing.
 
@@ -51,7 +51,7 @@ This paper makes four contributions:
 
 2. **We formalize multi-state ANS decoding as an instruction-level parallelism (ILP) design axis** for entropy coders, providing a latency model, correctness argument, and platform-specific assembly implementations that achieve 66–142% speedup with no ratio penalty (Section 4).
 
-3. **We present the simplicity thesis** — empirical evidence that for lossless medical image compression, a simple spatial predictor paired with 16-bit entropy coding outperforms or matches wavelet+context-adaptive approaches at dramatically higher throughput, at ~40× lower implementation complexity than HTJ2K (Section 6).
+3. **We present the simplicity thesis** — empirical evidence that for lossless medical image compression, a simple spatial predictor paired with 16-bit entropy coding outperforms or matches wavelet+context-adaptive approaches at dramatically higher throughput, at ~18× lower implementation complexity than HTJ2K (Section 6).
 
 4. **We demonstrate browser-native decoding as a distribution primitive** — a ~20 KB JavaScript decoder and parallel PICS strip decoding that achieve 483 MB/s in a browser (Section 5), enabling a storage-and-serve distribution model that bypasses server-side transcoding entirely.
 
@@ -125,14 +125,14 @@ where $x_{i,j}$ is the pixel at row $i$, column $j$. Boundary pixels use only th
 
 For 16-bit images, residuals can span [−65535, +65535]. Rather than widening to 32 bits, MIC uses an **overflow delimiter** scheme derived from the image's effective bit depth $d = \lceil\log_2(\max(x)+1)\rceil$:
 
-- Residuals with $|r| \leq 2^{d-1} - 1$ are stored directly as uint16 values.
+- Residuals with $|r| \leq 2^{d-1} - 2$ (i.e., $|r| <$ `deltaThreshold`) are stored directly as uint16 values.
 - Larger residuals are preceded by a delimiter value $2^d - 1$, followed by the raw pixel value.
 
 This encoding adapts automatically to the actual bit depth. For 8-bit images stored in 16-bit containers (common in MR), the threshold and delimiter operate within the 8-bit range, reducing the effective symbol alphabet and improving downstream entropy coding.
 
-**Overflow delimiter: no collision by construction**: The delimiter value $D = 2^d - 1$ is a valid pixel value, but the encoding scheme avoids ambiguity structurally. In-range residuals are stored as `uint16(deltaThreshold + diff)` where `deltaThreshold = 2^{d-1} - 1` and `|diff| < deltaThreshold`. This maps in-range residuals to the interval $[0,\ 2 \cdot \text{deltaThreshold} - 2] = [0,\ 2^d - 4]$. The delimiter is $D = 2^d - 1$. Since $2^d - 4 < 2^d - 1$, the stored value of a direct residual can never equal $D$; the two ranges are disjoint. Whenever `|diff| >= deltaThreshold`, the encoder always emits the delimiter followed by the raw pixel value — there is no ambiguous case to resolve. The decoder simply tests `inputVal == delimiterForOverflow` on every word; if true, the next word is the raw pixel; otherwise the residual is decoded as `inputVal - deltaThreshold`. This invariant holds for all pixel values including $x_{i,j} = D$.
+**Overflow delimiter: no collision by construction**: The delimiter value $D = 2^d - 1$ is a valid pixel value, but the encoding scheme avoids ambiguity structurally. In-range residuals are stored as `uint16(deltaThreshold + diff)` where `deltaThreshold = 2^{d-1} - 1` and `|diff| < deltaThreshold` (strict). The strict inequality means `|diff| \leq \text{deltaThreshold} - 1`, so stored values range from `deltaThreshold - (deltaThreshold - 1) = 1` to `deltaThreshold + (deltaThreshold - 1) = 2 \cdot \text{deltaThreshold} - 1 = 2^d - 3`. This maps in-range residuals to the interval $[1,\ 2 \cdot \text{deltaThreshold} - 1] = [1,\ 2^d - 3]$. The delimiter is $D = 2^d - 1$. Since $2^d - 3 < 2^d - 1$, the stored value of a direct residual can never equal $D$; the two ranges are disjoint. Whenever `|diff| >= deltaThreshold`, the encoder always emits the delimiter followed by the raw pixel value — there is no ambiguous case to resolve. The decoder simply tests `inputVal == delimiterForOverflow` on every word; if true, the next word is the raw pixel; otherwise the residual is decoded as `inputVal - deltaThreshold`. This invariant holds for all pixel values including $x_{i,j} = D$.
 
-**Implementation — branch-free interior loop**: The delta decompressor uses four separate code paths for the corner pixel, first-row pixels, first-column pixels, and interior pixels. The interior loop handles $(w-1)(h-1)$ out of $wh$ pixels — the vast majority — without any per-pixel boundary checks, eliminating branch mispredictions in the hot path.
+**Implementation — boundary-check-free interior loop**: The delta decompressor uses four separate code paths for the corner pixel, first-row pixels, first-column pixels, and interior pixels. The interior loop handles $(w-1)(h-1)$ out of $wh$ pixels — the vast majority — without any per-pixel boundary checks (`x > 0`, `y > 0`). The only remaining per-pixel branch is the overflow delimiter test (`inputVal == delimiterForOverflow`), which is highly predictable (almost always not-taken on smooth medical images), making it effectively free for the branch predictor.
 
 **Why not the MED predictor?** The JPEG-LS MED predictor selects among three candidates based on edge orientation. More sophisticated context-based predictors exist (e.g., CALIC [19], FLIF's MANIAC [20]), but they further increase per-pixel computation. We implemented and tested MED through the full RLE+FSE pipeline (Section 8). Result: geometric mean improvement of only +0.9%, with MG4 actually regressing by −1.7%. MED decompression is 1.5–2× slower due to the three-way conditional branch and diagonal neighbor dependency that prevents the branch-free interior loop optimization. The average predictor is retained because the compression gains are small and inconsistent while the speed penalty is significant.
 
@@ -143,7 +143,7 @@ After delta coding, medical images produce long runs of identical residual value
 - **Same run**: a count $c$ followed by a single value repeated $c$ times.
 - **Diff run**: a count $c$ followed by $c$ distinct values.
 
-A key design constraint is that the minimum run length is 3, which guarantees that the RLE output is **never larger** than the input. The proof: a same-run header costs 2 symbols (count + value) encoding 3 input symbols — net saving of 1. A diff-run header costs 1 symbol (count), followed by n ≥ 3 values verbatim — net cost of 1. Since diff runs can only follow same runs (which saved at least 1), the cumulative output never exceeds the input length. This eliminates the need for expansion detection or fallback paths.
+A key design property is that same runs require a minimum of 3 consecutive identical values before they are emitted (the encoder buffers 2 symbols before detecting a run). A same-run header costs 2 symbols (count + value) encoding ≥ 3 input symbols — net saving of ≥ 1 per same run. Diff runs are flushed when the encoder mode switches; short diff flushes (1–2 items) can occur at mode-transition boundaries, introducing a small local overhead. In practice, after delta prediction the residual stream is dominated by same runs over smooth regions, making the net RLE-to-input size ratio well below 1.0 on all tested medical images.
 
 **Why 16-bit RLE matters**: A run of 1,000 identical 16-bit zero residuals is a single same-run record in MIC's RLE (2 uint16 words). The same data viewed as 2,000 bytes has no obvious run structure to a byte-level compressor — the zero bytes are interleaved with whatever byte pattern represents "zero" in little-endian. This is the core of the 16-bit advantage: word-level structure is invisible at the byte level.
 
@@ -238,7 +238,7 @@ The four chains are completely independent: each has its own state variable, its
 
 The empirical speedup is below theoretical maximum due to: (1) bit-reader refill overhead shared across all chains, (2) instruction cache pressure from the unrolled loop, and (3) memory bandwidth limits on the compressed stream reads. Nevertheless, the 4-state decoder achieves **66–142% isolated FSE speedup** across all tested modalities.
 
-**Stream format**: The compressed stream is prefixed with a magic sequence (`0xFF`, `0x02` for two-state; `0xFF`, `0x04` for four-state) followed by a 4-byte symbol count, enabling the auto-detect dispatcher to route streams transparently. The magic byte `0xFF` cannot appear as a valid single-state FSE header (it would imply tableLog = 20 > 16), so all three formats coexist without ambiguity.
+**Stream format**: The compressed stream is prefixed with a magic sequence (`0xFF`, `0x02` for two-state; `0xFF`, `0x04` for four-state) followed by a 4-byte symbol count, enabling the auto-detect dispatcher to route streams transparently. The magic byte `0xFF` cannot appear as a valid single-state FSE header: the single-state header encodes tableLog as `(firstNibble + minTableLog)` where minTableLog = 5, so a first byte of `0xFF` implies tableLog = 15 + 5 = 20, which exceeds `tablelogAbsoluteMax` = 17 and is unconditionally rejected by the decoder. All three formats therefore coexist without ambiguity.
 
 ### 4.3 Platform-Specific Assembly Kernels
 
@@ -434,7 +434,7 @@ The table below consolidates all single-threaded and PICS-C measurements on Appl
 
 **PICS-C**: PICS-C-8 exceeds HTJ2K on all 21 images, peaking at 3,773 MB/s on MG2 — enabling sub-millisecond decompression of large mammography images on a 12-core workstation. HTJ2K's single-threaded architecture has no equivalent parallelism path.
 
-**Complexity**: HTJ2K (OpenJPH [33]) is ~20,000 lines of C++. MIC's Delta+RLE+FSE pipeline is ~500 lines of Go. This 40× complexity difference matters for maintenance, security auditing, and constrained environments.
+**Complexity**: HTJ2K (OpenJPH [33]) is ~20,000 lines of C++. MIC's Delta+RLE+FSE pipeline is ~1,100 lines of Go (five files: `deltacompressu16.go`, `rlecompressu16.go`, `rledecompressu16.go`, `fsecompressu16.go`, `fsedecompressu16.go`). This ~18× complexity difference matters for maintenance, security auditing, and constrained environments.
 
 ### 6.4 Decompression Speed — AMD64
 
@@ -599,7 +599,7 @@ For each additional percentage of compression ratio gained by a more complex pre
 
 | Codec / Variant | Geo. Mean Ratio | Geo. Mean Decomp (MB/s) | Code size | Browser decoder |
 |-----------------|:--------------:|:-----------------------:|:---------:|:---------------:|
-| Delta+RLE+FSE (Go) | 3.12× | 310 | ~500 LOC | **Yes (~20 KB JS)** |
+| Delta+RLE+FSE (Go) | 3.12× | 310 | ~1,100 LOC | **Yes (~20 KB JS)** |
 | Delta+RLE+FSE (4s-C) | 3.12× | 530 | ~1,500 LOC | **Yes** |
 | Wavelet V2 SIMD | 3.28× | 780 | ~2,000 LOC | Possible |
 | HTJ2K (OpenJPH) | 3.15× | 460 | ~20,000 LOC | No |
@@ -608,7 +608,7 @@ For each additional percentage of compression ratio gained by a more complex pre
 
 *Table 11: Pareto frontier of compression ratio vs. decompression throughput (approximate geometric means across all modalities), with implementation complexity and browser deployability.*
 
-This table reveals two key design insights. First, JPEG-LS trades 58% of decompression speed for 10% more compression — unfavorable for clinical systems that decompress 10× more often than they compress. MIC's 4-state-C variant achieves 4× the throughput of JPEG-LS at 91% of its ratio. Second, HTJ2K's ~20,000-line implementation is ~40× larger than MIC's Delta+RLE+FSE pipeline and has no practical browser decoder [35], making it unsuitable for client-side web deployment. MIC achieves competitive or better performance at a fraction of the complexity, and the ~20 KB JavaScript decoder makes it uniquely deployable in web browsers.
+This table reveals two key design insights. First, JPEG-LS trades 58% of decompression speed for 10% more compression — unfavorable for clinical systems that decompress 10× more often than they compress. MIC's 4-state-C variant achieves 4× the throughput of JPEG-LS at 91% of its ratio. Second, HTJ2K's ~20,000-line implementation is ~18× larger than MIC's Delta+RLE+FSE pipeline (~1,100 lines) and has no practical browser decoder [35], making it unsuitable for client-side web deployment. MIC achieves competitive or better performance at a fraction of the complexity, and the ~20 KB JavaScript decoder makes it uniquely deployable in web browsers.
 
 ### 7.3 Limitations
 
@@ -630,16 +630,16 @@ The ~20 KB JavaScript decoder enables a direct storage-and-serve distribution mo
 
 We have presented MIC, a lossless medical image codec built on a simple observation: the compression ecosystem has a 30-year blind spot for 16-bit data. By extending FSE to 65,535 symbols and pairing it with a 16-bit-native RLE stage, MIC outperforms byte-oriented Zstandard by 10–22% on all tested modalities. The four-state interleaved ANS decoder demonstrates that entropy coder design should target instruction-level parallelism width, not just coding efficiency, achieving 66–142% FSE speedup with no ratio penalty.
 
-The simplicity thesis is validated empirically: a three-stage Delta+RLE+FSE pipeline (~500 lines of code) matches or beats HTJ2K on 18/21 medical images for lossless compression ratio, and significantly outperforms on high-dynamic-range images (CT, MG), at dramatically higher throughput. When maximum ratio is needed, a five-level wavelet alternative with SIMD acceleration exceeds both the delta pipeline and HTJ2K.
+The simplicity thesis is validated empirically: a three-stage Delta+RLE+FSE pipeline (~1,100 lines of Go) matches or beats HTJ2K on 18/21 medical images for lossless compression ratio, and significantly outperforms on high-dynamic-range images (CT, MG), at dramatically higher throughput. When maximum ratio is needed, a five-level wavelet alternative with SIMD acceleration exceeds both the delta pipeline and HTJ2K.
 
 Key results across 21 clinical DICOM images spanning 10 modalities:
 - **Compression ratios**: 1.7×–8.9× (greyscale), 1.56×–6.24× (single-frame RGB US/VL)
-- **vs. HTJ2K**: MIC-4state-C exceeds HTJ2K on 19/21 images single-threaded (ARM64, speed gain from 4-state ILP — no AVX2 on Apple Silicon); MIC-4state-SIMD (AVX2) exceeds HTJ2K on 16/21 images single-threaded (Intel AMD64, `-march=native`); PICS-C-8 exceeds HTJ2K on **all 21 images** on both platforms; MIC pipeline is ~40× simpler
+- **vs. HTJ2K**: MIC-4state-C exceeds HTJ2K on 19/21 images single-threaded (ARM64, speed gain from 4-state ILP — no AVX2 on Apple Silicon); MIC-4state-SIMD (AVX2) exceeds HTJ2K on 16/21 images single-threaded (Intel AMD64, `-march=native`); PICS-C-8 exceeds HTJ2K on **all 21 images** on both platforms; MIC pipeline is ~18× simpler
 - **vs. JPEG-LS**: 1.7–5.0× faster decompression; 1–30% lower ratio depending on modality
 - **vs. Delta+Zstandard**: 10–22% better compression on all modalities
 - **Browser decoder**: ~20 KB pure JS decoder enables client-side decoding in any modern browser; PICS + `worker_threads` achieves 483 MB/s (MG1) — equivalent to native-code performance in the browser, with no server-side transcoding
 - **Portability**: Four implementations span the full deployment spectrum — Pure Go (no CGO, single binary, runs anywhere Go runs) → C/pthreads+SIMD (maximum single-node throughput) → JavaScript ES module (~20 KB, zero npm dependencies) → Go WebAssembly (~2.5 MB). No native libraries are required for browser-native decoding; HTJ2K and JPEG-LS have no practical browser decoder.
-- **Compact**: The entire Delta+RLE+FSE pipeline is ~500 lines of Go code — approximately 40× less than HTJ2K's ~20,000-line implementation — yet matches or exceeds HTJ2K compression ratio on 18/21 images and decompression speed on 19/21 images (ARM64, single-threaded 4-state-C).
+- **Compact**: The entire Delta+RLE+FSE pipeline is ~1,100 lines of Go code — approximately 18× less than HTJ2K's ~20,000-line implementation — yet matches or exceeds HTJ2K compression ratio on 18/21 images and decompression speed on 19/21 images (ARM64, single-threaded 4-state-C).
 
 MIC is open-source and available at https://github.com/pappuks/medical-image-codec.
 
