@@ -359,7 +359,7 @@ Both the JavaScript and WASM decoders support all MIC container formats (MIC1 si
 
 *Table 1: Test dataset — 21 clinical DICOM images spanning 10 modalities.*
 
-Sources: NEMA WG-04 compsamples (MR, CT, CR, XR, MG1–MG4), NEMA 1997 CD (NM, SC, XA, RG variants), and the Clunie Breast Tomosynthesis Case 1 (multi-frame, Section 6.5). All images are de-identified per DICOM PS 3.15 Appendix E; no ethics approval is required.
+Sources: NEMA WG-04 compsamples (MR, CT, CR, XR, MG1–MG4), NEMA 1997 CD (NM, SC, XA, RG variants), and the Clunie Breast Tomosynthesis Case 1 (multi-frame, Section 6.7). All images are de-identified per DICOM PS 3.15 Appendix E; no ethics approval is required.
 
 ### 6.2 Compression Ratios
 
@@ -469,7 +469,85 @@ On AMD64 (`-O3 -march=native`), `MIC-4state-SIMD` activates the BMI2/PDEP scatte
 
 **Single-threaded**: MIC-4state-SIMD leads 16/21 images; HTJ2K leads on MG1, MG2, MG4, CT, and RG3 where its SIMD paths are heavily tuned. Wavelet+SIMD gains AVX2 kernels and leads on 5 spatially-correlated images (MG3, MG4, CT2, MG-N, RG1). **PICS-C-8 exceeds HTJ2K on all 21 images** on both platforms.
 
-### 6.5 Parallel Scaling, Multi-Frame, and WSI
+### 6.5 Compression (Encoding) Speed — ARM64
+
+> **MIC-4state-C is the recommended production encoder for single-core workloads.** PICS-8 scales to multi-core ingestion, reaching **1.2–2.1 GB/s** on large images.
+
+The table below reports encoding throughput on Apple M2 Max (ARM64) using `BenchmarkAllCodecsEncode` (`-tags cgo_ojph`, `-benchtime=10x`). All codecs run in-process; no subprocess or file-I/O overhead. MIC-4state-C and MIC-C are C encoders via CGO; all others are pure Go. PICS-N uses Go goroutines encoding independent strips in parallel.
+
+```
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecsEncode$ ./ojph/
+```
+
+| Image | MIC-Go | MIC-4state | MIC-4state-C | MIC-C | Wavelet+SIMD | HTJ2K | JPEG-LS | PICS-2 | PICS-4 | PICS-8 |
+|-------|:------:|:----------:|:------------:|:-----:|:------------:|:-----:|:-------:|:------:|:------:|:------:|
+| MR    | 180    | 219        | 243          | **305** | 102        | 217   | 104     | 111    | 104    | 103    |
+| CT    | 208    | 222        | 314          | 332  | 89           | 258   | 166     | 195    | **358** | 313   |
+| CR    | 307    | 312        | 441          | 416  | 138          | 311   | 119     | 488    | 856    | **1195** |
+| XR    | 336    | 322        | 498          | 500  | 126          | 269   | 123     | 411    | 738    | **1136** |
+| MG1   | 512    | 508        | 621          | 651  | 162          | 676   | 320     | 858    | 1437   | **2001** |
+| MG2   | 517    | 505        | 644          | 702  | 160          | 700   | 315     | 829    | 1372   | **2095** |
+| MG3   | 355    | 352        | 469          | 425  | 95           | 293   | 153     | 530    | 862    | **1491** |
+| MG4   | 458    | 463        | 554          | 503  | 106          | 451   | 234     | 654    | 1186   | **1984** |
+| CT1   | 292    | 267        | 383          | 388  | 89           | 314   | 204     | 299    | **397** | 347   |
+| CT2   | 228    | 236        | 356          | 335  | 95           | 294   | 231     | 286    | **373** | 343   |
+| MG-N  | 341    | 357        | 424          | 427  | 94           | 309   | 156     | 538    | 929    | **1421** |
+| MR1   | 309    | 307        | 400          | **441** | 104        | 271   | 151     | 176    | 301    | 301    |
+| MR2   | 350    | 350        | 498          | 514  | 106          | 339   | 136     | 463    | 672    | **821** |
+| MR3   | 385    | 379        | 538          | **568** | 121        | 389   | 183     | 287    | 434    | 516    |
+| MR4   | 305    | 310        | 466          | **471** | 118        | 354   | 252     | 262    | 363    | 325    |
+| NM1   | 302    | 302        | 438          | 444  | 114          | 346   | 178     | 273    | 323    | **474** |
+| RG1   | 284    | 315        | 471          | 367  | 127          | 256   | 107     | 349    | 648    | **985** |
+| RG2   | 390    | 398        | 493          | 520  | 140          | 402   | 155     | 598    | 1034   | **1583** |
+| RG3   | 374    | 388        | 488          | 485  | 153          | 455   | 198     | 566    | 1029   | **1389** |
+| SC1   | 414    | 413        | 508          | 466  | 97           | 349   | 297     | 655    | 1170   | **1712** |
+| XA1   | 335    | 324        | 449          | 463  | 111          | 357   | 154     | 437    | 708    | **944** |
+
+*Table 5: Encoding throughput (MB/s), Apple M2 Max (12-core ARM64), `-O3`. MIC-4state-C and MIC-C require CGO (`-tags cgo_ojph`); all others are pure Go. Bold = fastest per row. PICS-N uses Go goroutines encoding independent strips in parallel.*
+
+**Single-threaded**: MIC-C leads on smaller images (MR, MR1, MR3, MR4) where the single-core overhead of PICS coordination is non-negligible. MIC-4state-C is 2–2.5× faster than pure-Go MIC-Go on all images. Wavelet+SIMD encode is 2–4× slower than MIC-Go due to the multi-level forward transform cost; its compression ratio advantage (Section 6.2) is the trade-off. HTJ2K encode is comparable to MIC-Go on most images; JPEG-LS is consistently 2–4× slower to encode than MIC-Go.
+
+**PICS-8** reaches **1.2–2.1 GB/s** on large images (CR, XR, MG1–MG4, MG-N, SC1) using 8 goroutines — sufficient for real-time PACS ingestion of high-resolution modalities. For small images (MR, CT, 0.5 MB), strip overhead reverses the scaling benefit; PICS-C-4 or single-core MIC-4state-C is preferred.
+
+### 6.6 Compression (Encoding) Speed — AMD64
+
+On AMD64 (`-O3 -march=native`), MIC-C benefits from native BMI2 code generation; Wavelet+SIMD gains AVX2 predict/update kernels for the forward transform. PICS-N uses Go goroutines.
+
+```
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecsEncode$ ./ojph/
+```
+
+| Image | MIC-Go | MIC-4state | MIC-4state-C | MIC-C | Wavelet+SIMD | HTJ2K | JPEG-LS | PICS-2 | PICS-4 | PICS-8 |
+|-------|:------:|:----------:|:------------:|:-----:|:------------:|:-----:|:-------:|:------:|:------:|:------:|
+| MR    | 121    | 132        | **290**      | 273  | 85           | 177   | 71      | 217    | 186    | 128    |
+| CT    | 180    | 191        | **359**      | 311  | 84           | 178   | 104     | 248    | 301    | 312    |
+| CR    | 233    | 235        | **461**      | 423  | 120          | 193   | 89      | 412    | 732    | **1102** |
+| XR    | 254    | 254        | **550**      | 519  | 127          | 214   | 95      | 447    | 775    | **1212** |
+| MG1   | 380    | 381        | **861**      | 820  | 155          | 508   | 239     | 698    | 1112   | **1651** |
+| MG2   | 380    | 378        | **857**      | 830  | 153          | 507   | 235     | 686    | 1119   | **1676** |
+| MG3   | 256    | 257        | **556**      | 514  | 97           | 202   | 109     | 465    | 832    | **1317** |
+| MG4   | 336    | 340        | **738**      | 710  | 107          | 354   | 162     | 619    | 1098   | **1901** |
+| CT1   | 206    | 211        | **413**      | 384  | 94           | 216   | 132     | 286    | 310    | 329    |
+| CT2   | 192    | 197        | **371**      | 340  | 89           | 194   | 132     | 294    | 320    | 294    |
+| MG-N  | 254    | 261        | **562**      | 529  | 99           | 202   | 107     | 471    | 842    | **1353** |
+| MR1   | 221    | 222        | **460**      | 429  | 101          | 195   | 92      | 302    | 364    | 347    |
+| MR2   | 275    | 263        | **566**      | 532  | 107          | 230   | 102     | 455    | 643    | 857    |
+| MR3   | 300    | 298        | **609**      | 591  | 119          | 292   | 142     | 428    | 498    | 448    |
+| MR4   | 249    | 251        | **494**      | 451  | 108          | 226   | 142     | 333    | 370    | 368    |
+| NM1   | 237    | 240        | **467**      | 444  | 117          | 242   | 132     | 353    | 360    | 302    |
+| RG1   | 229    | 243        | **485**      | 397  | 123          | 198   | 70      | 377    | 651    | 942    |
+| RG2   | 280    | 277        | **582**      | 488  | 125          | 254   | 112     | 499    | 842    | **1220** |
+| RG3   | 275    | 271        | **550**      | 512  | 128          | 273   | 143     | 503    | 863    | **1222** |
+| SC1   | 286    | 293        | **577**      | 551  | 83           | 235   | 169     | 528    | 924    | **1425** |
+| XA1   | 242    | 246        | **496**      | 471  | 101          | 219   | 114     | 419    | 616    | 832    |
+
+*Table 6: Encoding throughput (MB/s), Intel Core Ultra 9 285K (AMD64, 24 P-cores), `-O3 -march=native`. MIC-4state-C and MIC-C require CGO (`-tags cgo_ojph`); all others are pure Go. Bold = fastest per row. PICS-N uses Go goroutines encoding independent strips in parallel.*
+
+**Single-threaded**: MIC-4state-C leads all 21 images on AMD64 — the C encoder with `-O3 -march=native` reaches 290–861 MB/s across modalities, 1.5–2.5× faster than pure-Go MIC-Go. MIC-C is close to MIC-4state-C (within 5–10%) but both require CGO. HTJ2K encode is competitive on MG1/MG2 where its SIMD encode paths are tuned; JPEG-LS is consistently the slowest encoder (2–5× slower than MIC-Go). Wavelet+SIMD encode remains 2–4× slower than MIC-Go due to multi-level forward transform overhead regardless of platform.
+
+**PICS-8** reaches **1.1–1.9 GB/s** on large images (CR, XR, MG, SC1) on AMD64 — comparable to ARM64 PICS-8 despite the lower single-core ceiling, since goroutine scheduling is more efficient on the 24 P-core Intel machine for large strips. For small images (MR, 0.13 MB), per-strip goroutine overhead causes PICS-8 to underperform single-core MIC-4state-C; always prefer single-core for sub-1 MB images.
+
+### 6.7 Parallel Scaling, Multi-Frame, and WSI
 
 **Multi-platform PICS scaling** (PICS-C with available cores, 8 representative images):
 
@@ -562,7 +640,7 @@ This table reveals two key design insights. First, JPEG-LS trades 58% of decompr
 - **Encoding speed not reported**: This paper focuses on decompression throughput, consistent with the write-once, read-many PACS archival deployment model. Encoding speed benchmarks are left to future work.
 - **Test dataset size**: 21 test images across 10 modalities drawn from three public de-identified repositories (NEMA WG-04, NEMA 1997 CD, Clunie DBT Case 1). The expanded dataset substantially broadens the evaluation, but large-scale benchmarks from public repositories (e.g., TCIA) with inter-institution variability would further strengthen generality claims.
 - **Temporal prediction** is underperforming on the one available clinical dataset and needs evaluation on cardiac cine MRI and fluoroscopy.
-- **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed. Single-frame RGB results (Section 6.5) use the NEMA compsamples public dataset, which provides a limited but real-world sample of US and VL modalities.
+- **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed. Single-frame RGB results (Section 6.7) use the NEMA compsamples public dataset, which provides a limited but real-world sample of US and VL modalities.
 - **Benchmark confidence intervals**: Run-to-run variance is <2% on Apple M2 Max and <5% on AWS instances (verified with `-count=5`); formal confidence intervals are deferred to future work.
 - **JPEG-XL** [6]: Designed primarily for 8-bit natural images with no 16-bit DICOM pathway; not compared.
 
