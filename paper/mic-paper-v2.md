@@ -39,7 +39,7 @@ Medical images break this assumption. DICOM stores pixels at 10, 12, or 16 bits 
 - **Re-encode 16-bit symbols as byte pairs**, losing inter-byte correlation and doubling the number of coding steps, or
 - **Truncate the alphabet** at 256 and fall back to raw storage for rare symbols.
 
-This mismatch has measurable consequences. We show (Section 5.2) that applying Zstandard to delta-encoded 16-bit medical images — treating each residual as a two-byte sequence — loses 10–22% of achievable compression compared to a 16-bit-native approach. The loss is not due to Zstandard being a poor compressor; it is structural. A run of 1,000 identical 16-bit zero residuals is a single same-run record in a 16-bit RLE, but 2,000 bytes with no obvious structure to a byte-level LZ77 matcher.
+This mismatch has measurable consequences. We show (Section 6.2) that applying Zstandard to delta-encoded 16-bit medical images — treating each residual as a two-byte sequence — loses 10–22% of achievable compression compared to a 16-bit-native approach. The loss is not due to Zstandard being a poor compressor; it is structural. A run of 1,000 identical 16-bit zero residuals is a single same-run record in a 16-bit RLE, but 2,000 bytes with no obvious structure to a byte-level LZ77 matcher.
 
 At the same time, the 16-bit alphabet presents an *opportunity*. After delta prediction, medical image residuals are sharply concentrated: over 90% of CT residuals fall within a ±64 range, and mammography residuals cluster even more tightly near zero. The effective active alphabet — the number of distinct residual values with non-zero counts — is typically far smaller than 65,536 (often <500). A 16-bit-aware entropy coder can model this concentration directly, without the distortions introduced by byte-splitting.
 
@@ -51,11 +51,11 @@ This paper makes four contributions:
 
 2. **We formalize multi-state ANS decoding as an instruction-level parallelism (ILP) design axis** for entropy coders, providing a latency model, correctness argument, and platform-specific assembly implementations that achieve 66–142% speedup with no ratio penalty (Section 4).
 
-3. **We present the simplicity thesis** — empirical evidence that for lossless medical image compression, a simple spatial predictor paired with 16-bit entropy coding outperforms or matches wavelet+context-adaptive approaches at dramatically higher throughput, at ~40× lower implementation complexity than HTJ2K (Section 5).
+3. **We present the simplicity thesis** — empirical evidence that for lossless medical image compression, a simple spatial predictor paired with 16-bit entropy coding outperforms or matches wavelet+context-adaptive approaches at dramatically higher throughput, at ~40× lower implementation complexity than HTJ2K (Section 6).
 
-4. **We demonstrate browser-native decoding as a distribution primitive** — a ~20 KB JavaScript decoder and parallel PICS strip decoding that achieve 483 MB/s in a browser (Section 6.4), enabling a storage-and-serve distribution model that bypasses server-side transcoding entirely.
+4. **We demonstrate browser-native decoding as a distribution primitive** — a ~20 KB JavaScript decoder and parallel PICS strip decoding that achieve 483 MB/s in a browser (Section 5), enabling a storage-and-serve distribution model that bypasses server-side transcoding entirely.
 
-We evaluate against HTJ2K, JPEG-LS, and Zstandard using fair in-process benchmarking (Section 5), correcting earlier subprocess-based measurements and discussing the benchmarking methodology pitfall (Section 5.1).
+We evaluate against HTJ2K, JPEG-LS, and Zstandard using fair in-process benchmarking (Section 6), correcting earlier subprocess-based measurements and discussing the benchmarking methodology pitfall (Section 6.1).
 
 ---
 
@@ -93,25 +93,7 @@ For medical image residuals after delta prediction, this mutual information is s
 
 **Quantification**: On our test images, the mutual information $I(X_H; X_L)$ of delta residuals ranges from 0.3 bits/symbol (MR, where residuals are very narrow) to 1.1 bits/symbol (MG3, where the residual spread is wider). This corresponds to 8–22% of the total entropy — closely matching the 10–22% empirical advantage of MIC over Delta+Zstandard (Table 8). The gap is not incidental; it is causal.
 
-### 2.4 Signal Processing Approaches and Their Limitations for Lossless Compression
-
-Image compression research has long drawn on classical signal processing. The DCT underpins JPEG; the DWT forms the core of JPEG 2000 [2]. Both decompose images into low-pass (coarse structure) and high-pass (edges, texture, noise) components, mirroring the classical filter-bank model of subband coding [21]. The lifting scheme [22,23] enabled integer-to-integer wavelet transforms [24], making lossless wavelet coding practical.
-
-For **lossy** compression, this decomposition is highly effective — high-frequency subbands can be quantized with little perceptual impact.
-
-For **lossless** compression, however, the picture is more nuanced. Perfect recovery of every transform coefficient imposes constraints that erode the advantages of the filter-bank approach:
-
-1. **Coefficient overflow.** Even with integer lifting schemes (the 5/3 Le Gall wavelet [21,24]), the predict step can produce detail coefficients that exceed the input dynamic range. For 16-bit inputs, worst-case expansion per level is 3/2; for L=5 levels, this is (3/2)^5 ≈ 7.6× the input range — well beyond uint16. This forces either promotion to int32 arithmetic or escape coding of out-of-range values, inflating the compressed stream.
-
-2. **The update step reintroduces correlation.** The lifting update adjusts low-pass coefficients to preserve the signal mean and subband orthogonality. For lossy coding this prevents drift; for lossless coding of images already well-predicted by a simple linear filter, it adds residual energy to the low-pass band without a compensating reduction elsewhere. The smooth homogeneous regions that dominate medical images are exactly where delta encoding already produces near-zero residuals, and the wavelet update provides no benefit.
-
-3. **Higher memory bandwidth.** The 2D wavelet inverse transform requires two sequential passes (rows + columns), each visiting every element at int32 width (4 bytes/sample vs. 2 bytes/sample for delta). At high core counts where decompression is memory-bandwidth-limited, this doubles the traffic.
-
-4. **Entropy coding mismatch.** Wavelet subbands have distinct statistical characteristics that ideally require subband-specific entropy models. JPEG 2000 handles this via EBCOT; simpler coders applied to concatenated coefficients cannot exploit this structure.
-
-By contrast, simple spatial prediction leaves a single residual image whose statistics are homogeneous across the frame — tightly clustered around zero everywhere, regardless of spatial frequency. This homogeneity makes the residual ideal for a uniform 16-bit entropy coding scheme applied once, without subband partitioning or context modeling.
-
-### 2.5 Color Transforms for Pathology Imaging
+### 2.4 Color Transforms for Pathology Imaging
 
 The YCoCg-R transform [25] is a reversible integer approximation of RGB-to-YCbCr. It decorrelates RGB channels into luminance (Y) and chrominance (Co, Cg) with no loss of precision. YCoCg-R has been adopted in screen content coding extensions to H.265/HEVC and is used in MIC for whole slide image compression.
 
@@ -148,6 +130,10 @@ For 16-bit images, residuals can span [−65535, +65535]. Rather than widening t
 
 This encoding adapts automatically to the actual bit depth. For 8-bit images stored in 16-bit containers (common in MR), the threshold and delimiter operate within the 8-bit range, reducing the effective symbol alphabet and improving downstream entropy coding.
 
+**Overflow delimiter: no collision by construction**: The delimiter value $D = 2^d - 1$ is a valid pixel value, but the encoding scheme avoids ambiguity structurally. In-range residuals are stored as `uint16(deltaThreshold + diff)` where `deltaThreshold = 2^{d-1} - 1` and `|diff| < deltaThreshold`. This maps in-range residuals to the interval $[0,\ 2 \cdot \text{deltaThreshold} - 2] = [0,\ 2^d - 4]$. The delimiter is $D = 2^d - 1$. Since $2^d - 4 < 2^d - 1$, the stored value of a direct residual can never equal $D$; the two ranges are disjoint. Whenever `|diff| >= deltaThreshold`, the encoder always emits the delimiter followed by the raw pixel value — there is no ambiguous case to resolve. The decoder simply tests `inputVal == delimiterForOverflow` on every word; if true, the next word is the raw pixel; otherwise the residual is decoded as `inputVal - deltaThreshold`. This invariant holds for all pixel values including $x_{i,j} = D$.
+
+**Implementation — branch-free interior loop**: The delta decompressor uses four separate code paths for the corner pixel, first-row pixels, first-column pixels, and interior pixels. The interior loop handles $(w-1)(h-1)$ out of $wh$ pixels — the vast majority — without any per-pixel boundary checks, eliminating branch mispredictions in the hot path.
+
 **Why not the MED predictor?** The JPEG-LS MED predictor selects among three candidates based on edge orientation. More sophisticated context-based predictors exist (e.g., CALIC [19], FLIF's MANIAC [20]), but they further increase per-pixel computation. We implemented and tested MED through the full RLE+FSE pipeline (Section 8). Result: geometric mean improvement of only +0.9%, with MG4 actually regressing by −1.7%. MED decompression is 1.5–2× slower due to the three-way conditional branch and diagonal neighbor dependency that prevents the branch-free interior loop optimization. The average predictor is retained because the compression gains are small and inconsistent while the speed penalty is significant.
 
 ### 3.2 Run-Length Encoding (16-Bit Native)
@@ -163,6 +149,8 @@ A key design constraint is that the minimum run length is 3, which guarantees th
 
 The run headers use a midpoint protocol: counts ≤ `midCount` signal same runs; counts > `midCount` signal diff runs with the actual count obtained by subtracting `midCount`.
 
+**Implementation — same-run fast path**: Same-value runs (the most common pattern after delta coding, often >80% of all runs on smooth medical images) are fast-pathed in the decoder to return the cached value without touching the compressed-data slice. Each output symbol in a same run requires only a counter decrement — no memory reads. This makes same-run decompression nearly free from a memory-bandwidth standpoint.
+
 ### 3.3 FSE Entropy Coding (Extended to 65,535 Symbols)
 
 The final stage encodes the RLE output using table-based ANS (tANS), implemented as Finite State Entropy. **MIC extends FSE to support up to 65,535 distinct symbols** (versus the 4,095 limit in Zstandard), which is necessary for 16-bit medical images where delta residuals can span a wide range.
@@ -171,10 +159,13 @@ The final stage encodes the RLE output using table-based ANS (tANS), implemented
 
 **Decoding**: Reads bits forward, using a decode table (`decTable`) indexed by current state. Each decode step requires only a table lookup, a bit read, and an addition — no divisions or multiplications.
 
-**Adaptive table sizing**: MIC automatically adjusts the FSE table log:
+**Adaptive table sizing**: MIC automatically adjusts the FSE table log via three thresholds derived from `symbolLen` (number of distinct symbols) and `symbolDensity` (data points per symbol):
 - Default tableLog = 11
-- Bumped to 12 when symbol density > 128 distinct symbols with > 32 data points each
-- Bumped to 13 when symbolLen > 512 and density > 16
+- Bumped to 12 when `symbolDensity > 32 && symbolLen > 128`
+- Bumped to 12 when `symbolDensity > 64 && symbolLen > 256` (higher-confidence bump)
+- Bumped to 13 when `symbolLen > 512 && symbolDensity > 16`
+
+where `symbolDensity = inputLength / symbolLen`. These thresholds encode a practical rate-distortion tradeoff: a larger tableLog allows more precise probability quantization (reducing the FSE coding loss $\sum_s p_s \log_2(p_s / \hat{p}_s)$), but the decode table grows as $2^{\text{tableLog}}$ entries, increasing its memory footprint and potentially exceeding L1/L2 cache. The `symbolLen` guards ensure the table is only enlarged when there are enough distinct symbols to benefit from the extra precision; the density guards ensure there are enough data points per symbol for the frequency estimates to be reliable at the higher resolution. These are empirically tuned thresholds; a formal ablation study across a larger image corpus would be needed to establish them as rate-distortion optima.
 
 This provides 4–7% better compression ratios on CR and mammography images where the residual distribution has a wider spread (Table 4).
 
@@ -189,6 +180,23 @@ This provides 4–7% better compression ratios on CR and mammography images wher
 *Table 4: Effect of adaptive tableLog (11→12).*
 
 **Canonical Huffman alternative**: MIC also supports a canonical Huffman entropy backend. It typically produces 1–3% smaller output than FSE but decodes more slowly due to variable-length code lookup.
+
+### 3.4 Pipeline Selection Guidelines
+
+When should each pipeline be used? Our results (Section 6) suggest the following decision framework, placed here as a design artifact rather than a post-hoc observation:
+
+| Condition | Recommended Pipeline |
+|-----------|---------------------|
+| Effective bit depth ≤ 12, speed priority | Delta+RLE+FSE (4-state) |
+| Effective bit depth ≤ 12, ratio priority | Wavelet V2 SIMD |
+| Full 16-bit dynamic range (CT) | Delta+RLE+FSE (avoid wavelet) |
+| Image ≥ 0.5 MB, multi-core available | Add PICS (2–8 strips) |
+| Multi-frame sequence | MIC2 independent mode |
+| Single-frame RGB (US, VL) | MICR (YCoCg-R + full-image, no tiling) |
+| RGB pathology / WSI | MIC3 (YCoCg-R + tiled) |
+| Lossy/progressive needed | Use HTJ2K (MIC does not support lossy) |
+
+The wavelet restriction for full 16-bit images is structural: the 5/3 lifting predict step expands the coefficient range by up to $(3/2)^L$ per level, causing coefficient overflow at 5 levels on CT images with high dynamic range utilization, which inflates compressed size. PICS strips each receive a dedicated FSE table adapted to their local residual distribution; on non-stationary images $\sum_k |S_k| \cdot H(S_k) < |S| \cdot H(S)$ so PICS improves ratio while also enabling parallelism.
 
 ---
 
@@ -235,11 +243,15 @@ The empirical speedup is below theoretical maximum due to: (1) bit-reader refill
 
 ### 4.3 Platform-Specific Assembly Kernels
 
-**AMD64 (BMI2)**: The kernel uses `SHLXQ`/`SHRXQ` for 3-operand variable shifts, enabling four independent bit-extraction sequences per iteration without CL register contention. Standard x86 shifts require the shift count in the CL register, serializing multi-symbol extraction. BMI2 eliminates this bottleneck.
+MIC includes hand-written Go assembly routines for amd64 and arm64, with pure-Go fallbacks for all other architectures (WebAssembly, RISC-V, etc.).
 
-**ARM64**: The kernel uses `LSLV`/`LSRV` variable-shift instructions which natively take the count from any general-purpose register. No register contention exists, but the kernel still benefits from four-chain ILP because the table-lookup latency is the binding constraint, not the shift instructions.
+**AMD64 (BMI2) — four-state FSE kernel**: Uses `SHLXQ`/`SHRXQ` for 3-operand variable shifts, enabling four independent bit-extraction sequences per iteration without CL register contention. Standard x86 shifts require the shift count in the CL register, serializing multi-symbol extraction. BMI2 eliminates this bottleneck. The kernel also includes an interleaved histogram routine (`countSimpleU16Asm`) using a 4-way unrolled loop that distributes even/odd pixels into separate count arrays, avoiding store-to-load forwarding stalls when consecutive pixels have similar values — a common pattern in medical images after delta prediction.
 
-**Fallback**: A pure-Go four-state loop provides identical functionality on all other platforms (WebAssembly, RISC-V, etc.).
+**ARM64 — four-state FSE kernel**: Uses `LSLV`/`LSRV` variable-shift instructions which natively take the count from any general-purpose register. No register contention exists, but the kernel still benefits from four-chain ILP because the table-lookup latency is the binding constraint, not the shift instructions.
+
+**AMD64 AVX2 — wavelet kernels**: `wt53PredictAVX2`/`wt53UpdateAVX2` and their inverses process 8 `int32` values per cycle using `VPADDD`/`VPSUBD`/`VPSRAD`. They operate on contiguous arrays produced by the blocked column layout (8 columns per cache-line), requiring no gather/scatter. On ARM64 the column pass uses the blocked layout without AVX2 and falls back to scalar arithmetic; the throughput gain from cache-line efficiency alone is +14–25% on large images.
+
+**Fallback**: Pure-Go implementations of all three routines (four-state FSE, histogram, wavelet) provide identical functionality on all non-amd64/arm64 targets.
 
 ### 4.4 FSE Decompression Throughput
 
@@ -265,9 +277,53 @@ This connects to a broader trend in compression: Giesen's interleaved entropy co
 
 ---
 
-## 5. Evaluation
+## 5. Browser-Native Decoding for Ubiquitous Distribution
 
-### 5.1 Benchmarking Methodology and Dataset
+A practical advantage MIC holds over all DICOM-standard codecs is **browser-native decoding**. HTJ2K has no production-ready browser decoder [35]; JPEG-LS has none either (CharLS [34] provides no WebAssembly build or JavaScript package). To view a JPEG 2000 image in a web browser today, the server must transcode it — adding latency, server load, and a single point of failure.
+
+MIC ships two browser decoder implementations:
+
+| Decoder | Size | Dependencies | Build step |
+|---------|------|:------------:|:----------:|
+| `mic-decoder.js` (pure JS ES module) | ~20 KB | None | None |
+| `mic-decoder.wasm` (Go compiled to WASM) | ~2.5 MB | `wasm_exec.js` (17 KB) | `GOOS=js GOARCH=wasm go build` |
+
+The JavaScript decoder is a complete, self-contained implementation of the Delta+RLE+FSE pipeline in ~20 KB of ES module code with zero npm dependencies. It works in any browser since 2020 (Chrome 67+, Firefox 68+, Safari 14+). The only non-trivial porting requirement is FSE's 64-bit reverse bit reader, which the JS decoder handles using `BigInt` with explicit uint64 masking.
+
+**Single-threaded throughput** (Apple M2 Max, Node.js v24.8, median over 20 iterations):
+
+| Image | Dimensions | Ratio | Median ms | MB/s | MP/s |
+|-------|-----------|:-----:|:---------:|:----:|:----:|
+| MR | 256×256 | 2.35× | 3.0 | 42 | 21.8 |
+| CT | 512×512 | 2.24× | 13.5 | 37 | 19.5 |
+| CR | 1760×2140 | 3.69× | 161.2 | 45 | 23.4 |
+| MG1 | 1996×2457 | 8.79× | 80.9 | 116 | 60.6 |
+| MG3 | 3064×4774 | 2.29× | 638.4 | 44 | 22.9 |
+
+*Table 9: JavaScript decoder throughput (4-state), Node.js v24.8, Apple M2 Max.*
+
+**Parallel decoding via PICS + `worker_threads`**: PICS files encode independent strips, enabling parallel browser decoding without SharedArrayBuffer synchronization. Each strip is a self-contained compressed blob — a worker receives its strip, decompresses it independently, and returns the pixel buffer.
+
+| Image | strips | workers | Median ms | MB/s | Speedup |
+|-------|:------:|:-------:|:---------:|:----:|:-------:|
+| MR 256×256 | 4 | 8 | **1.3** | 94 | 2.57× |
+| CT 512×512 | 4 | 8 | **5.0** | 101 | 2.95× |
+| CR 1760×2140 | 8 | 12 | **31.7** | 227 | 5.53× |
+| MG1 1996×2457 | 8 | 12 | **19.4** | 483 | 4.36× |
+
+*Table 10: PICS parallel JavaScript decoder, `worker_threads`, Apple M2 Max. Speedup relative to 1 worker.*
+
+MG1 (a 9.35 MB mammography image) decompresses in **19.4 ms** at 483 MB/s using 12 browser workers — well into real-time territory for diagnostic viewing. CR (a 7.18 MB radiography image) decompresses in 31.7 ms at 227 MB/s.
+
+**Why this matters for distribution**: A web-based DICOM viewer can fetch a `.mic` file directly from object storage (S3, GCS) and decode it client-side — zero server-side compute, zero transcoding latency, works offline, works in service workers. The same compressed archive file that a server stores is the file the browser downloads and decodes directly. This is not possible today with HTJ2K or JPEG-LS without a server-side proxy.
+
+Both the JavaScript and WASM decoders support all MIC container formats (MIC1 single-frame greyscale, MIC2 multi-frame with movie playback, MIC3 WSI tiles with pyramid level selector and RGB rendering, and MICR single-frame RGB for ultrasound and visible light images).
+
+---
+
+## 6. Evaluation
+
+### 6.1 Benchmarking Methodology and Dataset
 
 **Methodology**: An earlier version of our HTJ2K comparison used subprocess-based timings (`ojph_compress`/`ojph_expand`), which inflated apparent HTJ2K latency by approximately 6 ms per invocation (subprocess launch + PGM file I/O). This led to an incorrect claim that MIC was 1.3–1.5× faster. **All comparisons in this paper use in-process CGO library calls** for both MIC and competing codecs, measured on the same hardware in the same process (`BenchmarkAllCodecs`, `-benchtime=10x`).
 
@@ -303,9 +359,9 @@ This connects to a broader trend in compression: Giesen's interleaved entropy co
 
 *Table 1: Test dataset — 21 clinical DICOM images spanning 10 modalities.*
 
-Sources: NEMA WG-04 compsamples (MR, CT, CR, XR, MG1–MG4), NEMA 1997 CD (NM, SC, XA, RG variants), and the Clunie Breast Tomosynthesis Case 1 (multi-frame, Section 5.5). All images are de-identified per DICOM PS 3.15 Appendix E; no ethics approval is required.
+Sources: NEMA WG-04 compsamples (MR, CT, CR, XR, MG1–MG4), NEMA 1997 CD (NM, SC, XA, RG variants), and the Clunie Breast Tomosynthesis Case 1 (multi-frame, Section 6.5). All images are de-identified per DICOM PS 3.15 Appendix E; no ethics approval is required.
 
-### 5.2 Compression Ratios
+### 6.2 Compression Ratios
 
 The table below consolidates all codec variants. MIC and MIC-4state encode identically; PICS ratio varies with strip count (PICS-4/8 columns show the effect of local FSE table adaptation).
 
@@ -335,7 +391,7 @@ The table below consolidates all codec variants. MIC and MIC-4state encode ident
 
 *Table 2: Lossless compression ratios — all codec variants, 21 images. JPEG-LS consistently achieves the highest ratios; MIC leads on high-dynamic-range images (CT, CT1, CT2) where wavelet coefficient overflow penalizes Wavelet and HTJ2K.*
 
-**Analysis**: Mammography achieves the highest ratios (up to 8.79×) due to smooth tissue regions producing near-zero RLE runs over thousands of consecutive pixels. CT with full 16-bit dynamic range achieves 2.24× (MIC) vs. 1.67× (Wavelet): coefficient overflow in the 5/3 lifting step inflates compressed size. Across the original 8 modalities, Wavelet V2 matches or exceeds Delta+RLE+FSE on 7/8 and matches or exceeds HTJ2K on 7/8, but on the expanded 21-image dataset (which includes more CT and MR variants), Delta wins on images with high dynamic range utilization.
+**Analysis**: Mammography achieves the highest ratios (up to 8.79×) due to smooth tissue regions producing near-zero RLE runs over thousands of consecutive pixels. CT with full 16-bit dynamic range achieves 2.24× (MIC) vs. 1.67× (Wavelet): coefficient overflow in the 5/3 lifting step inflates compressed size (see Section 7.1 for the signal-processing analysis of why wavelets underperform on high-dynamic-range lossless images). Across the original 8 modalities, Wavelet V2 matches or exceeds Delta+RLE+FSE on 7/8 and matches or exceeds HTJ2K on 7/8, but on the expanded 21-image dataset (which includes more CT and MR variants), Delta wins on images with high dynamic range utilization.
 
 **PICS strip adaptation**: Large images (CR, MG) *improve* compression with more strips because each strip receives a dedicated FSE table that specializes to its local residual distribution. For small images (MR, CT) the per-strip overhead dominates and ratio decreases slightly. Formally, when the image is non-stationary along the strip dimension: $\sum_k |S_k| \cdot H(S_k) < |S| \cdot H(S)$.
 
@@ -343,7 +399,7 @@ The table below consolidates all codec variants. MIC and MIC-4state encode ident
 
 **Simplicity vs. complexity**: Wavelet V2 adds 1–5% ratio on smooth images at the cost of 2× memory bandwidth (int32 vs. uint16), ~4× implementation size (~2,000 vs. ~500 LOC), and slower decompression on all but the largest high-spatial-correlation images. For production lossless workflows, Delta+RLE+FSE is the recommended choice; Wavelet V2 is the natural foundation for future lossy/progressive modes.
 
-### 5.3 Decompression Speed — ARM64
+### 6.3 Decompression Speed — ARM64
 
 > **MIC-4state-C is the recommended production variant.** It is the fastest single-threaded decoder on **19 of 21 images on ARM64**. PICS-C-8 exceeds HTJ2K on **all 21 images**.
 
@@ -381,7 +437,7 @@ The table below consolidates all single-threaded and PICS-C measurements on Appl
 
 **Complexity**: HTJ2K (OpenJPH [33]) is ~20,000 lines of C++. MIC's Delta+RLE+FSE pipeline is ~500 lines of Go. This 40× complexity difference matters for maintenance, security auditing, and constrained environments.
 
-### 5.4 Decompression Speed — AMD64
+### 6.4 Decompression Speed — AMD64
 
 On AMD64 (`-O3 -march=native`), `MIC-4state-SIMD` activates the BMI2/PDEP scatter decoder, and Wavelet+SIMD gains AVX2 predict/update kernels.
 
@@ -413,7 +469,7 @@ On AMD64 (`-O3 -march=native`), `MIC-4state-SIMD` activates the BMI2/PDEP scatte
 
 **Single-threaded**: MIC-4state-SIMD leads 16/21 images; HTJ2K leads on MG1, MG2, MG4, CT, and RG3 where its SIMD paths are heavily tuned. Wavelet+SIMD gains AVX2 kernels and leads on 5 spatially-correlated images (MG3, MG4, CT2, MG-N, RG1). **PICS-C-8 exceeds HTJ2K on all 21 images** on both platforms.
 
-### 5.5 Parallel Scaling, Multi-Frame, and WSI
+### 6.5 Parallel Scaling, Multi-Frame, and WSI
 
 **Multi-platform PICS scaling** (PICS-C with available cores, 8 representative images):
 
@@ -463,71 +519,27 @@ Independent mode outperforms temporal mode on this dataset. Tomosynthesis frames
 
 ---
 
-## 6. Implementation Notes
-
-### 6.1 Go Assembly Optimizations
-
-MIC includes platform-specific Go assembly routines for amd64 and arm64, with pure-Go fallbacks for all other architectures.
-
-- **Four-state FSE decode kernel**: BMI2 `SHLXQ`/`SHRXQ` on amd64; `LSLV`/`LSRV` on arm64.
-- **Interleaved histogram** (`countSimpleU16Asm`): 4-way unrolled loop distributing even/odd pixels into separate count arrays to avoid store-to-load forwarding stalls.
-- **AVX2 wavelet kernels**: `wt53PredictAVX2`/`wt53UpdateAVX2` processing 8 int32 values per cycle for the blocked column pass.
-
-### 6.2 Branch-Free Delta Decompression
-
-The delta decompressor uses four separate loops for corner, first-row, first-column, and interior pixels. The interior loop handles >(w−1)(h−1) out of wh pixels without any per-pixel boundary checks, eliminating branch mispredictions.
-
-### 6.3 RLE Fast Path
-
-Same-value runs (the most common pattern after delta coding) are fast-pathed to return the cached value without touching the input slice, requiring only a counter decrement per output symbol.
-
-### 6.4 Browser Decoders — Web Distribution Without a Server
-
-A practical advantage MIC holds over all DICOM-standard codecs is **browser-native decoding**. HTJ2K has no production-ready browser decoder [35]; JPEG-LS has none either (CharLS [34] provides no WebAssembly build or JavaScript package). To view a JPEG 2000 image in a web browser today, the server must transcode it — adding latency, server load, and a single point of failure.
-
-MIC ships two browser decoder implementations:
-
-| Decoder | Size | Dependencies | Build step |
-|---------|------|:------------:|:----------:|
-| `mic-decoder.js` (pure JS ES module) | ~20 KB | None | None |
-| `mic-decoder.wasm` (Go compiled to WASM) | ~2.5 MB | `wasm_exec.js` (17 KB) | `GOOS=js GOARCH=wasm go build` |
-
-The JavaScript decoder is a complete, self-contained implementation of the Delta+RLE+FSE pipeline in ~20 KB of ES module code with zero npm dependencies. It works in any browser since 2020 (Chrome 67+, Firefox 68+, Safari 14+). The only non-trivial porting requirement is FSE's 64-bit reverse bit reader, which the JS decoder handles using `BigInt` with explicit uint64 masking.
-
-**Single-threaded throughput** (Apple M2 Max, Node.js v24.8, median over 20 iterations):
-
-| Image | Dimensions | Ratio | Median ms | MB/s | MP/s |
-|-------|-----------|:-----:|:---------:|:----:|:----:|
-| MR | 256×256 | 2.35× | 3.0 | 42 | 21.8 |
-| CT | 512×512 | 2.24× | 13.5 | 37 | 19.5 |
-| CR | 1760×2140 | 3.69× | 161.2 | 45 | 23.4 |
-| MG1 | 1996×2457 | 8.79× | 80.9 | 116 | 60.6 |
-| MG3 | 3064×4774 | 2.29× | 638.4 | 44 | 22.9 |
-
-*Table 9: JavaScript decoder throughput (4-state), Node.js v24.8, Apple M2 Max.*
-
-**Parallel decoding via PICS + `worker_threads`**: PICS files encode independent strips, enabling parallel browser decoding without SharedArrayBuffer synchronization. Each strip is a self-contained compressed blob — a worker receives its strip, decompresses it independently, and returns the pixel buffer.
-
-| Image | strips | workers | Median ms | MB/s | Speedup |
-|-------|:------:|:-------:|:---------:|:----:|:-------:|
-| MR 256×256 | 4 | 8 | **1.3** | 94 | 2.57× |
-| CT 512×512 | 4 | 8 | **5.0** | 101 | 2.95× |
-| CR 1760×2140 | 8 | 12 | **31.7** | 227 | 5.53× |
-| MG1 1996×2457 | 8 | 12 | **19.4** | 483 | 4.36× |
-
-*Table 10: PICS parallel JavaScript decoder, `worker_threads`, Apple M2 Max. Speedup relative to 1 worker.*
-
-MG1 (a 9.35 MB mammography image) decompresses in **19.4 ms** at 483 MB/s using 12 browser workers — well into real-time territory for diagnostic viewing. CR (a 7.18 MB radiography image) decompresses in 31.7 ms at 227 MB/s.
-
-**Why this matters for distribution**: A web-based DICOM viewer can fetch a `.mic` file directly from object storage (S3, GCS) and decode it client-side — zero server-side compute, zero transcoding latency, works offline, works in service workers. The same compressed archive file that a server stores is the file the browser downloads and decodes directly. This is not possible today with HTJ2K or JPEG-LS without a server-side proxy.
-
-Both the JavaScript and WASM decoders support all MIC container formats (MIC1 single-frame greyscale, MIC2 multi-frame with movie playback, MIC3 WSI tiles with pyramid level selector and RGB rendering, and MICR single-frame RGB for ultrasound and visible light images).
-
----
-
 ## 7. Discussion
 
-### 7.1 The Cost-of-Complexity Frontier
+### 7.1 Signal Processing Approaches and Their Limitations for Lossless Compression
+
+Image compression research has long drawn on classical signal processing. The DCT underpins JPEG; the DWT forms the core of JPEG 2000 [2]. Both decompose images into low-pass (coarse structure) and high-pass (edges, texture, noise) components, mirroring the classical filter-bank model of subband coding [21]. The lifting scheme [22,23] enabled integer-to-integer wavelet transforms [24], making lossless wavelet coding practical.
+
+For **lossy** compression, this decomposition is highly effective — high-frequency subbands can be quantized with little perceptual impact.
+
+For **lossless** compression, however, the picture is more nuanced. Perfect recovery of every transform coefficient imposes constraints that erode the advantages of the filter-bank approach. The evaluation results in Section 6.2 — particularly the CT wavelet regression (1.67× vs. 2.24× for Delta) — are directly explained by three structural mechanisms:
+
+1. **Coefficient overflow.** Even with integer lifting schemes (the 5/3 Le Gall wavelet [21,24]), the predict step can produce detail coefficients that exceed the input dynamic range. For 16-bit inputs, worst-case expansion per level is 3/2; for L=5 levels, this is (3/2)^5 ≈ 7.6× the input range — well beyond uint16. This forces either promotion to int32 arithmetic or escape coding of out-of-range values, inflating the compressed stream.
+
+2. **The update step reintroduces correlation.** The lifting update adjusts low-pass coefficients to preserve the signal mean and subband orthogonality. For lossy coding this prevents drift; for lossless coding of images already well-predicted by a simple linear filter, it adds residual energy to the low-pass band without a compensating reduction elsewhere. The smooth homogeneous regions that dominate medical images are exactly where delta encoding already produces near-zero residuals, and the wavelet update provides no benefit.
+
+3. **Higher memory bandwidth.** The 2D wavelet inverse transform requires two sequential passes (rows + columns), each visiting every element at int32 width (4 bytes/sample vs. 2 bytes/sample for delta). At high core counts where decompression is memory-bandwidth-limited, this doubles the traffic.
+
+4. **Entropy coding mismatch.** Wavelet subbands have distinct statistical characteristics that ideally require subband-specific entropy models. JPEG 2000 handles this via EBCOT; simpler coders applied to concatenated coefficients cannot exploit this structure.
+
+By contrast, simple spatial prediction leaves a single residual image whose statistics are homogeneous across the frame — tightly clustered around zero everywhere, regardless of spatial frequency. This homogeneity makes the residual ideal for a uniform 16-bit entropy coding scheme applied once, without subband partitioning or context modeling. This is the signal-processing basis of the simplicity thesis (Contribution 3): the filter-bank advantages that are decisive for lossy coding largely vanish under the lossless constraint for images dominated by smooth regions.
+
+### 7.2 The Cost-of-Complexity Frontier
 
 For each additional percentage of compression ratio gained by a more complex predictor or transform, what is the decompression throughput cost? The table below summarizes the tradeoffs across all MIC variants and competing codecs:
 
@@ -544,28 +556,13 @@ For each additional percentage of compression ratio gained by a more complex pre
 
 This table reveals two key design insights. First, JPEG-LS trades 58% of decompression speed for 10% more compression — unfavorable for clinical systems that decompress 10× more often than they compress. MIC's 4-state-C variant achieves 4× the throughput of JPEG-LS at 91% of its ratio. Second, HTJ2K's ~20,000-line implementation is ~40× larger than MIC's Delta+RLE+FSE pipeline and has no practical browser decoder [35], making it unsuitable for client-side web deployment. MIC achieves competitive or better performance at a fraction of the complexity, and the ~20 KB JavaScript decoder makes it uniquely deployable in web browsers.
 
-### 7.2 Pipeline Selection Heuristic
-
-When should each pipeline be used? Our results suggest the following decision framework:
-
-| Condition | Recommended Pipeline |
-|-----------|---------------------|
-| Effective bit depth ≤ 12, speed priority | Delta+RLE+FSE (4-state) |
-| Effective bit depth ≤ 12, ratio priority | Wavelet V2 SIMD |
-| Full 16-bit dynamic range (CT) | Delta+RLE+FSE (avoid wavelet) |
-| Image ≥ 0.5 MB, multi-core available | Add PICS (2–8 strips) |
-| Multi-frame sequence | MIC2 independent mode |
-| Single-frame RGB (US, VL) | MICR (YCoCg-R + full-image, no tiling) |
-| RGB pathology / WSI | MIC3 (YCoCg-R + tiled) |
-| Lossy/progressive needed | Use HTJ2K (MIC does not support lossy) |
-
 ### 7.3 Limitations
 
 - **No lossy compression, progressive decoding, or region-of-interest coding** for greyscale images. The wavelet pipeline provides a natural foundation for future lossy mode.
 - **Encoding speed not reported**: This paper focuses on decompression throughput, consistent with the write-once, read-many PACS archival deployment model. Encoding speed benchmarks are left to future work.
 - **Test dataset size**: 21 test images across 10 modalities drawn from three public de-identified repositories (NEMA WG-04, NEMA 1997 CD, Clunie DBT Case 1). The expanded dataset substantially broadens the evaluation, but large-scale benchmarks from public repositories (e.g., TCIA) with inter-institution variability would further strengthen generality claims.
 - **Temporal prediction** is underperforming on the one available clinical dataset and needs evaluation on cardiac cine MRI and fluoroscopy.
-- **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed. Single-frame RGB results (Section 5.5) use the NEMA compsamples public dataset, which provides a limited but real-world sample of US and VL modalities.
+- **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed. Single-frame RGB results (Section 6.5) use the NEMA compsamples public dataset, which provides a limited but real-world sample of US and VL modalities.
 - **Benchmark confidence intervals**: Run-to-run variance is <2% on Apple M2 Max and <5% on AWS instances (verified with `-count=5`); formal confidence intervals are deferred to future work.
 - **JPEG-XL** [6]: Designed primarily for 8-bit natural images with no 16-bit DICOM pathway; not compared.
 
