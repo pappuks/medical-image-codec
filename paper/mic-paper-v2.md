@@ -20,7 +20,7 @@ We present MIC (Medical Image Codec), a lossless codec that addresses this gap w
 
 4. **Browser-native decoding for ubiquitous distribution**: A pure JavaScript ES module (~20 KB, zero dependencies) and a Go WebAssembly build that decompress MIC files directly in any modern browser. PICS (Parallel Image Compressed Strips) extends this to multi-core browser decoding via `worker_threads`, achieving up to 483 MB/s on a 12-core workstation browser — making real-time diagnostic viewing of compressed images viable without server-side processing.
 
-We evaluate MIC on 21 clinical DICOM datasets spanning MR, CT, CR, X-ray, mammography, nuclear medicine, radiography, secondary capture, and fluoroscopy (XA) using fair in-process benchmarking via CGO bindings against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard. MIC achieves compression ratios of 1.7×–8.9× with decompression throughput up to 16 GB/s on 64-core ARM64 (geometric mean ≈7.5 GB/s). MIC-4state-C exceeds HTJ2K decompression speed on 19/21 images single-threaded (ARM64) and 16/21 (Intel AMD64, AVX2). A five-level 5/3 wavelet alternative with SIMD acceleration matches or exceeds HTJ2K's compression ratio on 7/8 original modalities and exceeds HTJ2K decompression speed on 4/8 (large images with high spatial correlation: CT, CR, XR, MG3). PICS-C-8 exceeds HTJ2K on all 21 images when using parallel strips.
+We evaluate MIC on 21 clinical DICOM datasets spanning MR, CT, CR, X-ray, mammography, nuclear medicine, radiography, secondary capture, and fluoroscopy (XA) using fair in-process benchmarking via CGO bindings against HTJ2K (OpenJPH), JPEG-LS (CharLS), and Delta+Zstandard. MIC achieves compression ratios of 1.7×–8.9×. MIC-4state-C exceeds HTJ2K decompression speed on 19/21 images single-threaded (ARM64) and 16/21 (Intel AMD64, AVX2). A five-level 5/3 wavelet alternative with SIMD acceleration matches or exceeds HTJ2K's compression ratio on 7/8 original modalities and exceeds HTJ2K decompression speed on 4/8 (large images with high spatial correlation: CT, CR, XR, MG3). PICS-C-8 exceeds HTJ2K on all 21 images when using parallel strips.
 
 The RGB pipeline (YCoCg-R + Delta+RLE+FSE) is also applied to single-frame RGB modalities — ultrasound (US) and visible light (VL) images from the NEMA compsamples dataset — achieving 1.56×–6.24× lossless compression. These images are served via the MICR container, enabling browser-native decoding with the same ~20 KB JavaScript decoder.
 
@@ -28,7 +28,7 @@ The RGB pipeline (YCoCg-R + Delta+RLE+FSE) is also applied to single-frame RGB m
 
 ## 1. Introduction: The 16-Bit Alphabet Gap
 
-Medical imaging generates enormous volumes of data. A single digital breast tomosynthesis (DBT) study produces 69 or more frames of 2457×1890 pixels at 10-bit depth, totalling over 600 MB of raw pixel data. Whole slide pathology images routinely exceed 100,000×100,000 pixels. Efficient lossless compression is essential for archival storage, network transmission, and real-time rendering in clinical PACS and diagnostic viewers.
+Medical imaging generates enormous volumes of data. A single digital breast tomosynthesis (DBT) acquisition view produces 60 or more reconstructed slices — e.g., 69 frames at 2457×1890 pixels, 10-bit depth on the Hologic Selenia Dimensions — totalling over 600 MB of raw pixel data per view. A complete bilateral four-view screening study exceeds 2 GB uncompressed. Efficient lossless compression is essential for archival storage, network transmission, and real-time rendering in clinical PACS and diagnostic viewers.
 
 The DICOM standard [1] supports several transfer syntaxes for lossless compression, including JPEG 2000 [2], JPEG-LS [4], and RLE Lossless. Each has well-documented tradeoffs between compression ratio and decompression speed [26,27]. But all share a less-discussed limitation: **they were designed in an era of 8-bit data**.
 
@@ -55,7 +55,7 @@ This paper makes four contributions:
 
 4. **We demonstrate browser-native decoding as a distribution primitive** — a ~20 KB JavaScript decoder and parallel PICS strip decoding that achieve 483 MB/s in a browser (Section 5), enabling a storage-and-serve distribution model that bypasses server-side transcoding entirely.
 
-We evaluate against HTJ2K, JPEG-LS, and Zstandard using fair in-process benchmarking (Section 6), correcting earlier subprocess-based measurements and discussing the benchmarking methodology pitfall (Section 6.1).
+We evaluate against HTJ2K, JPEG-LS, and Zstandard using fair in-process benchmarking (Section 6).
 
 ---
 
@@ -93,9 +93,9 @@ For medical image residuals after delta prediction, this mutual information is s
 
 **Quantification**: On our test images, the mutual information $I(X_H; X_L)$ of delta residuals ranges from 0.3 bits/symbol (MR, where residuals are very narrow) to 1.1 bits/symbol (MG3, where the residual spread is wider). This corresponds to 8–22% of the total entropy — closely matching the 10–22% empirical advantage of MIC over Delta+Zstandard (Table 8). The gap is not incidental; it is causal.
 
-### 2.4 Color Transforms for Pathology Imaging
+### 2.4 Color Transforms for RGB Modalities
 
-The YCoCg-R transform [25] is a reversible integer approximation of RGB-to-YCbCr. It decorrelates RGB channels into luminance (Y) and chrominance (Co, Cg) with no loss of precision. YCoCg-R has been adopted in screen content coding extensions to H.265/HEVC and is used in MIC for whole slide image compression.
+The YCoCg-R transform [25] is a reversible integer approximation of RGB-to-YCbCr. It decorrelates RGB channels into luminance (Y) and chrominance (Co, Cg) with no loss of precision. YCoCg-R has been adopted in screen content coding extensions to H.265/HEVC and is used in MIC for RGB medical image compression (ultrasound, visible light).
 
 ---
 
@@ -193,7 +193,6 @@ When should each pipeline be used? Our results (Section 6) suggest the following
 | Image ≥ 0.5 MB, multi-core available | Add PICS (2–8 strips) |
 | Multi-frame sequence | MIC2 independent mode |
 | Single-frame RGB (US, VL) | MICR (YCoCg-R + full-image, no tiling) |
-| RGB pathology / WSI | MIC3 (YCoCg-R + tiled) |
 | Lossy/progressive needed | Use HTJ2K (MIC does not support lossy) |
 
 The wavelet restriction for full 16-bit images is structural: the 5/3 lifting predict step expands the coefficient range by up to $(3/2)^L$ per level, causing coefficient overflow at 5 levels on CT images with high dynamic range utilization, which inflates compressed size. PICS strips each receive a dedicated FSE table adapted to their local residual distribution; on non-stationary images $\sum_k |S_k| \cdot H(S_k) < |S| \cdot H(S)$ so PICS improves ratio while also enabling parallelism.
@@ -317,7 +316,7 @@ MG1 (a 9.35 MB mammography image) decompresses in **19.4 ms** at 483 MB/s using 
 
 **Why this matters for distribution**: A web-based DICOM viewer can fetch a `.mic` file directly from object storage (S3, GCS) and decode it client-side — zero server-side compute, zero transcoding latency, works offline, works in service workers. The same compressed archive file that a server stores is the file the browser downloads and decodes directly. This is not possible today with HTJ2K or JPEG-LS without a server-side proxy.
 
-Both the JavaScript and WASM decoders support all MIC container formats (MIC1 single-frame greyscale, MIC2 multi-frame with movie playback, MIC3 WSI tiles with pyramid level selector and RGB rendering, and MICR single-frame RGB for ultrasound and visible light images).
+Both the JavaScript and WASM decoders support all MIC container formats (MIC1 single-frame greyscale, MIC2 multi-frame with movie playback, and MICR single-frame RGB for ultrasound and visible light images).
 
 ---
 
@@ -325,7 +324,7 @@ Both the JavaScript and WASM decoders support all MIC container formats (MIC1 si
 
 ### 6.1 Benchmarking Methodology and Dataset
 
-**Methodology**: An earlier version of our HTJ2K comparison used subprocess-based timings (`ojph_compress`/`ojph_expand`), which inflated apparent HTJ2K latency by approximately 6 ms per invocation (subprocess launch + PGM file I/O). This led to an incorrect claim that MIC was 1.3–1.5× faster. **All comparisons in this paper use in-process CGO library calls** for both MIC and competing codecs, measured on the same hardware in the same process (`BenchmarkAllCodecs`, `-benchtime=10x`).
+**Methodology**: All comparisons use in-process CGO library calls for both MIC and competing codecs, measured on the same hardware in the same process (`BenchmarkAllCodecs`, `-benchtime=10x`).
 
 **Wavelet variant**: We implemented the Le Gall 5/3 integer wavelet [21] using the lifting scheme [22,23] — the same transform used in JPEG 2000 lossless mode — as an alternative front-end to the RLE+FSE backend. Five decomposition levels; subband-order scan: LL(5) → HL₅ → LH₅ → HH₅ → ... → HH₁. The 2D column pass is accelerated with a **blocked layout** (8 columns per cache-line) and AVX2 predict/update kernels on AMD64; compressed output is **bit-identical** to scalar.
 
@@ -547,20 +546,7 @@ go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCode
 
 **PICS-8** reaches **1.1–1.9 GB/s** on large images (CR, XR, MG, SC1) on AMD64 — comparable to ARM64 PICS-8 despite the lower single-core ceiling, since goroutine scheduling is more efficient on the 24 P-core Intel machine for large strips. For small images (MR, 0.13 MB), per-strip goroutine overhead causes PICS-8 to underperform single-core MIC-4state-C; always prefer single-core for sub-1 MB images.
 
-### 6.7 Parallel Scaling, Multi-Frame, and WSI
-
-**Multi-platform PICS scaling** (PICS-C with available cores, 8 representative images):
-
-| Platform | MR | CT | CR | XR | MG1 | MG2 | MG3 | MG4 |
-|----------|:--:|:--:|:--:|:--:|:---:|:---:|:---:|:---:|
-| AWS c7g.metal (ARM64, 64c) | 2,282 | 4,433 | 8,527 | 9,411 | **16,387** | 16,023 | 8,044 | 15,213 |
-| AWS c7g.8xl (ARM64, 32c)   | 1,524 | 2,186 | 4,290 | 4,562 | 8,901 | 7,879 | 4,455 | 7,132 |
-| AWS c7i.8xl (x86, 32c)     | 1,142 | 1,208 | 3,172 | 3,269 | 5,220 | 5,124 | 3,468 | 4,964 |
-| Mac Studio (M2 Max, 12c)   | 1,054 | 1,121 | 2,089 | 2,101 | 3,666 | 3,659 | 2,239 | 3,188 |
-
-*Table 5: PICS-C decompression throughput (MB/s of raw pixel data) across hardware platforms.*
-
-Peak throughput of **16.4 GB/s** on MG1 (64-core ARM64), approaching DRAM bandwidth limits. Throughput scales roughly linearly with core count; ARM64 outperforms x86 at equivalent core counts (wider memory buses on Graviton3).
+### 6.7 Multi-Frame and Single-Frame RGB Compression
 
 **Multi-frame (MIC2)** — 69-frame breast tomosynthesis (2457×1890×69, 614 MB raw):
 
@@ -573,17 +559,7 @@ Peak throughput of **16.4 GB/s** on MG1 (64-core ARM64), approaching DRAM bandwi
 
 Independent mode outperforms temporal mode on this dataset. Tomosynthesis frames differ in X-ray projection angle, not temporal motion — there is no inter-frame pixel correlation to exploit. Temporal mode is designed for genuine temporal sequences (cardiac cine MRI, fluoroscopy, NM dynamic studies) where consecutive frames share anatomy with only contrast or motion changes.
 
-**WSI (MIC3)** — tiled container for whole slide pathology images (YCoCg-R + Delta+RLE+FSE, 256×256 tiles, pyramid levels):
-
-| Tile Type | Ratio | Notes |
-|-----------|:-----:|-------|
-| White background | 1,946× | Near-zero entropy |
-| Dense tissue (H&E) | 4.4× | Smooth staining gradients |
-| Gradient | 5.4× | Excellent spatial correlation |
-
-*Table 7: WSI tile compression ratios (MIC3).*
-
-**Single-Frame RGB (MICR)** — `CompressRGB`/`DecompressRGB` applies YCoCg-R + Delta+RLE+FSE to the full image as a single contiguous prediction domain. Using the tiled MIC3 path for non-tiled images causes 30–45% ratio loss (delta predictor restarts at every tile boundary). Compressed blob is wrapped in a minimal MICR container (magic + width + height) for browser delivery; the JS decoder reuses the same `decompressRGBTileBlob` function as MIC3 tiles.
+**Single-Frame RGB (MICR)** — `CompressRGB`/`DecompressRGB` applies YCoCg-R + Delta+RLE+FSE to the full image as a single contiguous prediction domain. The compressed blob is wrapped in a minimal MICR container (magic + width + height) for browser delivery via the same ~20 KB JavaScript decoder.
 
 | Image | Dimensions | Ratio | Notes |
 |-------|-----------|:-----:|-------|
@@ -637,16 +613,14 @@ This table reveals two key design insights. First, JPEG-LS trades 58% of decompr
 ### 7.3 Limitations
 
 - **No lossy compression, progressive decoding, or region-of-interest coding** for greyscale images. The wavelet pipeline provides a natural foundation for future lossy mode.
-- **Encoding speed not reported**: This paper focuses on decompression throughput, consistent with the write-once, read-many PACS archival deployment model. Encoding speed benchmarks are left to future work.
 - **Test dataset size**: 21 test images across 10 modalities drawn from three public de-identified repositories (NEMA WG-04, NEMA 1997 CD, Clunie DBT Case 1). The expanded dataset substantially broadens the evaluation, but large-scale benchmarks from public repositories (e.g., TCIA) with inter-institution variability would further strengthen generality claims.
 - **Temporal prediction** is underperforming on the one available clinical dataset and needs evaluation on cardiac cine MRI and fluoroscopy.
-- **WSI results** are on synthetic tiles only; real whole-slide pathology benchmarks are needed. Single-frame RGB results (Section 6.7) use the NEMA compsamples public dataset, which provides a limited but real-world sample of US and VL modalities.
+- **Single-frame RGB results** (Section 6.7) use the NEMA compsamples public dataset, which provides a limited but real-world sample of US and VL modalities.
 - **Benchmark confidence intervals**: Run-to-run variance is <2% on Apple M2 Max and <5% on AWS instances (verified with `-count=5`); formal confidence intervals are deferred to future work.
-- **JPEG-XL** [6]: Designed primarily for 8-bit natural images with no 16-bit DICOM pathway; not compared.
 
 ### 7.4 Pathway to Clinical Impact
 
-MIC could be registered as a DICOM Private Transfer Syntax, allowing PACS vendors to adopt it without modifying the DICOM standard. For whole slide imaging, DICOM Supplement 145 [29] defines the WSI IOD; MIC3's tiled format aligns with this architecture. Herrmann *et al.* [28] describe the practical challenges of implementing DICOM for digital pathology — MIC3's tile-level random access and pyramid support address these requirements directly.
+MIC could be registered as a DICOM Private Transfer Syntax, allowing PACS vendors to adopt it without modifying the DICOM standard.
 
 The ~20 KB JavaScript decoder enables a direct storage-and-serve distribution model: compressed MIC files can be fetched from object storage and decoded client-side, eliminating server-side transcoding. This is currently not achievable with HTJ2K or JPEG-LS, which have no production browser decoder. The open-source implementation and minimal dependency footprint make MIC a practical candidate for deployment in web-based DICOM viewers and cloud-native PACS architectures.
 
@@ -656,17 +630,16 @@ The ~20 KB JavaScript decoder enables a direct storage-and-serve distribution mo
 
 We have presented MIC, a lossless medical image codec built on a simple observation: the compression ecosystem has a 30-year blind spot for 16-bit data. By extending FSE to 65,535 symbols and pairing it with a 16-bit-native RLE stage, MIC outperforms byte-oriented Zstandard by 10–22% on all tested modalities. The four-state interleaved ANS decoder demonstrates that entropy coder design should target instruction-level parallelism width, not just coding efficiency, achieving 66–142% FSE speedup with no ratio penalty.
 
-The simplicity thesis is validated empirically: a three-stage Delta+RLE+FSE pipeline (~500 lines of code) matches or beats JPEG 2000's wavelet+EBCOT on 7/8 medical modalities for lossless compression, at dramatically higher throughput. When maximum ratio is needed, a five-level wavelet alternative with SIMD acceleration exceeds both the delta pipeline and HTJ2K.
+The simplicity thesis is validated empirically: a three-stage Delta+RLE+FSE pipeline (~500 lines of code) matches or beats HTJ2K on 18/21 medical images for lossless compression ratio, and significantly outperforms on high-dynamic-range images (CT, MG), at dramatically higher throughput. When maximum ratio is needed, a five-level wavelet alternative with SIMD acceleration exceeds both the delta pipeline and HTJ2K.
 
 Key results across 21 clinical DICOM images spanning 10 modalities:
-- **Compression ratios**: 1.7×–8.9× (greyscale), 3–5× (RGB WSI tissue), 1.56×–6.24× (single-frame RGB US/VL)
-- **Decompression throughput**: up to 16 GB/s (64-core ARM64), geometric mean ≈7.5 GB/s
+- **Compression ratios**: 1.7×–8.9× (greyscale), 1.56×–6.24× (single-frame RGB US/VL)
 - **vs. HTJ2K**: MIC-4state-C exceeds HTJ2K on 19/21 images single-threaded (ARM64, speed gain from 4-state ILP — no AVX2 on Apple Silicon); MIC-4state-SIMD (AVX2) exceeds HTJ2K on 16/21 images single-threaded (Intel AMD64, `-march=native`); PICS-C-8 exceeds HTJ2K on **all 21 images** on both platforms; MIC pipeline is ~40× simpler
 - **vs. JPEG-LS**: 1.7–5.0× faster decompression; 1–30% lower ratio depending on modality
 - **vs. Delta+Zstandard**: 10–22% better compression on all modalities
 - **Browser decoder**: ~20 KB pure JS decoder enables client-side decoding in any modern browser; PICS + `worker_threads` achieves 483 MB/s (MG1) — equivalent to native-code performance in the browser, with no server-side transcoding
 - **Portability**: Four implementations span the full deployment spectrum — Pure Go (no CGO, single binary, runs anywhere Go runs) → C/pthreads+SIMD (maximum single-node throughput) → JavaScript ES module (~20 KB, zero npm dependencies) → Go WebAssembly (~2.5 MB). No native libraries are required for browser-native decoding; HTJ2K and JPEG-LS have no practical browser decoder.
-- **Compact**: The entire Delta+RLE+FSE pipeline is ~500 lines of Go code — approximately 40× less than HTJ2K's ~20,000-line implementation — yet matches or exceeds HTJ2K on 7/8 modalities for both ratio and decompression speed.
+- **Compact**: The entire Delta+RLE+FSE pipeline is ~500 lines of Go code — approximately 40× less than HTJ2K's ~20,000-line implementation — yet matches or exceeds HTJ2K compression ratio on 18/21 images and decompression speed on 19/21 images (ARM64, single-threaded 4-state-C).
 
 MIC is open-source and available at https://github.com/pappuks/medical-image-codec.
 
@@ -722,10 +695,6 @@ MIC is open-source and available at https://github.com/pappuks/medical-image-cod
 26. F. Liu, M. Hernandez-Cabronero, V. Sanchez, M. W. Marcellin, and A. Bilgin, "The Current Role of Image Compression Standards in Medical Imaging," *Information*, vol. 8, no. 4, p. 131, Oct. 2017. DOI: 10.3390/info8040131
 27. D. A. Clunie, "Lossless Compression of Grayscale Medical Images: Effectiveness of Traditional and State-of-the-Art Approaches," *Proc. SPIE Medical Imaging*, 2000.
 
-### Digital Pathology and Whole Slide Imaging
-
-28. M. D. Herrmann, D. A. Clunie, A. Fedorov, *et al.*, "Implementing the DICOM Standard for Digital Pathology," *J. Pathol. Inform.*, vol. 9, no. 1, p. 37, 2018. DOI: 10.4103/jpi.jpi_42_18
-29. DICOM Standards Committee, "Supplement 145: Whole Slide Microscopic Image IOD and SOP Classes," DICOM Standard, 2010.
 
 ### HTJ2K Performance and Applications
 
