@@ -1,6 +1,6 @@
 module mic
 
-go 1.24
+go 1.25.0
 
 require github.com/suyashkumar/dicom v1.0.7
 

@@ -25,7 +25,7 @@ TEXT ·cpuidAMD64(SB),NOSPLIT,$0-24
 // func countSimpleU16Asm(in unsafe.Pointer, inLen int, count, count2 unsafe.Pointer)
 // Builds two interleaved histograms of uint16 values to reduce store-to-load stalls.
 // Uses a 4-way unrolled loop: even-indexed elements go to count[], odd go to count2[].
-TEXT ·countSimpleU16Asm(SB),NOSPLIT,$0-40
+TEXT ·countSimpleU16Asm(SB),NOSPLIT,$0-32
     MOVQ in+0(FP),   SI   // *uint16 input
     MOVQ inLen+8(FP), CX  // element count
     MOVQ count+16(FP), DI // *uint32 count[65536]
