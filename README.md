@@ -388,6 +388,38 @@ go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCode
 
 MIC-4state-C and MIC-C require CGO (`-tags cgo_ojph`); MIC-Go and MIC-4state are pure Go. **Bold** = fastest per row. PICS-N uses Go goroutines encoding independent strips in parallel. Wavelet+SIMD encode is 2–4× slower than MIC-Go due to the multi-level forward transform; its compression advantage (see ratio column in decompression table) is the trade-off.
 
+**Encoding (compression) throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecsEncode` (`-tags cgo_ojph`, `-benchtime=10x`). C variants compiled with `-O3 -march=native`. PICS-N uses Go goroutines encoding independent strips in parallel.
+
+```
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecsEncode$ ./ojph/
+```
+
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-C | Wavelet+SIMD | HTJ2K | JPEG-LS | PICS-2 | PICS-4 | PICS-8 |
+|-------|:--------:|:------:|:----------:|:------------:|:-----:|:------------:|:-----:|:-------:|:------:|:------:|:------:|
+| MR (256×256) | 0.13 | 180 | 219 | 243 | **305** | 102 | 217 | 104 | 111 | 104 | 103 |
+| CT (512×512) | 0.50 | 208 | 222 | 314 | 332 | 89 | 258 | 166 | 195 | **358** | 313 |
+| CR (2140×1760) | 7.18 | 307 | 312 | 441 | 416 | 138 | 311 | 119 | 488 | 856 | **1195** |
+| XR (2048×2577) | 10.1 | 336 | 322 | 498 | 500 | 126 | 269 | 123 | 411 | 738 | **1136** |
+| MG1 (2457×1996) | 9.35 | 512 | 508 | 621 | 651 | 162 | 676 | 320 | 858 | 1437 | **2001** |
+| MG2 (2457×1996) | 9.35 | 517 | 505 | 644 | 702 | 160 | 700 | 315 | 829 | 1372 | **2095** |
+| MG3 (4774×3064) | 27.3 | 355 | 352 | 469 | 425 | 95 | 293 | 153 | 530 | 862 | **1491** |
+| MG4 (4096×3328) | 26.0 | 458 | 463 | 554 | 503 | 106 | 451 | 234 | 654 | 1186 | **1984** |
+| CT1 (512×512) | 0.50 | 292 | 267 | 383 | 388 | 89 | 314 | 204 | 299 | **397** | 347 |
+| CT2 (512×512) | 0.50 | 228 | 236 | 356 | 335 | 95 | 294 | 231 | 286 | **373** | 343 |
+| MG-N (3064×4664) | 27.3 | 341 | 357 | 424 | 427 | 94 | 309 | 156 | 538 | 929 | **1421** |
+| MR1 (512×512) | 0.50 | 309 | 307 | 400 | **441** | 104 | 271 | 151 | 176 | 301 | 301 |
+| MR2 (1024×1024) | 2.00 | 350 | 350 | 498 | 514 | 106 | 339 | 136 | 463 | 672 | **821** |
+| MR3 (512×512) | 0.50 | 385 | 379 | 538 | **568** | 121 | 389 | 183 | 287 | 434 | 516 |
+| MR4 (512×512) | 0.50 | 305 | 310 | 466 | **471** | 118 | 354 | 252 | 262 | 363 | 325 |
+| NM1 (256×1024) | 0.50 | 302 | 302 | 438 | 444 | 114 | 346 | 178 | 273 | 323 | **474** |
+| RG1 (1841×1955) | 6.86 | 284 | 315 | 471 | 367 | 127 | 256 | 107 | 349 | 648 | **985** |
+| RG2 (1760×2140) | 7.18 | 390 | 398 | 493 | 520 | 140 | 402 | 155 | 598 | 1034 | **1583** |
+| RG3 (1760×1760) | 5.91 | 374 | 388 | 488 | 485 | 153 | 455 | 198 | 566 | 1029 | **1389** |
+| SC1 (2048×2487) | 9.71 | 414 | 413 | 508 | 466 | 97 | 349 | 297 | 655 | 1170 | **1712** |
+| XA1 (1024×1024) | 2.00 | 335 | 324 | 449 | 463 | 111 | 357 | 154 | 437 | 708 | **944** |
+
+MIC-4state-C and MIC-C require CGO (`-tags cgo_ojph`); MIC-Go and MIC-4state are pure Go. **Bold** = fastest per row. PICS-N uses Go goroutines encoding independent strips in parallel. Wavelet+SIMD encode is 2–4× slower than MIC-Go due to the multi-level forward transform. On Intel AMD64, MIC-C single-core reaches 300–700 MB/s; PICS-8 reaches 1.1–2.1 GB/s on large images (CR, MG, SC1).
+
 Key observations for ingestion pipelines:
 - **MIC-4state-C** is the fastest single-core encoder: 2–2.5× faster than pure-Go MIC-Go, reaching 500–860 MB/s on large images.
 - **PICS-8** reaches **1.2–1.9 GB/s** on large images (CR, XR, MG, SC1) using 8 goroutines — sufficient for real-time PACS ingestion of high-resolution modalities.
