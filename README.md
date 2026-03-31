@@ -356,6 +356,64 @@ MIC-4state-C/SIMD and PICS-C require CGO (`-tags cgo_ojph`); MIC-Go, MIC-4state,
 
 MIC-4state-C/SIMD and PICS-C require CGO (`-tags cgo_ojph`); MIC-Go, MIC-4state, and Wavelet+SIMD are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best PICS-C throughput per row. ⚠ MR (256×256) is too small for multi-threading. PICS-C-8 shows diminishing returns for highly compressed (MG2, RG3) or small (0.5 MB) images — use PICS-C-4 instead. PICS-C uses C pthreads + SIMD auto-detecting inner decoder with only **1 output-buffer allocation** vs Go PICS which allocates per-strip intermediate buffers. Notable: with `-O3 -march=native`, MIC-4state-SIMD beats HTJ2K on 18/21 images single-threaded; PICS-C-8 beats HTJ2K on all 21 images.
 
+**Encoding (compression) throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecsEncode` (`-tags cgo_ojph`, `-benchtime=10x`). All codecs run in-process; no subprocess or file-I/O overhead. MIC-4state-C and MIC-C are C encoders via CGO; all others are pure Go.
+
+```
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecsEncode$ ./ojph/
+```
+
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-C | Wavelet+SIMD | HTJ2K | JPEG-LS | PICS-2 | PICS-4 | PICS-8 |
+|-------|:--------:|:------:|:----------:|:------------:|:-----:|:------------:|:-----:|:-------:|:------:|:------:|:------:|
+| MR (256×256) | 0.13 | 121 | 132 | **290** | 273 | 85 | 177 | 71 | 217 | 186 | 128 |
+| CT (512×512) | 0.50 | 180 | 191 | **359** | 311 | 84 | 178 | 104 | 248 | 301 | 312 |
+| CR (2140×1760) | 7.18 | 233 | 235 | **461** | 423 | 120 | 193 | 89 | 412 | 732 | 1102 |
+| XR (2048×2577) | 10.1 | 254 | 254 | **550** | 519 | 127 | 214 | 95 | 447 | 775 | **1212** |
+| MG1 (2457×1996) | 9.35 | 380 | 381 | **861** | 820 | 155 | 508 | 239 | 698 | 1112 | **1651** |
+| MG2 (2457×1996) | 9.35 | 380 | 378 | **857** | 830 | 153 | 507 | 235 | 686 | 1119 | **1676** |
+| MG3 (4774×3064) | 27.3 | 256 | 257 | **556** | 514 | 97 | 202 | 109 | 465 | 832 | **1317** |
+| MG4 (4096×3328) | 26.0 | 336 | 340 | **738** | 710 | 107 | 354 | 162 | 619 | 1098 | **1901** |
+| CT1 (512×512) | 0.50 | 206 | 211 | **413** | 384 | 94 | 216 | 132 | 286 | 310 | 329 |
+| CT2 (512×512) | 0.50 | 192 | 197 | **371** | 340 | 89 | 194 | 132 | 294 | 320 | 294 |
+| MG-N (3064×4664) | 27.3 | 254 | 261 | **562** | 529 | 99 | 202 | 107 | 471 | 842 | **1353** |
+| MR1 (512×512) | 0.50 | 221 | 222 | **460** | 429 | 101 | 195 | 92 | 302 | 364 | 347 |
+| MR2 (1024×1024) | 2.00 | 275 | 263 | **566** | 532 | 107 | 230 | 102 | 455 | 643 | 857 |
+| MR3 (512×512) | 0.50 | 300 | 298 | **609** | 591 | 119 | 292 | 142 | 428 | 498 | 448 |
+| MR4 (512×512) | 0.50 | 249 | 251 | **494** | 451 | 108 | 226 | 142 | 333 | 370 | 368 |
+| NM1 (256×1024) | 0.50 | 237 | 240 | **467** | 444 | 117 | 242 | 132 | 353 | 360 | 302 |
+| RG1 (1841×1955) | 6.86 | 229 | 243 | **485** | 397 | 123 | 198 | 70 | 377 | 651 | 942 |
+| RG2 (1760×2140) | 7.18 | 280 | 277 | **582** | 488 | 125 | 254 | 112 | 499 | 842 | **1220** |
+| RG3 (1760×1760) | 5.91 | 275 | 271 | **550** | 512 | 128 | 273 | 143 | 503 | 863 | **1222** |
+| SC1 (2048×2487) | 9.71 | 286 | 293 | **577** | 551 | 83 | 235 | 169 | 528 | 924 | **1425** |
+| XA1 (1024×1024) | 2.00 | 242 | 246 | **496** | 471 | 101 | 219 | 114 | 419 | 616 | 832 |
+
+MIC-4state-C and MIC-C require CGO (`-tags cgo_ojph`); MIC-Go and MIC-4state are pure Go. **Bold** = fastest per row. PICS-N uses Go goroutines encoding independent strips in parallel. Wavelet+SIMD encode is 2–4× slower than MIC-Go due to the multi-level forward transform; its compression advantage (see ratio column in decompression table) is the trade-off.
+
+Key observations for ingestion pipelines:
+- **MIC-4state-C** is the fastest single-core encoder: 2–2.5× faster than pure-Go MIC-Go, reaching 500–860 MB/s on large images.
+- **PICS-8** reaches **1.2–1.9 GB/s** on large images (CR, XR, MG, SC1) using 8 goroutines — sufficient for real-time PACS ingestion of high-resolution modalities.
+- **HTJ2K** encode is comparable to MIC-Go on most images; JPEG-LS is consistently 2–4× slower to encode than MIC-Go.
+
+---
+
+**FSE table working-set sizes** — `BenchmarkFSETableMemory` (`-benchtime=3x`) reports `alloc-KB/op` (total bytes allocated per encode) and `peakHeap-KB` (max `HeapInuse` snapshot mid-loop). Dynamic table sizing keeps the FSE working set proportional to the actual symbol range (derived from `bits.Len16(maxValue)`), not a fixed 65 536-entry table.
+
+```
+go test -benchmem -run=^$ -benchtime=3x -bench ^BenchmarkFSETableMemory$ mic
+```
+
+| Image | Bit depth (eff.) | alloc-KB/op | peakHeap-KB |
+|-------|:----------------:|:-----------:|:-----------:|
+| MR (256×256, 12-bit) | 12 | ~1 827 | ~3 352 |
+| CT (512×512, 16-bit) | 16 | ~4 995 | ~4 952 |
+| CR (2140×1760, 12-bit) | 12 | ~30 040 | ~24 832 |
+| MG1 (2457×1996, 14-bit) | 14 | ~30 407 | ~29 312 |
+| MG3 (4774×3064, 14-bit) | 14 | ~133 701 | ~24 832 |
+| MR3 (512×512, 12-bit) | 12 | ~2 418 | ~5 984 |
+
+Allocation cost scales with image area (pixel count × bytes/symbol), not bit-depth alone, because the largest allocations are the delta and RLE intermediate buffers. The FSE symbol table itself (`symbolTT`, `stateTable`) is sized to `1 << actualTableLog` entries — typically 2 048–4 096 `uint16` values (~4–8 KB) rather than the 128 KB a fixed 65 536-entry table would consume. This keeps the FSE decode table hot in L1/L2 cache regardless of modality.
+
+---
+
 **When to use which:**
 - **Pure Go, zero dependencies** → MIC-Go or `DecompressParallelStrips` (no CGO): parallel strips reach ~60–70% of PICS-C speed.
 - **Best single-core throughput** → MIC-4state-SIMD (`-O3 -march=native`): beats HTJ2K on 18/21 images; 2–3× faster than MIC-Go.

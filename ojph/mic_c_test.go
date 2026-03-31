@@ -510,6 +510,138 @@ func BenchmarkAllCodecs(b *testing.B) {
 	}
 }
 
+// BenchmarkAllCodecsEncode measures compression (encoding) throughput for every
+// codec variant that has an encoder available:
+//
+//   - MIC-Go     — pure-Go two-state:  DeltaRle + FSECompressU16TwoState
+//   - MIC-4state — pure-Go four-state: DeltaRle + FSECompressU16FourState
+//   - MIC-4state-C — C four-state encoder (CGO)
+//   - MIC-C       — C two-state encoder (CGO)
+//   - Wavelet+SIMD — 5/3 wavelet + RLE + FSE (SIMD column pass on AMD64)
+//   - HTJ2K        — OpenJPH in-process via CGO
+//   - JPEG-LS      — CharLS in-process via CGO
+//   - PICS-N        — parallel strip encoder (Go goroutines, N=2/4/8)
+//
+// Command:
+//
+//	go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecsEncode$ ./ojph/
+func BenchmarkAllCodecsEncode(b *testing.B) {
+	for _, ti := range testImages {
+		byteData, shortData, maxShort, cols, rows := loadTestImage(ti)
+		if len(shortData) == 0 {
+			continue
+		}
+		origBytes := len(byteData)
+		bitDepth := bits.Len16(maxShort)
+		if bitDepth < 2 {
+			bitDepth = 2
+		}
+
+		// Pre-compute compressed sizes once for ratio reporting (outside timer).
+		var drc mic.DeltaRleCompressU16
+		deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
+		var s2 mic.ScratchU16
+		fse2Comp, _ := mic.FSECompressU16TwoState(deltaComp, &s2)
+		var s4 mic.ScratchU16
+		fse4Comp, _ := mic.FSECompressU16FourState(deltaComp, &s4)
+		fse4CComp, _ := MICCompressFourStateC(shortData, cols, rows)
+		fse2CComp, _ := MICCompressTwoStateC(shortData, cols, rows)
+		htj2kComp, err := CompressU16(shortData, cols, rows, bitDepth)
+		if err != nil {
+			b.Logf("Skipping %s: HTJ2K compress error: %v", ti.name, err)
+			continue
+		}
+		jplsComp, _ := CharlsCompressU16(shortData, cols, rows, bitDepth)
+		wavComp, _ := mic.WaveletV2SIMDRLEFSECompressU16(shortData, rows, cols, maxShort, 5)
+
+		b.Run("MIC-Go/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var drc mic.DeltaRleCompressU16
+				dc, _ := drc.Compress(shortData, cols, rows, maxShort)
+				var s mic.ScratchU16
+				mic.FSECompressU16TwoState(dc, &s)
+			}
+			b.ReportMetric(float64(origBytes)/float64(len(fse2Comp)), "ratio")
+		})
+
+		b.Run("MIC-4state/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var drc mic.DeltaRleCompressU16
+				dc, _ := drc.Compress(shortData, cols, rows, maxShort)
+				var s mic.ScratchU16
+				mic.FSECompressU16FourState(dc, &s)
+			}
+			b.ReportMetric(float64(origBytes)/float64(len(fse4Comp)), "ratio")
+		})
+
+		b.Run("MIC-4state-C/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				MICCompressFourStateC(shortData, cols, rows)
+			}
+			b.ReportMetric(float64(origBytes)/float64(len(fse4CComp)), "ratio")
+		})
+
+		b.Run("MIC-C/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				MICCompressTwoStateC(shortData, cols, rows)
+			}
+			b.ReportMetric(float64(origBytes)/float64(len(fse2CComp)), "ratio")
+		})
+
+		b.Run("Wavelet+SIMD/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				mic.WaveletV2SIMDRLEFSECompressU16(shortData, rows, cols, maxShort, 5)
+			}
+			b.ReportMetric(float64(origBytes)/float64(len(wavComp)), "ratio")
+		})
+
+		b.Run("HTJ2K/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				CompressU16(shortData, cols, rows, bitDepth)
+			}
+			b.ReportMetric(float64(origBytes)/float64(len(htj2kComp)), "ratio")
+		})
+
+		b.Run("JPEGLS/"+ti.name, func(b *testing.B) {
+			b.SetBytes(int64(origBytes))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				CharlsCompressU16(shortData, cols, rows, bitDepth)
+			}
+			b.ReportMetric(float64(origBytes)/float64(len(jplsComp)), "ratio")
+		})
+
+		for _, strips := range []int{2, 4, 8} {
+			strips := strips
+			picsComp, err := mic.CompressParallelStrips(shortData, cols, rows, maxShort, strips)
+			if err != nil {
+				continue
+			}
+			picsRatio := float64(origBytes) / float64(len(picsComp))
+			b.Run(fmt.Sprintf("PICS-%d/%s", strips, ti.name), func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					mic.CompressParallelStrips(shortData, cols, rows, maxShort, strips)
+				}
+				b.ReportMetric(picsRatio, "ratio")
+			})
+		}
+	}
+}
+
 // TestMICFullPipelineC verifies that the C encoder + C decoder round-trips correctly.
 // Compresses with the C four-state encoder and decompresses with the C four-state
 // decoder (both scalar and SIMD), checking all pixels match the original.

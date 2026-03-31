@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"sort"
 	"sync"
 	"testing"
@@ -1208,4 +1209,75 @@ func PrintHistogram(in []uint16) {
 		fmt.Printf("{%d %d}\t", symbolsOfInterestList[i].symbol, symbolsOfInterestList[i].freq)
 	}
 	fmt.Println()
+}
+
+// BenchmarkDeltaRLEFSEEncodeSpeed measures compression (encoding) throughput for
+// the Delta+RLE+FSE pipeline. Reports encode MB/s alongside the decompression ratio
+// so that ingestion-pipeline scenarios can be evaluated, not only read-heavy archival.
+//
+// Command: go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkDeltaRLEFSEEncodeSpeed$ mic
+func BenchmarkDeltaRLEFSEEncodeSpeed(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			b.SetBytes(int64(len(byteData)))
+			b.ResetTimer()
+			var compressed []byte
+			for i := 0; i < b.N; i++ {
+				var drc DeltaRleCompressU16
+				deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
+				var s ScratchU16
+				compressed, _ = FSECompressU16(deltaComp, &s)
+			}
+			b.ReportMetric(float64(len(byteData))/float64(len(compressed)), "ratio")
+			mbPerSec := float64(len(byteData)) / (1 << 20) * float64(b.N) / b.Elapsed().Seconds()
+			b.ReportMetric(mbPerSec, "encode-MB/s")
+		})
+	}
+}
+
+// BenchmarkFSETableMemory reports the peak heap allocation (HeapInuse) incurred
+// during FSE compression for each modality. This substantiates the dynamic table
+// sizing claim: smaller images / lower bit-depths should show significantly lower
+// working-set sizes than a fixed 65536-entry table would require.
+//
+// Command: go test -benchmem -run=^$ -benchtime=1x -bench ^BenchmarkFSETableMemory$ mic
+func BenchmarkFSETableMemory(b *testing.B) {
+	for _, tf := range testFiles {
+		b.Run(tf.name, func(b *testing.B) {
+			_, shortData, maxShort, cols, rows := SetupTests(tf)
+
+			// Compress once outside the loop to warm up any lazy inits, then
+			// measure a single fresh compression for the allocation snapshot.
+			var drc0 DeltaRleCompressU16
+			deltaComp0, _ := drc0.Compress(shortData, cols, rows, maxShort)
+			var s0 ScratchU16
+			_, _ = FSECompressU16(deltaComp0, &s0)
+
+			runtime.GC()
+			var before runtime.MemStats
+			runtime.ReadMemStats(&before)
+
+			b.ResetTimer()
+			var peakHeapInuse uint64
+			for i := 0; i < b.N; i++ {
+				var drc DeltaRleCompressU16
+				deltaComp, _ := drc.Compress(shortData, cols, rows, maxShort)
+				var s ScratchU16
+				_, _ = FSECompressU16(deltaComp, &s)
+				var mid runtime.MemStats
+				runtime.ReadMemStats(&mid)
+				if mid.HeapInuse > peakHeapInuse {
+					peakHeapInuse = mid.HeapInuse
+				}
+			}
+			b.StopTimer()
+
+			var after runtime.MemStats
+			runtime.ReadMemStats(&after)
+
+			b.ReportMetric(float64(peakHeapInuse)/1024, "peakHeap-KB")
+			b.ReportMetric(float64(after.TotalAlloc-before.TotalAlloc)/float64(b.N)/1024, "alloc-KB/op")
+		})
+	}
 }
