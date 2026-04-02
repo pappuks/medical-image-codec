@@ -3,9 +3,18 @@
 % ------- arXiv-standard packages -------
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
-\usepackage{lmodern}
-\usepackage[letterpaper, margin=1in, columnsep=0.25in]{geometry}
-\usepackage{amsmath,amssymb,amsthm}
+% Times New Roman-equivalent: newtxtext (text) + newtxmath (math)
+% Both are in TeX Live 2023/2025 and fully supported on arXiv.
+% amssymb must be loaded BEFORE newtxmath to avoid the \Bbbk conflict
+% (see arXiv TeX Live FAQ: "newtxmath.sty and amssymb.sty conflict").
+\usepackage{newtxtext}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\let\openbox\relax   % avoid clash between amsthm and newtxmath
+\usepackage{newtxmath}
+\usepackage[letterpaper, top=0.75in, bottom=1in, left=0.65in, right=0.65in, columnsep=0.2in]{geometry}
+\usepackage{titlesec}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{array}
@@ -21,6 +30,22 @@
 \usepackage{subcaption}
 \usepackage{cite}
 \usepackage{balance}
+
+% IEEE-style section headings:
+%   \section    -> bold small-caps (e.g. "I. Introduction")
+%   \subsection -> bold italic
+%   \subsubsection -> italic
+\titleformat{\section}
+  {\normalfont\normalsize\bfseries\scshape}
+  {\thesection.}{0.5em}{}
+\titleformat{\subsection}
+  {\normalfont\normalsize\bfseries\itshape}
+  {\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\itshape}
+  {\thesubsubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{6pt plus 2pt minus 2pt}{3pt plus 1pt minus 1pt}
+\titlespacing*{\subsection}{0pt}{4pt plus 2pt minus 2pt}{2pt plus 1pt minus 1pt}
 
 \hypersetup{
   colorlinks=true,
