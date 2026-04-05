@@ -5,10 +5,13 @@
 package mic
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/csv"
 	"fmt"
 	"math/bits"
 	"os"
+	"os/exec"
 	"strconv"
 	"testing"
 	"time"
@@ -574,4 +577,58 @@ func TestDumpHistogramCSV(t *testing.T) {
 		t.Fatalf("csv flush: %v", err)
 	}
 	t.Logf("wrote paper/figures/histogram_data.csv")
+}
+
+// TestDeltaZstdRatio compresses each test image with the MIC delta predictor
+// (avg of top+left) followed by zstd at level 19, reporting the compression ratio.
+// This provides the Delta+Zstandard baseline used in Table VIII of the paper.
+//
+// Run with:
+//
+//	go test -run TestDeltaZstdRatio -v
+func TestDeltaZstdRatio(t *testing.T) {
+	if _, err := exec.LookPath("zstd"); err != nil {
+		t.Skip("zstd not found in PATH")
+	}
+
+	fmt.Println()
+	fmt.Printf("Delta+Zstandard (level 19) Compression Ratios\n")
+	fmt.Printf("%-6s | Raw (MB) | Delta+Zstd-19 ratio\n", "Image")
+	fmt.Printf("-------|----------|--------------------\n")
+
+	for _, tf := range testFiles {
+		t.Run(tf.name, func(t *testing.T) {
+			byteData, shortData, maxShort, cols, rows := SetupTests(tf)
+			if shortData == nil {
+				t.Skip("test data not available")
+			}
+			rawBytes := len(byteData)
+
+			// Apply MIC delta encoding (avg predictor + overflow delimiter).
+			deltaOut, err := DeltaCompressU16(shortData, cols, rows, maxShort)
+			if err != nil {
+				t.Fatalf("delta: %v", err)
+			}
+
+			// Serialize delta residuals as little-endian uint16 bytes.
+			buf := make([]byte, len(deltaOut)*2)
+			for i, v := range deltaOut {
+				binary.LittleEndian.PutUint16(buf[i*2:], v)
+			}
+
+			// Compress with zstd -19 via stdin→stdout pipe.
+			cmd := exec.Command("zstd", "-19", "--no-progress", "-c")
+			cmd.Stdin = bytes.NewReader(buf)
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("zstd: %v", err)
+			}
+
+			compressedSize := out.Len()
+			ratio := float64(rawBytes) / float64(compressedSize)
+			fmt.Printf("%-6s | %8.2f | %.2f×\n",
+				tf.name, float64(rawBytes)/(1<<20), ratio)
+		})
+	}
 }
