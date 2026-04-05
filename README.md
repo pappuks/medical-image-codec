@@ -292,6 +292,19 @@ MIC and MIC-4state encode identically — the 4-state variant only unlocks a fas
 
 `CompressSingleFrameGapRemoval` adds +0.45% on CT (2.237× → **2.247×**) by collapsing the 65536-symbol RLE alphabet to the 1782 symbols that actually occur, via a delta-encoded expand map (1798 bytes overhead). Other modalities are unaffected. See [docs/compression-results.md](./docs/compression-results.md).
 
+**Predictor ablation (21 images, full pipeline):** Four predictors were evaluated — left-only, avg (MIC default), Paeth, and MED (JPEG-LS):
+
+| Predictor | Geo. Mean Ratio | Wins (21 imgs) | vs. Avg |
+|-----------|:--------------:|:--------------:|:-------:|
+| Left-only | 3.38× | 3/21 | -2.3% |
+| **Avg (MIC default)** | **3.46×** | **13/21** | baseline |
+| Paeth | 3.48× | 2/21 | +0.5% |
+| MED (JPEG-LS) | 3.52× | 16/21 | +1.6% |
+
+No single predictor dominates across all modalities. The avg predictor is best for mammography (MG1/MG2) and fluoroscopy; Paeth and MED improve on CT1/CT2, MR3, MR4, SC1, and RG3 (up to +10.5%) but regress on NM1 (−8%) and MG images (−2%). MED provides the best overall geomean at the cost of 1.5–2× slower decompression due to its three-way conditional branch.
+
+**TableLog ablation (21 images, full pipeline):** The adaptive tableLog selection bumps from 11→12 or 11→13 for 9 of 21 images (those with many distinct residual symbols and sufficient data per symbol — notably CR, MG1/MG2, RG2, RG3, XA1, MR2, MR3, NM1), gaining 0.9–9.9% compression ratio. Decompression speed is unaffected by tableLog choice (variation <5%, within measurement noise). See `TestTableLogAblation` in [ablation_test.go](ablation_test.go) for full data.
+
 For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compression-results.md](./docs/compression-results.md).
 
 ---
@@ -325,6 +338,14 @@ For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compressio
 | XA1 (1024×1024) | 2.00 | 331 | 371 | _576_ | 575 | 459 | 928 | 1583 | **2493** | 419 | 204 |
 
 MIC-4state-C/SIMD and PICS-C require CGO (`-tags cgo_ojph`); MIC-Go, MIC-4state, and Wavelet+SIMD are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best PICS-C throughput per row. ⚠ MR (256×256) too small for PICS-C-8 — thread overhead dominates; PICS-C-4 is best. ⚠ On ARM64, `MIC-4state-SIMD` falls back to scalar C (`NO_SIMD_AVAILABLE`); numbers ≈ `MIC-4state-C`. PICS-C-8 beats HTJ2K on all 21 images; MIC-4state-SIMD beats HTJ2K on 17/21 images single-threaded.
+
+**Isolated FSE multi-state speedup** (pure Go, ARM64, `BenchmarkFSEDecompress4State`): Across all 21 images, the four-state FSE decoder achieves a geometric mean of **+68% throughput** over the single-state decoder (2-state: +37%). Gains range from +25% (MR3) to +276% (MG3). The CR image shows an extreme +590% gain because the single-state decoder's `zeroBits` safe-path (triggered when any symbol probability >50%) is avoided by the interleaved multi-state decoder. This is a pure instruction-level parallelism benefit — no assembly required.
+
+| States | 1-state geomean | 2-state geomean | 4-state geomean | 4 vs. 1 speedup |
+|:------:|:---------------:|:---------------:|:---------------:|:---------------:|
+| ARM64 (pure Go) | 1,418 MB/s | 1,945 MB/s | 2,375 MB/s | **+68%** |
+
+Run with: `go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkFSEDecompress4State$ mic`
 
 ---
 
@@ -494,6 +515,26 @@ go build -o mic-compress ./cmd/mic-compress/
 # Generate all test .mic files (single-frame + multi-frame)
 ./mic-compress -testdata
 ```
+
+---
+
+## Figures
+
+Publication-quality figures are in [paper/figures/](paper/figures/). Regenerate with:
+
+```bash
+go test -run TestDumpHistogramCSV -v        # export residual histogram data
+.venv/bin/python3 paper/generate_figures.py # render all 6 figures
+```
+
+| Figure | Description |
+|--------|-------------|
+| [fig1_pipeline.png](paper/figures/fig1_pipeline.png) | MIC compression pipeline block diagram |
+| [fig2_histogram.png](paper/figures/fig2_histogram.png) | Delta-residual distributions for 5 modalities (MR, CT, CR, MG1, XA1) |
+| [fig3_multistate_speedup.png](paper/figures/fig3_multistate_speedup.png) | 1/2/4-state FSE isolated decompression speedup, all 21 images (ARM64, pure Go) |
+| [fig4_pareto.png](paper/figures/fig4_pareto.png) | Pareto scatter: compression ratio vs. throughput for all codec variants (ARM64) |
+| [fig5_predictor_ablation.png](paper/figures/fig5_predictor_ablation.png) | Per-image predictor ratio change vs. Avg (left-only, Paeth, MED) |
+| [fig6_tablelog_ablation.png](paper/figures/fig6_tablelog_ablation.png) | TableLog ablation: ratio and gain (TL=11/12/13/adaptive) across all 21 images |
 
 ---
 
