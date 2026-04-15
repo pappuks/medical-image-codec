@@ -83,8 +83,9 @@ delta\,+\,Zstandard baseline, and its geometric mean ratio (3.12$\times$)
 is within 1\% of HTJ2K (3.15$\times$) while being structurally simpler.
 Across grayscale images, MIC achieves lossless
 compression ratios ranging from 1.7$\times$ to 8.9$\times$. A four-state
-interleaved entropy decoder provides 66--142\% decompression speedup over a
-single-state implementation without affecting compressed size. On the reported
+interleaved entropy decoder provides geomean $+$68\% isolated FSE speedup on
+ARM64 ($+$43\% on AMD64) over a single-state implementation without affecting
+compressed size. On the reported
 ARM64 and AMD64 platforms, the fastest MIC variant exceeds HTJ2K decompression
 speed on 19/21 images single-threaded (ARM64) and 16/21 (AMD64);
 strip-parallel configurations exceed HTJ2K on all 21 images on both platforms.
@@ -190,8 +191,8 @@ The main contributions of this paper are as follows.
 
   \item \textbf{A multi-state interleaved entropy decoder.}
   We implement and evaluate two-state and four-state FSE decoding to exploit
-  instruction-level parallelism, achieving 66--142\% isolated FSE speedup with
-  no compression ratio penalty.
+  instruction-level parallelism, achieving geomean $+$68\% isolated FSE
+  speedup on ARM64 ($+$43\% on AMD64) with no compression ratio penalty.
 
   \item \textbf{An empirical evaluation against standard codecs and a
   general-purpose baseline.}
@@ -352,7 +353,7 @@ JavaScript decoder for browsers.
 MIC compresses grayscale images using three sequential stages: spatial
 prediction, 16-bit run-length encoding, and large-alphabet table-based entropy
 coding. Each stage is simple enough to decode in a single sequential pass with
-minimal branching.
+minimal branching, as illustrated in Fig.~\ref{fig:pipeline}.
 
 \begin{figure*}[tbp]
 \centering
@@ -408,7 +409,8 @@ loop optimization used by the average predictor. The results show no single
 predictor dominates. MED yields the best geomean ratio ($+$1.6\% over Avg) but
 at significant speed cost. The average predictor is retained as the default
 because its per-modality performance is more consistent and its decompression
-path is branch-free.
+path is branch-free. Fig.~\ref{fig:predictor-ablation} shows the per-image
+ratio difference relative to the average predictor across all 21 images.
 
 \begin{figure*}[tbp]
 \centering
@@ -535,7 +537,8 @@ Nine images benefit from TL=12 or TL=13: CR ($+$6.3\%), MG1 ($+$9.9\%), MG2
 ($+$9.9\%), MR2 ($+$4.6\%), RG2 ($+$9.9\%), RG3 ($+$7.8\%), XA1 ($+$4.4\%),
 MR3 ($+$0.9\%), NM1 ($+$1.9\%). The adaptive policy correctly identifies all
 beneficial cases. Decompression throughput is unaffected by tableLog choice
-($<$5\% variation).
+($<$5\% variation). Fig.~\ref{fig:tablelog-ablation} plots per-image compression
+ratios for all four settings.
 
 \begin{figure*}[tbp]
 \centering
@@ -707,8 +710,8 @@ decoders interleave their bit reads, reducing the frequency of this check.
 \centering
 \includegraphics[width=0.85\textwidth]{figures/fig3_multistate_speedup.png}
 \caption{Isolated FSE decompression speedup relative to 1-state for all 21
-images (ARM64, pure Go). Dashed lines show geomeans: 4-state = 1.74$\times$,
-2-state = 1.45$\times$.}
+images (ARM64, pure Go). Dashed lines show geomeans: 4-state = 1.68$\times$,
+2-state = 1.37$\times$.}
 \label{fig:multistate-speedup}
 \end{figure*}
 
@@ -719,6 +722,7 @@ driven by the \texttt{zeroBits} fast-path discussed above). The spread
 reflects how different residual distributions exercise the shared bit-reader
 refill path: images with denser symbol alphabets (larger MG, CR) gain the
 most, while very small images (MR, NM1) see the least amortization.
+Fig.~\ref{fig:multistate-speedup} shows the per-image speedup distribution.
 
 Table~\ref{tab:fse-amd64} presents the same isolated FSE benchmark
 (\texttt{BenchmarkFSEDecompress4State}) run on the Intel Core Ultra 9
@@ -789,8 +793,8 @@ platform, see Table~\ref{tab:decomp-amd64}.
 
 The evaluation uses 21 de-identified DICOM images spanning 10 modalities, drawn
 from publicly available datasets: NEMA WG-04 compsamples, NEMA 1997 CD, and the
-Clunie Breast Tomosynthesis Case~1. All images are de-identified per DICOM PS
-3.15 Appendix~E; no ethics approval is required.
+Clunie Breast Tomosynthesis Case~1 (Table~\ref{tab:dataset}). All images are
+de-identified per DICOM PS 3.15 Appendix~E; no ethics approval is required.
 
 \begin{table}[htbp]
 \centering
@@ -928,7 +932,8 @@ XA1  & 2.00 & 4.37$\times$ & 5.01$\times$ & 4.94$\times$ & 5.04$\times$ & 5.03$\
 \end{tabular}
 \end{table*}
 
-\textbf{Summary statistics:}
+Table~\ref{tab:ratio-summary} summarizes geometric means and win counts across
+all codec variants.
 
 \begin{table}[htbp]
 \centering
@@ -1053,6 +1058,9 @@ XA1  & 413 & 693 & \textbf{836} & 538 & 797 & 1,173 & \textbf{1,513} \\
 \end{tabular}
 \end{table*}
 
+$^\dagger$\textbf{MR} is too small for PICS-C-8; PICS-C-4 achieves the highest
+PICS throughput on this image.
+
 On AMD64, MIC-4state-SIMD leads 16/21 images single-threaded; HTJ2K leads on
 MG1, MG2, MG4, CT, and RG3. PICS-C-8 exceeds HTJ2K on all 21 images on both
 platforms.
@@ -1105,9 +1113,9 @@ Image & Dimensions & Ratio & ms & MB/s \\
 \midrule
 MR  & $256{\times}256$ & 2.35$\times$ & 3.0 & 42 \\
 CT  & $512{\times}512$ & 2.24$\times$ & 13.5 & 37 \\
-CR  & $1760{\times}2140$ & 3.69$\times$ & 161.2 & 45 \\
-MG1 & $1996{\times}2457$ & 8.79$\times$ & 80.9 & 116 \\
-MG3 & $3064{\times}4774$ & 2.29$\times$ & 638.4 & 44 \\
+CR  & $2140{\times}1760$ & 3.69$\times$ & 161.2 & 45 \\
+MG1 & $2457{\times}1996$ & 8.79$\times$ & 80.9 & 116 \\
+MG3 & $4774{\times}3064$ & 2.29$\times$ & 638.4 & 44 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1173,7 +1181,8 @@ slowest to decode; HTJ2K is ratio-competitive but ships as
 ${\sim}$20k lines of C++ with no browser decoder. MIC's core Delta+RLE+FSE
 pipeline sits close to both on ratio while decoding faster than JPEG-LS and
 fitting in roughly 1k lines---small enough to ship as a zero-dependency
-JavaScript module.
+JavaScript module. Fig.~\ref{fig:pareto} plots this ratio vs.\ decompression
+throughput tradeoff for all codec variants (ARM64).
 
 \begin{table}[tbp]
 \centering
@@ -1242,8 +1251,8 @@ spanning 10 modalities:
   retains the best lossless ratios (geometric mean 3.44$\times$ vs.\ MIC's
   3.12$\times$).
 
-  \item \textbf{Multi-state decoder}: 66--142\% isolated FSE speedup with no
-  ratio penalty.
+  \item \textbf{Multi-state decoder}: geomean $+$68\% isolated FSE speedup
+  (ARM64; $+$43\% AMD64) with no ratio penalty.
 
   \item \textbf{Browser decoder}: ${\sim}$20\,KB pure JS decoder; PICS +
   \texttt{worker\_threads} achieves 483\,MB/s (MG1 in Node.js).
@@ -1354,15 +1363,9 @@ XA1 & 335 & 324 & 449 & 463 & 111 & 357 & 154 & 437 & 708 & \textbf{944} \\
 \end{table*}
 
 % ============================================================
-\IEEEtriggeratref{20}
+\IEEEtriggeratref{10}
 
 \begin{thebibliography}{99}
-
-\bibitem{dicom}
-NEMA, ``Digital Imaging and Communications in Medicine (DICOM),''
-PS3.5---Data Structures and Encoding, PS3.15---Security and System Management
-Profiles,
-\url{https://www.dicomstandard.org/}, 2024.
 
 \bibitem{taubman2002}
 D.\,S.\,Taubman and M.\,W.\,Marcellin,
@@ -1378,15 +1381,6 @@ M.\,J.\,Weinberger, G.\,Seroussi, and G.\,Sapiro,
 ``The LOCO-I lossless image compression algorithm: Principles and
 standardization into JPEG-LS,''
 \textit{IEEE Trans.\ Image Process.}, vol.\,9, no.\,8, pp.\,1309--1324, 2000.
-
-\bibitem{jpegls2}
-ISO/IEC 14495-2:2003, ``Information technology---Lossless and near-lossless
-compression of continuous-tone still images: Extensions---Part~2,'' 2003.
-
-\bibitem{jpegxl}
-J.\,Alakuijala \textit{et al.},
-``JPEG XL next-generation image compression architecture and coding tools,''
-\textit{Proc.\ SPIE 11137}, Sep.\,2019.
 
 \bibitem{duda2009}
 J.\,Duda, ``Asymmetric numeral systems,'' arXiv:0902.0271, 2009.
@@ -1404,11 +1398,6 @@ Y.\,Collet, ``Finite State Entropy---A new breed of entropy coder,''
 Y.\,Collet and M.\,Kucherawy,
 ``Zstandard Compression and the `application/zstd' Media Type,''
 RFC~8878, IETF, Feb.\,2021.
-
-\bibitem{schwartz1964}
-E.\,S.\,Schwartz and B.\,Kallick,
-``Generating a canonical prefix encoding,''
-\textit{Commun.\ ACM}, vol.\,7, no.\,3, pp.\,166--169, 1964.
 
 \bibitem{mahapatra2007}
 S.\,Mahapatra and K.\,Singh,
@@ -1441,69 +1430,14 @@ A.\,Weissenberger and B.\,Schmidt,
 ``Massively Parallel ANS Decoding on GPUs,''
 \textit{Proc.\ 48th ICPP '19}, Article~100, 2019.
 
-\bibitem{wu1997}
-X.\,Wu and N.\,Memon,
-``Context-based, adaptive, lossless image coding,''
-\textit{IEEE Trans.\ Commun.}, vol.\,45, no.\,4, pp.\,437--444, 1997.
-
-\bibitem{sneyers2016}
-J.\,Sneyers and P.\,Wuille,
-``FLIF: Free Lossless Image Format based on MANIAC Compression,''
-\textit{Proc.\ IEEE ICIP}, 2016.
-
-\bibitem{legall1988}
-D.\,Le Gall and A.\,Tabatabai,
-``Sub-band coding of digital images using symmetric short kernel filters and
-arithmetic coding techniques,'' \textit{Proc.\ IEEE ICASSP}, pp.\,761--764,
-1988.
-
-\bibitem{sweldens1996}
-W.\,Sweldens,
-``The Lifting Scheme: A custom-design construction of biorthogonal wavelets,''
-\textit{Appl.\ Comput.\ Harmon.\ Anal.}, vol.\,3, no.\,2, pp.\,186--200, 1996.
-
-\bibitem{daubechies1998}
-I.\,Daubechies and W.\,Sweldens,
-``Factoring wavelet transforms into lifting steps,''
-\textit{J.\ Fourier Anal.\ Appl.}, vol.\,4, no.\,3, pp.\,247--269, 1998.
-
-\bibitem{calderbank1998}
-A.\,R.\,Calderbank, I.\,Daubechies, W.\,Sweldens, and B.-L.\,Yeo,
-``Wavelet transforms that map integers to integers,''
-\textit{Appl.\ Comput.\ Harmon.\ Anal.}, vol.\,5, no.\,3, pp.\,332--369, 1998.
-
 \bibitem{ycocgr}
 H.\,S.\,Malvar and G.\,J.\,Sullivan,
 ``YCoCg-R: A color space with RGB reversibility and low dynamic range,''
 JVT Doc.\ JVT-I014, 2003.
 
-\bibitem{liu2017}
-F.\,Liu \textit{et al.},
-``The Current Role of Image Compression Standards in Medical Imaging,''
-\textit{Information}, vol.\,8, no.\,4, p.\,131, Oct.\,2017.
-
-\bibitem{clunie2000}
-D.\,A.\,Clunie,
-``Lossless Compression of Grayscale Medical Images: Effectiveness of
-Traditional and State-of-the-Art Approaches,''
-\textit{Proc.\ SPIE Medical Imaging}, 2000.
-
 \bibitem{png}
 W3C, ``Portable Network Graphics (PNG) Specification (Second Edition),''
 ISO/IEC 15948:2003, Nov.\,2003.
-
-\bibitem{taubman2022}
-D.\,Taubman, A.\,Naman, M.\,Smith, P.-A.\,Lemieux, H.\,Saadat, O.\,Watanabe,
-and R.\,Mathew,
-``High Throughput JPEG~2000 for Video Content Production and Delivery Over IP
-Networks,''
-\textit{Front.\ Signal Process.}, vol.\,2, Article 885644, Apr.\,2022.
-
-\bibitem{williams2009}
-S.\,Williams, A.\,Waterman, and D.\,Patterson,
-``Roofline: An insightful visual performance model for multicore
-architectures,''
-\textit{Commun.\ ACM}, vol.\,52, no.\,4, pp.\,65--76, Apr.\,2009.
 
 \bibitem{openjph}
 A.\,N.\,Aous,
@@ -1517,13 +1451,8 @@ Team CharLS,
 
 \bibitem{nohtj2k}
 As of the submission date, no production-ready WebAssembly or JavaScript decoder
-for High-Throughput JPEG~2000 was identified. The OpenJPH
-repository~\cite{openjph} does not provide a WASM build or npm package.
-
-\bibitem{fzstd}
-N.\,Tindall \textit{et al.},
-``fzstd: Pure JavaScript Zstandard decompressor,''
-\url{https://github.com/101arrowz/fzstd}, 2024.
+for High-Throughput JPEG~2000 was identified. The OpenJPH open-source library
+does not provide a WASM build or npm package.
 
 \end{thebibliography}
 
