@@ -339,13 +339,14 @@ For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compressio
 
 MIC-4state-C/SIMD and PICS-C require CGO (`-tags cgo_ojph`); MIC-Go, MIC-4state, and Wavelet+SIMD are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best PICS-C throughput per row. ⚠ MR (256×256) too small for PICS-C-8 — thread overhead dominates; PICS-C-4 is best. ⚠ On ARM64, `MIC-4state-SIMD` falls back to scalar C (`NO_SIMD_AVAILABLE`); numbers ≈ `MIC-4state-C`. PICS-C-8 beats HTJ2K on all 21 images; MIC-4state-SIMD beats HTJ2K on 17/21 images single-threaded.
 
-**Isolated FSE multi-state speedup** (pure Go, ARM64, `BenchmarkFSEDecompress4State`): Across all 21 images, the four-state FSE decoder achieves a geometric mean of **+68% throughput** over the single-state decoder (2-state: +37%). Gains range from +25% (MR3) to +276% (MG3). The CR image shows an extreme +590% gain because the single-state decoder's `zeroBits` safe-path (triggered when any symbol probability >50%) is avoided by the interleaved multi-state decoder. This is a pure instruction-level parallelism benefit — no assembly required.
+**Isolated FSE multi-state speedup** (`BenchmarkFSEDecompress4State`, all 21 images): On ARM64 (Apple M2 Max, pure Go), the four-state FSE decoder achieves a geometric mean of **+68% throughput** over the single-state decoder (2-state: +37%). On AMD64 (Intel Core Ultra 9 285K), where the 4-state uses the BMI2 assembly kernel (`fse4StateDecompKernel`), the geomean is **+43%** (2-state: +34%). The CR image shows a large gain on both platforms driven by the `zeroBits` safe-path: +590% on ARM64 (pure-Go 1-state stalls to 140 MB/s) vs +127% on AMD64 (BMI2 assembly 4-state bypasses the slow path efficiently).
 
-| States | 1-state geomean | 2-state geomean | 4-state geomean | 4 vs. 1 speedup |
-|:------:|:---------------:|:---------------:|:---------------:|:---------------:|
-| ARM64 (pure Go) | 1,418 MB/s | 1,945 MB/s | 2,375 MB/s | **+68%** |
+| Platform | 1-state geomean | 2-state geomean | 4-state geomean | 4 vs. 1 speedup |
+|:--------:|:---------------:|:---------------:|:---------------:|:---------------:|
+| ARM64 — Apple M2 Max (pure Go) | 1,418 MB/s | 1,945 MB/s | 2,375 MB/s | **+68%** |
+| AMD64 — Intel Core Ultra 9 285K (1/2-state pure Go; 4-state BMI2 asm) | 2,309 MB/s | 3,091 MB/s | 3,306 MB/s | **+43%** |
 
-Run with: `go test -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkFSEDecompress4State$ mic`
+Run with: `go test -benchmem -run=^$ -benchtime=30x -bench ^BenchmarkFSEDecompress4State$ mic`
 
 ---
 

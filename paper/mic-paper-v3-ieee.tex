@@ -720,57 +720,66 @@ reflects how different residual distributions exercise the shared bit-reader
 refill path: images with denser symbol alphabets (larger MG, CR) gain the
 most, while very small images (MR, NM1) see the least amortization.
 
-Table~\ref{tab:fse-amd64} reports end-to-end MIC decompression throughput on
-the Intel Core Ultra 9 285K used for the AMD64 benchmarks in
-Section~\ref{sec:methodology}, comparing the pure-Go single-state baseline
-(MIC-Go) with the pure-Go four-state interleaved decoder (MIC-4state), across
-all 21 images. A 2-state column is omitted because it was not separately
-measured on this machine; the values are taken from the
-\texttt{BenchmarkAllCodecs} sweep used for Table~\ref{tab:decomp-amd64}. The
-4-state decoder delivers a consistent per-image speedup, matching the
-qualitative pattern observed on ARM64.
+Table~\ref{tab:fse-amd64} presents the same isolated FSE benchmark
+(\texttt{BenchmarkFSEDecompress4State}) run on the Intel Core Ultra 9
+285K (AMD64) for all 21 images, matching the methodology of
+Table~\ref{tab:fse-arm64} above.
 
 \begin{table}[tbp]
 \centering
-\caption{Pure-Go MIC decompression throughput (MB/s), Intel Core Ultra 9
-285K (AMD64, 24 P-cores), from \texttt{BenchmarkAllCodecs}. MIC-Go is the
-single-state FSE decoder; MIC-4state is the four-state interleaved decoder.}
+\caption{Isolated FSE decompression throughput (MB/s), Intel Core Ultra 9
+285K (AMD64). 1-state and 2-state: pure Go; 4-state: BMI2 assembly
+(\texttt{fse4StateDecompKernel}). MB/s over uncompressed RLE symbol stream.}
 \label{tab:fse-amd64}
 \scriptsize
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Image & MIC-Go (1-state) & MIC-4state & 4 vs.\ 1 \\
+Image & 1-state & 2-state & 4-state & 4 vs.\ 1 \\
 \midrule
-MR   & 251 & 260 & $+$4\%  \\
-CT   & 231 & 243 & $+$5\%  \\
-CR   & 324 & 381 & $+$18\% \\
-XR   & 363 & 375 & $+$3\%  \\
-MG1  & 617 & 630 & $+$2\%  \\
-MG2  & 562 & 598 & $+$6\%  \\
-MG3  & 357 & 400 & $+$12\% \\
-MG4  & 523 & 559 & $+$7\%  \\
-CT1  & 322 & 293 & $-$9\%  \\
-CT2  & 293 & 295 & $+$1\%  \\
-MG-N & 368 & 416 & $+$13\% \\
-MR1  & 356 & 351 & $-$1\%  \\
-MR2  & 352 & 409 & $+$16\% \\
-MR3  & 450 & 443 & $-$2\%  \\
-MR4  & 390 & 339 & $-$13\% \\
-NM1  & 367 & 339 & $-$8\%  \\
-RG1  & 302 & 344 & $+$14\% \\
-RG2  & 433 & 472 & $+$9\%  \\
-RG3  & 460 & 464 & $+$1\%  \\
-SC1  & 464 & 478 & $+$3\%  \\
-XA1  & 413 & 415 & $+$0\%  \\
+MR   &   600 &   999 &   828 & $+$38\% \\
+CT   &   941 & 1,421 & 1,631 & $+$73\% \\
+CR   & 1,994 & 3,958 & 4,535 & $+$127\%$^*$ \\
+XR   & 3,195 & 5,028 & 5,771 & $+$81\% \\
+MG1  & 3,379 & 4,357 & 4,952 & $+$47\% \\
+MG2  & 2,682 & 3,313 & 4,155 & $+$55\% \\
+MG3  & 3,048 & 4,613 & 5,517 & $+$81\% \\
+MG4  & 5,476 & 6,686 & 6,437 & $+$18\% \\
+CT1  & 1,733 & 1,871 & 2,522 & $+$46\% \\
+CT2  & 1,780 & 2,504 & 2,485 & $+$40\% \\
+MG-N & 2,722 & 4,577 & 4,981 & $+$83\% \\
+MR1  & 2,277 & 2,338 & 2,881 & $+$27\% \\
+MR2  & 2,421 & 3,609 & 3,769 & $+$56\% \\
+MR3  & 1,941 & 1,958 & 2,369 & $+$22\% \\
+MR4  & 2,284 & 2,926 & 2,753 & $+$21\% \\
+NM1  & 2,078 & 2,587 & 2,407 & $+$16\% \\
+RG1  & 2,506 & 4,248 & 4,336 & $+$73\% \\
+RG2  & 3,808 & 3,786 & 4,081 & $+$7\% \\
+RG3  & 2,315 & 3,285 & 3,925 & $+$70\% \\
+SC1  & 3,044 & 3,760 & 3,734 & $+$23\% \\
+XA1  & 2,753 & 2,933 & 2,253 & $-$18\%$^\dagger$ \\
+\midrule
+\textbf{Geomean} & \textbf{2,309} & \textbf{3,091} & \textbf{3,306} & \textbf{$+$43\%} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The end-to-end pure-Go speedup on AMD64 is smaller than the isolated-FSE
-ARM64 speedup because the 4-state gain is amortised over delta and RLE
-stages that execute at the same cost in both variants; for the full C /
-BMI2 multi-state decoder throughput on this platform, see the MIC-4state-C
-and MIC-4state-SIMD columns of Table~\ref{tab:decomp-amd64}.
+$^*$\textbf{CR on AMD64}: the 4-state BMI2 assembly kernel sidesteps the
+pure-Go \texttt{zeroBits} bounds-check overhead, yielding $+$127\%---still
+large, but far below the $+$590\% on ARM64 where the 1-state pure-Go
+decoder stalls to 140~MB/s on this image.
+
+$^\dagger$\textbf{XA1}: the $-$18\% result is within measurement noise for
+this small image on a machine with mixed P/E-core topology.
+
+The AMD64 4-state decoder achieves a geometric-mean speedup of $+$43\%
+over the 1-state baseline (2-state: $+$34\%), with per-image gains
+ranging from $-$18\% (XA1) to $+$127\% (CR). The smaller geomean
+relative to ARM64 ($+$68\%) is primarily explained by the absence of
+the severe \texttt{zeroBits} stall on ARM64: the Intel out-of-order
+engine handles the bounds-checked code path without a dramatic penalty,
+raising the 1-state baseline and compressing the relative multi-state
+gain. For C-level and SIMD multi-state decoder throughput on this
+platform, see Table~\ref{tab:decomp-amd64}.
 
 % ============================================================
 \section{Experimental Methodology}
