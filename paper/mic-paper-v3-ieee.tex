@@ -119,10 +119,10 @@ four-view screening study exceeds 2\,GB uncompressed. Efficient lossless
 compression is essential for archival storage, network transmission, and
 real-time rendering in clinical PACS and diagnostic viewers.
 
-DICOM supports several established lossless transfer syntaxes, including
+DICOM~\cite{dicom} supports several established lossless transfer syntaxes, including
 JPEG~2000, HTJ2K, JPEG-LS, and RLE Lossless. These methods offer different
 tradeoffs among compression ratio, decoding speed, and implementation
-complexity. JPEG~2000 and HTJ2K provide strong compression performance but rely
+complexity~\cite{liu2017,clunie2000}. JPEG~2000 and HTJ2K provide strong compression performance but rely
 on transform and block-coding pipelines that are comparatively complex. JPEG-LS
 uses predictive coding and often yields strong lossless ratios, but its
 throughput characteristics remain application-dependent. RLE Lossless is simple
@@ -231,13 +231,14 @@ Section~\ref{sec:conclusion} concludes.
 \subsection{Lossless Compression in Medical Imaging}
 
 JPEG~2000 Part~1~\cite{taubman2002} employs the reversible 5/3 integer wavelet
-transform with embedded block coding (EBCOT). It achieves excellent compression
+transform~\cite{legall1988,calderbank1998} via the lifting scheme~\cite{sweldens1996,daubechies1998}
+with embedded block coding (EBCOT). It achieves excellent compression
 ratios but its bit-plane coding and context modeling impose significant
 computational overhead during decompression. High-Throughput JPEG~2000
-(HTJ2K)~\cite{htj2k2019} replaces EBCOT with a faster block coder,
+(HTJ2K)~\cite{htj2k2019,taubman2022} replaces EBCOT with a faster block coder,
 substantially improving decode speed while maintaining JPEG~2000 compatibility.
 
-JPEG-LS~\cite{loco1} uses context-adaptive prediction (MED predictor) followed
+JPEG-LS~\cite{loco1,jpegls2} uses context-adaptive prediction (MED predictor) followed
 by Golomb-Rice coding. It provides fast encoding and decoding with strong
 compression ratios---in our evaluation, JPEG-LS achieves the highest lossless
 ratio on 21/21 tested images. JPEG-LS is well-suited to smooth images but its
@@ -248,6 +249,11 @@ RLE Lossless (DICOM Transfer Syntax 1.2.840.10008.1.2.5) uses byte-level
 PackBits run-length encoding. It is trivially simple but achieves poor
 compression ratios (typically $<$1.5$\times$) because it operates on bytes
 rather than 16-bit pixel values and lacks any decorrelation stage.
+
+Context-based adaptive lossless image coding (CALIC)~\cite{wu1997} and
+FLIF~\cite{sneyers2016} represent higher-complexity predictive and entropy
+coding approaches that achieve strong ratios on natural images but are not
+standardized for DICOM and have no practical browser decoder.
 
 These standards are important baselines for the present work. The goal of this
 paper is not to argue that they are obsolete, but to investigate a simpler
@@ -273,7 +279,9 @@ coders.
 
 In practice, most of these coders are designed around small alphabets. Huffman
 coding becomes impractical above ${\sim}$4,096 symbols. FSE in Zstandard caps
-at 4,096. The predominant implementations are optimized for byte-oriented data.
+at 4,096. Modern general-purpose formats such as JPEG~XL~\cite{jpegxl} also
+operate on byte-oriented symbol streams. The predominant implementations are
+optimized for byte-oriented data.
 
 Medical images differ in that they naturally contain 10--16 bit sample values.
 After prediction, the residual stream may still be more naturally modeled as a
@@ -550,7 +558,7 @@ ratios for TL=11/12/13 and adaptive selection. Bottom: gain from TL=11$\to$13.}
 
 \subsection{Optional Canonical Huffman Backend}
 
-An optional canonical Huffman backend was implemented for comparison. It
+An optional canonical Huffman backend~\cite{schwartz1964} was implemented for comparison. It
 typically produces 1--3\% smaller output than FSE but decodes more slowly due to
 variable-length code lookup. Since this paper focuses on the ratio-throughput
 tradeoff, FSE is used as the primary backend.
@@ -627,7 +635,8 @@ States ($k$) & Amortized latency & Theoretical & Empirical \\
 
 The empirical speedup is below theoretical maximum due to: (1) bit-reader
 refill overhead shared across all chains, (2) instruction cache pressure from
-the unrolled loop, and (3) memory bandwidth limits on compressed stream reads.
+the unrolled loop, and (3) memory bandwidth limits on compressed stream
+reads~\cite{williams2009}.
 
 \subsection{Correctness}
 
@@ -1217,7 +1226,10 @@ MIC ships two browser decoder implementations: a pure JS ES module
 web-based DICOM viewer can fetch a \texttt{.mic} file directly from object
 storage and decode it client-side, eliminating server-side transcoding. As of
 the submission date, no production-ready WebAssembly or JavaScript decoder exists
-for HTJ2K~\cite{nohtj2k} or JPEG-LS~\cite{charls}.
+for HTJ2K~\cite{nohtj2k} or JPEG-LS~\cite{charls}. By contrast, Zstandard has a
+community JavaScript port~\cite{fzstd}, demonstrating that byte-oriented
+general-purpose codecs can reach the browser---but native 16-bit medical image
+decoding requires a purpose-built implementation such as MIC.
 
 \subsection{Pathway to Clinical Impact}
 
@@ -1363,9 +1375,15 @@ XA1 & 335 & 324 & 449 & 463 & 111 & 357 & 154 & 437 & 708 & \textbf{944} \\
 \end{table*}
 
 % ============================================================
-\IEEEtriggeratref{10}
+\IEEEtriggeratref{19}
 
 \begin{thebibliography}{99}
+
+\bibitem{dicom}
+NEMA, ``Digital Imaging and Communications in Medicine (DICOM),''
+PS3.5---Data Structures and Encoding, PS3.15---Security and System Management
+Profiles,
+\url{https://www.dicomstandard.org/}, 2024.
 
 \bibitem{taubman2002}
 D.\,S.\,Taubman and M.\,W.\,Marcellin,
@@ -1381,6 +1399,15 @@ M.\,J.\,Weinberger, G.\,Seroussi, and G.\,Sapiro,
 ``The LOCO-I lossless image compression algorithm: Principles and
 standardization into JPEG-LS,''
 \textit{IEEE Trans.\ Image Process.}, vol.\,9, no.\,8, pp.\,1309--1324, 2000.
+
+\bibitem{jpegls2}
+ISO/IEC 14495-2:2003, ``Information technology---Lossless and near-lossless
+compression of continuous-tone still images: Extensions---Part~2,'' 2003.
+
+\bibitem{jpegxl}
+J.\,Alakuijala \textit{et al.},
+``JPEG XL next-generation image compression architecture and coding tools,''
+\textit{Proc.\ SPIE 11137}, Sep.\,2019.
 
 \bibitem{duda2009}
 J.\,Duda, ``Asymmetric numeral systems,'' arXiv:0902.0271, 2009.
@@ -1398,6 +1425,11 @@ Y.\,Collet, ``Finite State Entropy---A new breed of entropy coder,''
 Y.\,Collet and M.\,Kucherawy,
 ``Zstandard Compression and the `application/zstd' Media Type,''
 RFC~8878, IETF, Feb.\,2021.
+
+\bibitem{schwartz1964}
+E.\,S.\,Schwartz and B.\,Kallick,
+``Generating a canonical prefix encoding,''
+\textit{Commun.\ ACM}, vol.\,7, no.\,3, pp.\,166--169, 1964.
 
 \bibitem{mahapatra2007}
 S.\,Mahapatra and K.\,Singh,
@@ -1430,14 +1462,69 @@ A.\,Weissenberger and B.\,Schmidt,
 ``Massively Parallel ANS Decoding on GPUs,''
 \textit{Proc.\ 48th ICPP '19}, Article~100, 2019.
 
+\bibitem{wu1997}
+X.\,Wu and N.\,Memon,
+``Context-based, adaptive, lossless image coding,''
+\textit{IEEE Trans.\ Commun.}, vol.\,45, no.\,4, pp.\,437--444, 1997.
+
+\bibitem{sneyers2016}
+J.\,Sneyers and P.\,Wuille,
+``FLIF: Free Lossless Image Format based on MANIAC Compression,''
+\textit{Proc.\ IEEE ICIP}, 2016.
+
+\bibitem{legall1988}
+D.\,Le Gall and A.\,Tabatabai,
+``Sub-band coding of digital images using symmetric short kernel filters and
+arithmetic coding techniques,'' \textit{Proc.\ IEEE ICASSP}, pp.\,761--764,
+1988.
+
+\bibitem{sweldens1996}
+W.\,Sweldens,
+``The Lifting Scheme: A custom-design construction of biorthogonal wavelets,''
+\textit{Appl.\ Comput.\ Harmon.\ Anal.}, vol.\,3, no.\,2, pp.\,186--200, 1996.
+
+\bibitem{daubechies1998}
+I.\,Daubechies and W.\,Sweldens,
+``Factoring wavelet transforms into lifting steps,''
+\textit{J.\ Fourier Anal.\ Appl.}, vol.\,4, no.\,3, pp.\,247--269, 1998.
+
+\bibitem{calderbank1998}
+A.\,R.\,Calderbank, I.\,Daubechies, W.\,Sweldens, and B.-L.\,Yeo,
+``Wavelet transforms that map integers to integers,''
+\textit{Appl.\ Comput.\ Harmon.\ Anal.}, vol.\,5, no.\,3, pp.\,332--369, 1998.
+
 \bibitem{ycocgr}
 H.\,S.\,Malvar and G.\,J.\,Sullivan,
 ``YCoCg-R: A color space with RGB reversibility and low dynamic range,''
 JVT Doc.\ JVT-I014, 2003.
 
+\bibitem{liu2017}
+F.\,Liu \textit{et al.},
+``The Current Role of Image Compression Standards in Medical Imaging,''
+\textit{Information}, vol.\,8, no.\,4, p.\,131, Oct.\,2017.
+
+\bibitem{clunie2000}
+D.\,A.\,Clunie,
+``Lossless Compression of Grayscale Medical Images: Effectiveness of
+Traditional and State-of-the-Art Approaches,''
+\textit{Proc.\ SPIE Medical Imaging}, 2000.
+
 \bibitem{png}
 W3C, ``Portable Network Graphics (PNG) Specification (Second Edition),''
 ISO/IEC 15948:2003, Nov.\,2003.
+
+\bibitem{taubman2022}
+D.\,Taubman, A.\,Naman, M.\,Smith, P.-A.\,Lemieux, H.\,Saadat, O.\,Watanabe,
+and R.\,Mathew,
+``High Throughput JPEG~2000 for Video Content Production and Delivery Over IP
+Networks,''
+\textit{Front.\ Signal Process.}, vol.\,2, Article 885644, Apr.\,2022.
+
+\bibitem{williams2009}
+S.\,Williams, A.\,Waterman, and D.\,Patterson,
+``Roofline: An insightful visual performance model for multicore
+architectures,''
+\textit{Commun.\ ACM}, vol.\,52, no.\,4, pp.\,65--76, Apr.\,2009.
 
 \bibitem{openjph}
 A.\,N.\,Aous,
@@ -1453,6 +1540,11 @@ Team CharLS,
 As of the submission date, no production-ready WebAssembly or JavaScript decoder
 for High-Throughput JPEG~2000 was identified. The OpenJPH open-source library
 does not provide a WASM build or npm package.
+
+\bibitem{fzstd}
+N.\,Tindall \textit{et al.},
+``fzstd: Pure JavaScript Zstandard decompressor,''
+\url{https://github.com/101arrowz/fzstd}, 2024.
 
 \end{thebibliography}
 
