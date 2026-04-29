@@ -1,5 +1,13 @@
 # CLAUDE.md - Development Guide for MIC (Medical Image Codec)
 
+## Paper Editorial Rules
+
+When editing or creating versions of the MIC IEEE paper (`paper/mic-paper-*.tex`),
+follow the rules in [`.claude/paper-rules.md`](.claude/paper-rules.md). These
+capture peer-review feedback applied in v5 covering: SE explainability, acronym
+expansion, em-dash reduction, duplicate removal, numerical consistency, and
+platform descriptions.
+
 ## Project Overview
 
 MIC is a lossless compression codec for 16-bit medical images (DICOM) implemented in Go. It uses a pipeline of Delta Encoding + RLE + FSE/Huffman to achieve compression ratios of 1.7x-8.9x with very high decompression throughput (up to 16 GB/s).

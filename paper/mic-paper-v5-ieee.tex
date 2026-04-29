@@ -73,8 +73,6 @@ E-mail: kuldeep.singh@innovaccer.com.
 Code: \url{https://github.com/pappuks/medical-image-codec}.}%
 }
 
-\markboth{IEEE Transactions on Medical Imaging,~Vol.~XX,~No.~XX,~2026}%
-{Singh: A 16-Bit-Native Entropy Coding Pipeline}
 
 % --------------------------------------------------
 
@@ -105,30 +103,20 @@ after simple spatial prediction, many medical images produce residual
 distributions sharply concentrated near zero with frequently repeated 16-bit
 residual values.
 
-We evaluate the proposed codec on 21 de-identified Digital Imaging and
-Communications in Medicine (DICOM) images spanning MR,
-CT, CR, X-ray, mammography, nuclear medicine, radiography, secondary capture,
-and fluoroscopy. On the evaluated dataset, the 16-bit-native pipeline improves
-compression ratio by 5--22\% (geometric mean $+$14\%) relative to a
-delta\,+\,Zstandard baseline, and its geometric mean ratio (3.12$\times$)
-is within 1\% relative to High-Throughput JPEG 2000 (HTJ2K, 3.15$\times$)
-while being structurally simpler.
-Across grayscale images, MIC achieves lossless
-compression ratios ranging from 1.7$\times$ to 8.9$\times$. A four-state
-interleaved entropy decoder provides a geometric-mean $+$68\% isolated FSE
-speedup on ARM64 over a single-state implementation without affecting
-compressed size. On the reported ARM64 and AMD64 platforms, the fastest MIC
-variant exceeds HTJ2K decompression speed on the majority of tested images
-single-threaded; strip-parallel configurations exceed HTJ2K on all 21 images
-on both platforms.
-
-A compact JavaScript implementation (${\sim}$20\,KB, zero dependencies) and a
-Go WebAssembly build demonstrate that the core decoding pipeline is lightweight
-enough for client-side web deployment, enabling in-browser decoding directly
-from object storage with no server-side transcoding. These results suggest that
-16-bit-native entropy coding is a useful design point for lossless medical
-image compression when decompression throughput, implementation simplicity, and
-deployment portability are important.
+Evaluation on 21 de-identified DICOM images spanning nine modalities shows the
+16-bit-native pipeline improves compression ratio by 5--22\% (geometric mean
+$+$14\%) relative to a delta\,+\,Zstandard baseline, with a geometric-mean
+ratio of 3.12$\times$---within 1\% of High-Throughput JPEG 2000
+(HTJ2K, 3.15$\times$)---while being structurally simpler. Across grayscale
+images, ratios range from 1.7$\times$ to 8.9$\times$. A four-state interleaved
+decoder yields a geometric-mean $+$68\% isolated FSE speedup on ARM64;
+single-threaded MIC exceeds HTJ2K decompression speed on the majority of tested
+images, and strip-parallel configurations exceed it on all 21 images on both
+ARM64 and AMD64. A compact JavaScript implementation (${\sim}$20\,KB, zero
+dependencies) and a Go WebAssembly build confirm that the pipeline is
+lightweight enough for client-side in-browser decoding, suggesting 16-bit-native
+entropy coding is a practical design point when throughput, simplicity, and
+deployment portability matter.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -255,11 +243,10 @@ The main contributions of this paper are as follows.
 
 \subsection{Scope}
 
-The primary focus of this paper is \textbf{lossless grayscale medical image
-compression}. Multi-frame grayscale (MIC2) and single-frame RGB support (MICR)
-are included as secondary studies demonstrating extensibility. The present work
-does not address lossy coding, progressive decoding, or region-of-interest
-coding.
+This paper is scoped to \textbf{lossless single-frame grayscale medical image
+compression}. Multi-frame and RGB extensions are outside the scope of this
+work. The present work does not address lossy coding, progressive decoding, or
+region-of-interest coding.
 
 \subsection{Organization}
 
@@ -595,35 +582,6 @@ $+$0.9\%, NM1 $+$1.9\%); the adaptive policy correctly identifies all
 beneficial cases. Decompression throughput is unaffected by tableLog choice
 ($<$5\% variation).
 
-\subsection{Optional Canonical Huffman Backend}
-
-An optional canonical Huffman backend~\cite{schwartz1964} was implemented for
-comparison. It typically produces 1--3\% smaller output than FSE but decodes
-more slowly. The slowdown arises because the large symbol alphabet requires a
-wider decode table with less-predictable variable-length code lookups, whereas
-FSE uses a fixed-width table transition (always $\textit{tableLog}$ bits) that
-the CPU branch predictor and prefetcher handle more efficiently. Since this
-paper focuses on the ratio-throughput tradeoff, FSE is used as the primary
-backend.
-
-\subsection{RGB and Multi-Frame Extensions}
-
-MIC includes two extensions:
-\begin{itemize}
-  \item \textbf{MIC2} for multi-frame grayscale data (the ``2'' denoting version
-  2 of the container format), with two modes: independent
-  (per-frame spatial Delta+RLE+FSE) and temporal (inter-frame ZigZag-encoded
-  residuals).
-  \item \textbf{MICR} for single-frame red-green-blue (RGB) images (the ``R''
-  denoting RGB), using a reversible YCoCg-R color transform~\cite{ycocgr}
-  (a luma/chroma decomposition that maps RGB integers to integers without loss)
-  followed by per-plane Delta+RLE+FSE applied to the full image without tiling.
-\end{itemize}
-
-These modes are included to demonstrate extensibility; the main contribution
-remains the grayscale 16-bit lossless pipeline. Lossless RGB compression ratios
-on the NEMA compsamples range from 1.56$\times$ (VL5, photographic) to
-6.24$\times$ (US1, ultrasound).
 
 % ============================================================
 \section{Multi-State Entropy Decoding}
@@ -720,117 +678,49 @@ role natively. Pure-Go implementations cover all other targets.
 
 \subsection{Isolated FSE Decompression Throughput}
 
-Table~\ref{tab:fse-arm64} presents isolated FSE decompression throughput for
-all 21 images on Apple M2 Max (ARM64, pure Go).
+Table~\ref{tab:fse-combined} reports isolated FSE decompression throughput
+(MB/s over the uncompressed RLE symbol stream) for a representative subset of
+modalities on both platforms.
 
 \begin{table}[htbp]
 \centering
-\caption{Isolated FSE decompression throughput (MB/s), Apple M2 Max (ARM64,
-pure Go). MB/s over uncompressed RLE symbol stream.}
-\label{tab:fse-arm64}
+\caption{Isolated FSE decompression throughput (MB/s) for representative
+modalities. ARM64: Apple M2 Max, pure Go. AMD64: Intel Core Ultra 9 285K,
+4-state uses BMI2 assembly (\texttt{fse4StateDecompKernel}).}
+\label{tab:fse-combined}
 \scriptsize
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Image & 1-state & 2-state & 4-state & 4 vs.\ 1 \\
+ & \multicolumn{3}{c}{ARM64 (MB/s)} & \multicolumn{3}{c}{AMD64 (MB/s)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Image & 1-st & 4-st & gain & 1-st & 4-st & gain \\
 \midrule
-MR   &   514 &   689 &   841 & $+$64\% \\
-CT   &   829 &   995 & 1,295 & $+$56\% \\
-CR   &   140 & 1,044 &   966 & $+$590\%$^*$ \\
-XR   & 1,444 & 1,774 & 1,952 & $+$35\% \\
-MG1  & 1,140 & 1,746 & 1,873 & $+$64\% \\
-MG2  &   743 & 1,064 & 1,319 & $+$77\% \\
-MG3  & 1,453 & 4,115 & 5,462 & $+$276\% \\
-MG4  & 2,633 & 3,707 & 5,287 & $+$101\% \\
-CT1  &   982 & 1,241 & 1,572 & $+$60\% \\
-CT2  & 1,108 & 1,092 & 1,434 & $+$29\% \\
-MG-N & 2,944 & 4,138 & 5,696 & $+$94\% \\
-MR1  & 1,562 & 2,027 & 2,591 & $+$66\% \\
-MR2  & 2,306 & 2,867 & 3,521 & $+$53\% \\
-MR3  & 1,472 & 1,582 & 1,841 & $+$25\% \\
-MR4  & 1,779 & 1,973 & 2,389 & $+$34\% \\
-NM1  & 1,658 & 1,898 & 2,254 & $+$36\% \\
-RG1  & 1,676 & 2,652 & 3,128 & $+$87\% \\
-RG2  & 2,432 & 3,409 & 3,810 & $+$57\% \\
-RG3  & 2,143 & 2,995 & 3,587 & $+$67\% \\
-SC1  & 1,997 & 2,788 & 2,927 & $+$47\% \\
-XA1  & 2,005 & 2,348 & 2,639 & $+$32\% \\
+MR   &   514 &   841 & $+$64\% &   600 &   828 & $+$38\% \\
+CT   &   829 & 1,295 & $+$56\% &   941 & 1,631 & $+$73\% \\
+CR   &   140 &   966 & $+$590\%$^*$ & 1,994 & 4,535 & $+$127\% \\
+XR   & 1,444 & 1,952 & $+$35\% & 3,195 & 5,771 & $+$81\% \\
+MG1  & 1,140 & 1,873 & $+$64\% & 3,379 & 4,952 & $+$47\% \\
+MG-N & 2,944 & 5,696 & $+$94\% & 2,722 & 4,981 & $+$83\% \\
+NM1  & 1,658 & 2,254 & $+$36\% & 2,078 & 2,407 & $+$16\% \\
+RG1  & 1,676 & 3,128 & $+$87\% & 2,506 & 4,336 & $+$73\% \\
 \midrule
-\textbf{Geomean} & \textbf{1,418} & \textbf{1,945} & \textbf{2,375} & \textbf{$+$68\%} \\
+\textbf{Geomean (21)} & \textbf{1,418} & \textbf{2,375} & \textbf{$+$68\%} &
+\textbf{2,309} & \textbf{3,306} & \textbf{$+$43\%} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-$^*$\textbf{CR anomaly}: The single-state CR result (140~MB/s) is caused by the
-\texttt{zeroBits} flag: when any symbol probability exceeds 50\%, the
-single-state decoder must bounds-check every \texttt{getBits} call. Multi-state
-decoders interleave their bit reads, reducing the frequency of this check.
+$^*$CR single-state is depressed by the \texttt{zeroBits} bounds-check path
+(triggered when any symbol probability exceeds 50\%); multi-state interleaving
+reduces this overhead. The AMD64 BMI2 kernel sidesteps the pure-Go check
+entirely, yielding $+$127\%.
 
-Across the 21-image ARM64 sweep in Table~\ref{tab:fse-arm64}, the 4-state
-decoder delivers a geometric-mean speedup of $+$68\% over the 1-state
-baseline, with per-image gains ranging from $+$25\% (MR3) to $+$590\% (CR,
-driven by the \texttt{zeroBits} fast-path discussed above). The spread
-reflects how different residual distributions exercise the shared bit-reader
-refill path: images with denser symbol alphabets (larger MG, CR) gain the
-most, while very small images (MR, NM1) see the least amortization.
-
-Table~\ref{tab:fse-amd64} presents the same isolated FSE benchmark run on the
-Intel Core Ultra 9 285K (AMD64) for all 21 images.
-
-\begin{table}[tbp]
-\centering
-\caption{Isolated FSE decompression throughput (MB/s), Intel Core Ultra 9
-285K (x86-64/AMD64). 1-state and 2-state: pure Go; 4-state: BMI2 assembly
-(\texttt{fse4StateDecompKernel}). MB/s over uncompressed RLE symbol stream.}
-\label{tab:fse-amd64}
-\scriptsize
-\begin{tabular}{lrrrr}
-\toprule
-Image & 1-state & 2-state & 4-state & 4 vs.\ 1 \\
-\midrule
-MR   &   600 &   999 &   828 & $+$38\% \\
-CT   &   941 & 1,421 & 1,631 & $+$73\% \\
-CR   & 1,994 & 3,958 & 4,535 & $+$127\%$^*$ \\
-XR   & 3,195 & 5,028 & 5,771 & $+$81\% \\
-MG1  & 3,379 & 4,357 & 4,952 & $+$47\% \\
-MG2  & 2,682 & 3,313 & 4,155 & $+$55\% \\
-MG3  & 3,048 & 4,613 & 5,517 & $+$81\% \\
-MG4  & 5,476 & 6,686 & 6,437 & $+$18\% \\
-CT1  & 1,733 & 1,871 & 2,522 & $+$46\% \\
-CT2  & 1,780 & 2,504 & 2,485 & $+$40\% \\
-MG-N & 2,722 & 4,577 & 4,981 & $+$83\% \\
-MR1  & 2,277 & 2,338 & 2,881 & $+$27\% \\
-MR2  & 2,421 & 3,609 & 3,769 & $+$56\% \\
-MR3  & 1,941 & 1,958 & 2,369 & $+$22\% \\
-MR4  & 2,284 & 2,926 & 2,753 & $+$21\% \\
-NM1  & 2,078 & 2,587 & 2,407 & $+$16\% \\
-RG1  & 2,506 & 4,248 & 4,336 & $+$73\% \\
-RG2  & 3,808 & 3,786 & 4,081 & $+$7\% \\
-RG3  & 2,315 & 3,285 & 3,925 & $+$70\% \\
-SC1  & 3,044 & 3,760 & 3,734 & $+$23\% \\
-XA1  & 2,753 & 2,933 & 2,253 & $-$18\%$^\dagger$ \\
-\midrule
-\textbf{Geomean} & \textbf{2,309} & \textbf{3,091} & \textbf{3,306} & \textbf{$+$43\%} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-$^*$\textbf{CR on AMD64}: the 4-state BMI2 assembly kernel sidesteps the
-pure-Go \texttt{zeroBits} bounds-check overhead, yielding $+$127\%.
-
-$^\dagger$\textbf{XA1}: the $-$18\% result is an outlier likely caused by
-small-image effects and mixed P-core/E-core scheduling on the Intel processor.
-The image size (2\,MB) is near the threshold where per-chain startup costs
-dominate amortized decoding time.
-
-The AMD64 4-state decoder achieves a geometric-mean speedup of $+$43\%
-over the 1-state baseline (2-state: $+$34\%), with per-image gains
-ranging from $-$18\% (XA1) to $+$127\% (CR). The smaller geomean
-relative to ARM64 ($+$68\%) is primarily explained by the absence of
-the severe \texttt{zeroBits} stall on ARM64: the Intel out-of-order
-engine handles the bounds-checked code path without a dramatic penalty,
-raising the 1-state baseline and compressing the relative multi-state
-gain. For C-level and Single Instruction, Multiple Data (SIMD) multi-state
-decoder throughput on this platform, see Table~\ref{tab:decomp-amd64}.
+The 4-state decoder delivers a geometric-mean speedup of $+$68\% on ARM64 and
+$+$43\% on AMD64 over the 1-state baseline. The smaller AMD64 gain reflects
+a higher 1-state baseline: the Intel out-of-order engine tolerates the serial
+dependency chain more efficiently, compressing the relative multi-state
+improvement. For C and SIMD variant throughput on AMD64, see
+Table~\ref{tab:decomp-amd64}.
 
 % ============================================================
 \section{Experimental Methodology}
@@ -918,7 +808,7 @@ M2 Max and $<$5\% on Intel AMD64.
   with \texttt{-O3 -march=native}.
 \end{itemize}
 
-\textbf{Codec variants} (Table~\ref{tab:variants}):
+\textbf{Codec variants}:
 \begin{itemize}
   \item \textbf{MIC-Go}: Pure Go, single-state FSE decoder.
   \item \textbf{MIC-4state}: Pure Go, four-state FSE decoder.
@@ -935,25 +825,6 @@ M2 Max and $<$5\% on Intel AMD64.
   decodable.
 \end{itemize}
 
-\begin{table}[htbp]
-\centering
-\caption{Codec variant summary. ``Format change'' indicates whether the
-compressed bitstream differs from MIC-Go.}
-\label{tab:variants}
-\scriptsize
-\begin{tabular}{lllll}
-\toprule
-Variant & Language & FSE decoder & SIMD & Format change \\
-\midrule
-MIC-Go        & Go    & 1-state Go   & No     & Baseline \\
-MIC-4state    & Go    & 4-state Go   & No     & Yes (magic header) \\
-MIC-4state-C  & C/CGO & 4-state C    & No     & Same as 4-state \\
-MIC-4state-SIMD & C/CGO & 4-state C  & BMI2/scalar & Same as 4-state \\
-Wavelet+SIMD  & Go/ASM & 1-state Go  & AVX2/scalar & Different pipeline \\
-PICS-C-$N$    & C/CGO & 4-state C    & Optional & Per-strip headers \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \subsection{JavaScript and Browser Evaluation}
 
@@ -1006,25 +877,6 @@ XA1  & 2.00 & 4.37$\times$ & 5.01$\times$ & 4.94$\times$ & 5.04$\times$ & 5.03$\
 \end{tabular}
 \end{table*}
 
-Table~\ref{tab:ratio-summary} summarizes geometric means and win counts across
-all codec variants.
-
-\begin{table}[htbp]
-\centering
-\caption{Compression ratio summary: geometric means and win counts.}
-\label{tab:ratio-summary}
-\begin{tabular}{lrr}
-\toprule
-Codec & Geo.\ Mean & Best on \\
-\midrule
-JPEG-LS & \textbf{3.44$\times$} & 21/21 \\
-Wavelet V2 SIMD & 3.28$\times$ & 0/21 \\
-HTJ2K & 3.15$\times$ & 0/21 \\
-MIC (Delta+RLE+FSE) & 3.12$\times$ & 0/21 \\
-Delta+Zstd-19 & 3.03$\times$ & 0/21 \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \textbf{Analysis.} JPEG-LS achieves the highest lossless ratio on all 21
 images, as expected given its context-adaptive MED predictor. MIC's design
@@ -1310,44 +1162,20 @@ prediction. MG1's extreme concentration (69.2\% at zero) explains its
 
 \subsection{The Cost-of-Complexity Frontier}
 
-Table~\ref{tab:pareto} places MIC against the main reference codecs on three
-axes: compression ratio (geometric mean over the 21 images), decompression
-throughput, and decoder source lines. JPEG-LS wins on ratio but is the
-slowest to decode; HTJ2K is ratio-competitive but ships as ${\sim}$20k lines
-of C++ with no browser decoder. MIC's core Delta+RLE+FSE pipeline sits close
-to both on ratio while decoding faster than JPEG-LS and fitting in roughly
-1k lines---small enough to ship as a zero-dependency JavaScript module.
-
-\begin{table}[tbp]
-\centering
-\caption{Ratio vs.\ decompression throughput (geometric means) and decoder
-source size.}
-\label{tab:pareto}
-\scriptsize
-\begin{tabular}{lrrrp{1.2cm}}
-\toprule
-Codec & Ratio & Decomp. & Source lines & Browser \\
-\midrule
-$\Delta$+RLE+FSE (Go) & 3.12$\times$ & 310 & 1.1k & \textbf{Yes} \\
-$\Delta$+RLE+FSE (4s-C) & 3.12$\times$ & 530 & 1.5k & \textbf{Yes} \\
-HTJ2K (OpenJPH) & 3.15$\times$ & 460 & 20k & No \\
-JPEG-LS (CharLS) & 3.44$\times$ & 130 & 5.0k & No \\
-\bottomrule
-\end{tabular}
-\end{table}
+MIC's core Delta+RLE+FSE pipeline achieves a geometric-mean ratio of
+3.12$\times$---within 1\% of HTJ2K (3.15$\times$) and 91\% of JPEG-LS
+(3.44$\times$)---while decoding faster than both and fitting in roughly
+1,100 lines of Go (${\sim}$18$\times$ fewer than HTJ2K's ${\sim}$20k-line
+C++ library). JPEG-LS leads on ratio but is the slowest codec evaluated;
+HTJ2K has no browser decoder.
 
 \subsection{Lightweight Client-Side Decoding}
 
-MIC ships two browser decoder implementations: a pure JS ES module
-(${\sim}$20\,KB, zero dependencies) and a Go WASM build (${\sim}$2.5\,MB). A
-web-based DICOM viewer can fetch a \texttt{.mic} file directly from object
-storage and decode it client-side, eliminating server-side transcoding. As of
-the submission date, we did not identify a production-ready npm-distributed
-WebAssembly or JavaScript decoder for HTJ2K~\cite{nohtj2k} or
-JPEG-LS~\cite{charls}; this landscape may change. By contrast, Zstandard has a
-community JavaScript port~\cite{fzstd}, demonstrating that byte-oriented
-general-purpose codecs can reach the browser---but native 16-bit medical image
-decoding requires a purpose-built implementation such as MIC.
+A pure JavaScript decoder (${\sim}$20\,KB, zero dependencies) and a Go
+WebAssembly build enable client-side in-browser decoding directly from object
+storage, eliminating server-side transcoding. Native 16-bit medical image
+decoding in the browser requires a purpose-built implementation; MIC provides
+one at a fraction of the footprint of general-purpose alternatives.
 
 \subsection{Pathway to Clinical Impact}
 
@@ -1366,8 +1194,8 @@ table-based entropy coding. The key results across 21 clinical DICOM images
 spanning 10 modalities:
 
 \begin{itemize}
-  \item \textbf{Compression ratios}: 1.7$\times$--8.9$\times$ grayscale;
-  1.56$\times$--6.24$\times$ single-frame RGB (see Section~\ref{sec:pipeline}).
+  \item \textbf{Compression ratios}: 1.7$\times$--8.9$\times$ across the 21
+  evaluated grayscale images.
 
   \item \textbf{vs.\ Delta+Zstandard}: 5--22\% better compression on all 21
   images (geometric mean $+$14\%), attributable to the structural cost of
@@ -1453,10 +1281,6 @@ Y.\,Collet and M.\,Kucherawy,
 ``Zstandard Compression and the `application/zstd' Media Type,''
 RFC~8878, IETF, Feb.\,2021.
 
-\bibitem{schwartz1964}
-E.\,S.\,Schwartz and B.\,Kallick,
-``Generating a canonical prefix encoding,''
-\textit{Commun.\ ACM}, vol.\,7, no.\,3, pp.\,166--169, 1964.
 
 \bibitem{mahapatra2007}
 S.\,Mahapatra and K.\,Singh,
@@ -1520,10 +1344,6 @@ A.\,R.\,Calderbank, I.\,Daubechies, W.\,Sweldens, and B.-L.\,Yeo,
 ``Wavelet transforms that map integers to integers,''
 \textit{Appl.\ Comput.\ Harmon.\ Anal.}, vol.\,5, no.\,3, pp.\,332--369, 1998.
 
-\bibitem{ycocgr}
-H.\,S.\,Malvar and G.\,J.\,Sullivan,
-``YCoCg-R: A color space with RGB reversibility and low dynamic range,''
-JVT Doc.\ JVT-I014, 2003.
 
 \bibitem{liu2017}
 F.\,Liu \textit{et al.},
@@ -1563,16 +1383,6 @@ Team CharLS,
 ``CharLS: A C/C++ JPEG-LS library implementation,''
 \url{https://github.com/team-charls/charls}, 2024.
 
-\bibitem{nohtj2k}
-As of the submission date, no production-ready WebAssembly or JavaScript decoder
-for High-Throughput JPEG~2000 was identified in published npm packages or
-official project releases. The OpenJPH open-source library does not provide a
-WASM build or npm package at the time of writing.
-
-\bibitem{fzstd}
-N.\,Tindall \textit{et al.},
-``fzstd: Pure JavaScript Zstandard decompressor,''
-\url{https://github.com/101arrowz/fzstd}, 2024.
 
 \end{thebibliography}
 
