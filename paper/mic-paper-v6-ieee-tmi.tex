@@ -109,8 +109,7 @@ high-bit-depth data. Modalities such as computed tomography (CT), magnetic
 resonance imaging (MR), digital radiography (computed radiography,
 CR; plain X-ray, XR), mammography, and tomosynthesis commonly store pixel
 values at 10, 12, or 16 bits per sample. A single digital breast tomosynthesis
-(DBT) acquisition view produces 60 or more reconstructed slices (for example,
-69 frames at $2457 \times 1890$ pixels, 10-bit depth), totalling over
+(DBT) acquisition view produces 60 or more reconstructed slices, totalling over
 600\,MB of raw pixel data per view. A complete bilateral four-view screening
 study exceeds 2\,GB uncompressed. Efficient lossless compression is essential
 for archival storage, network transmission, and real-time rendering in clinical
@@ -169,16 +168,6 @@ Based on this observation, we present MIC, a lossless codec that combines:
 The codec also includes multi-state interleaved entropy decoding to improve
 decompression throughput by increasing ILP.
 
-The paper is motivated by three practical questions:
-\begin{enumerate}
-  \item Can a 16-bit-native entropy coding pipeline improve compression
-  efficiency over byte-oriented baselines on medical residual streams?
-  \item Can entropy-decoder organization be modified to improve throughput
-  without changing compressed size?
-  \item Can such a codec remain compact enough for lightweight deployment,
-  including client-side decoding?
-\end{enumerate}
-
 \subsection{Contributions}
 
 The main contributions of this paper are as follows.
@@ -207,9 +196,9 @@ The main contributions of this paper are as follows.
   \item \textbf{An empirical evaluation against standard codecs and a
   general-purpose baseline.}
   We compare MIC with HTJ2K (OpenJPH)~\cite{openjph}, JPEG-LS
-  (CharLS)~\cite{charls}, and Delta\,+\,Zstandard on a dataset of 21 public
-  de-identified DICOM images spanning nine modalities, using fair in-process
-  benchmarking via CGO (Go's C foreign-function interface) bindings.
+  (CharLS)~\cite{charls}, and Delta\,+\,Zstandard on a dataset of 21
+  DICOM images spanning nine modalities (described in
+  Section~\ref{sec:methodology}).
 
   \item \textbf{A compact JavaScript/WebAssembly (WASM) decoder implementation.}
   We provide a ${\sim}$20\,KB pure JavaScript (JS) decoder and a Go
@@ -230,7 +219,6 @@ existing methods. Section~\ref{sec:pipeline} describes the proposed coding
 pipeline. Section~\ref{sec:multistate} presents the multi-state entropy decoder.
 Section~\ref{sec:methodology} describes experimental methodology.
 Section~\ref{sec:results} reports compression and speed results.
-Section~\ref{sec:discussion} discusses limitations and implications.
 Section~\ref{sec:conclusion} concludes.
 
 % ============================================================
@@ -320,10 +308,9 @@ Source lines & 5k & 20k & N/A & N/A & 1.1k \\
 \section{Proposed Method}
 \label{sec:pipeline}
 
-MIC compresses grayscale images using three sequential stages: spatial
-prediction, 16-bit run-length encoding, and large-alphabet table-based entropy
-coding. Each stage is simple enough to decode in a single sequential pass with
-minimal branching, as illustrated in Fig.~\ref{fig:pipeline}.
+Each stage of the pipeline described in Section~\ref{sec:intro} is simple
+enough to decode in a single sequential pass with minimal branching, as
+illustrated in Fig.~\ref{fig:pipeline}.
 
 \begin{figure*}[tbp]
 \centering
@@ -519,14 +506,21 @@ symbols and observation density:
   i.e., average observations per symbol slot.
 \end{itemize}
 
-Selection rules:
-\begin{itemize}
-  \item Default $\textit{tableLog} = 11$.
-  \item Bumped to 12 when $\textit{symbolDensity} > 32$ and
-  $\textit{symbolLen} > 128$.
-  \item Bumped to 13 when $\textit{symbolLen} > 512$ and
-  $\textit{symbolDensity} > 16$.
-\end{itemize}
+Selection rules (applied in order; later rules override earlier ones):
+\begin{enumerate}
+  \item Default: $\textit{tableLog} = 11$.
+  \item If $\textit{symbolLen} > 128$ \textbf{and} $\textit{symbolDensity} > 32$:
+  set $\textit{tableLog} = 12$.
+  \item If $\textit{symbolLen} > 512$ \textbf{and} $\textit{symbolDensity} > 16$:
+  set $\textit{tableLog} = 13$ (overrides rule 2 when both conditions hold).
+\end{enumerate}
+
+A larger tableLog improves probability precision for the FSE model but
+increases table memory from $2^{11} \times 4 = 8$\,KB to $2^{13} \times 4 =
+32$\,KB. Rule 2 activates on images with a large active symbol set and enough
+data per symbol for reliable probability estimates. Rule 3 extends this to
+images with very broad symbol ranges (e.g., mammography after delta coding),
+where precision gains outweigh the memory cost even at lower density.
 
 Table~\ref{tab:tablelog-ablation} presents the tableLog ablation across
 selected images.
@@ -565,13 +559,21 @@ beneficial cases. Decompression throughput is unaffected by tableLog choice
 \subsection{The Serial Dependency Problem}
 
 A conventional single-state table-based ANS decoder contains a serial
-dependency chain:
+dependency chain. Each decoded symbol requires one table lookup followed by
+one bit read, and the next state depends on both results:
 \begin{equation}
 \begin{aligned}
-  \text{let } e &= \texttt{decTable}[s_n], \\
-  s_{n+1} &= e.\textit{newState} + \texttt{getBits}(e.\textit{nbBits}).
+  e &= \texttt{decTable}[s_n], \\
+  s_{n+1} &= e.\textit{base} + \texttt{getBits}(e.\textit{nbBits}),
 \end{aligned}
 \end{equation}
+where $s_n$ is the current decoder state, $\texttt{decTable}$ is the
+prebuilt decode table, $e.\textit{base}$ is the base value for the next
+state stored in the table entry, $e.\textit{nbBits}$ is the number of bits
+to consume from the bitstream, and $\texttt{getBits}(k)$ reads the next $k$
+bits from the compressed stream and returns them as an integer.
+Because $s_{n+1}$ depends on $e$, which depends on $s_n$, the computations
+for symbol $n+1$ cannot begin until symbol $n$ is fully resolved.
 With a table-lookup latency of approximately $L \approx 4$ cycles on modern
 out-of-order CPUs (L1 cache hit), the loop is limited to roughly one symbol per
 $L$ cycles regardless of available execution units. Modern CPUs have 4--6
@@ -639,10 +641,19 @@ dependency.
 The bitstream signals the decoding mode with a 2-byte magic header:
 \texttt{0xFF,0x02} for two-state; \texttt{0xFF,0x04} for four-state; followed
 by a 4-byte symbol count. In the single-state format, the first byte encodes
-\texttt{tableLog}. Since the maximum supported \texttt{tableLog} is 17, a first
-byte of \texttt{0xFF} ($= 255$) is not a valid single-state \texttt{tableLog}
-value and can safely be reused as the extended-format marker. All three formats
-coexist without ambiguity.
+\texttt{tableLog} (the value that determines the decode table size as
+$2^{\textit{tableLog}}$ entries).
+
+The \texttt{tableLog} is bounded by the symbol alphabet size: for a 16-bit
+symbol alphabet of at most 65,535 symbols, a table of $2^{16} = 65{,}536$
+entries gives one slot per symbol, which is the practical minimum for
+meaningful probability quantization. The implementation supports
+\texttt{tableLog} up to 17 (giving 131,072 entries, approximately $2\times$
+the alphabet size, for better probability resolution on large alphabets).
+Since the maximum valid \texttt{tableLog} value is 17 and a single byte can
+represent at most 255, the value \texttt{0xFF} ($= 255 > 17$) is not a valid
+single-state \texttt{tableLog} and can safely be reused as the
+extended-format marker. All three formats coexist without ambiguity.
 
 \textbf{Platform-specific kernels.} On AMD64, Bit Manipulation Instruction
 Set 2 (BMI2) \texttt{SHLXQ}/\texttt{SHRXQ} instructions provide 3-operand
@@ -656,6 +667,25 @@ role natively. Pure-Go implementations cover all other targets.
 Table~\ref{tab:fse-combined} reports isolated FSE decompression throughput
 (MB/s over the uncompressed RLE symbol stream) for a representative subset of
 modalities on both platforms.
+
+\textbf{zeroBits condition.} The FSE decoder uses a fast inner loop that
+reads a fixed number of bits per symbol. However, when any symbol's
+normalized count exceeds half the table size (i.e., its probability exceeds
+50\%), some state transitions must emit zero bits---the decoder would call
+\texttt{getBits(0)}. Pure-Go code must branch on this case to avoid a
+zero-shift undefined behavior; the resulting conditional branch (the
+\emph{zeroBits check}) breaks the fast path. The AMD64 BMI2 assembly kernel
+(\texttt{fse4StateDecompKernel}) uses the \texttt{SHRXQ} instruction, which
+handles a shift count of zero correctly without branching, so it sidesteps
+the \texttt{zeroBits} check entirely.
+
+\texttt{fse4StateDecompKernel} is a hand-written AMD64 assembly routine that
+runs all four interleaved FSE decode chains in a single tight loop. It uses
+BMI2 \texttt{SHLXQ}/\texttt{SHRXQ} instructions for register-saving variable
+shifts (avoiding contention on the \texttt{CL} shift-count register used by
+legacy x86 variable-shift instructions) and issues four simultaneous
+table-lookup address computations to keep the CPU's out-of-order execution
+engine fully occupied.
 
 \begin{table}[htbp]
 \centering
@@ -685,10 +715,10 @@ RG1  & 1,676 & 3,128 & $+$87\% & 2,506 & 4,336 & $+$73\% \\
 \end{tabular}
 \end{table}
 
-$^*$CR single-state is depressed by the \texttt{zeroBits} bounds-check path
-(triggered when any symbol probability exceeds 50\%); multi-state interleaving
-reduces this overhead. The AMD64 BMI2 kernel sidesteps the pure-Go check
-entirely, yielding $+$127\%.
+$^*$CR single-state is depressed by the \texttt{zeroBits} branch (see
+above); multi-state interleaving amortizes this overhead across four chains.
+The AMD64 \texttt{fse4StateDecompKernel} sidesteps the branch entirely,
+yielding $+$127\%.
 
 The 4-state decoder delivers a geometric-mean speedup of $+$68\% on ARM64 and
 $+$43\% on AMD64 over the 1-state baseline. The smaller AMD64 gain reflects
@@ -703,10 +733,10 @@ Table~\ref{tab:decomp-amd64}.
 
 \subsection{Dataset}
 
-The evaluation uses 21 de-identified DICOM images spanning nine modalities, drawn
-from publicly available datasets: NEMA WG-04 compsamples, NEMA 1997 CD, and the
-Clunie Breast Tomosynthesis Case~1 (Table~\ref{tab:dataset}). All images are
-de-identified per DICOM PS 3.15 Appendix~E; no ethics approval is required.
+The evaluation uses 21 DICOM images spanning nine modalities, drawn
+from publicly available datasets: the NEMA Working Group~4 (WG-04)
+compression sample images~\cite{nema_wg04}, the NEMA 1997 CD, and the
+Clunie Breast Tomosynthesis Case~1 (Table~\ref{tab:dataset}).
 
 \begin{table}[htbp]
 \centering
@@ -749,11 +779,13 @@ strong generalization claims.
 
 The current study compares MIC with:
 \begin{itemize}
-  \item \textbf{HTJ2K} (OpenJPH~\cite{openjph}), via in-process CGO bindings,
-  \item \textbf{JPEG-LS} (CharLS~\cite{charls}), via in-process CGO bindings,
-  and
+  \item \textbf{HTJ2K} (OpenJPH~\cite{openjph}),
+  \item \textbf{JPEG-LS} (CharLS~\cite{charls}), and
   \item \textbf{Delta\,+\,Zstandard} (level 19).
 \end{itemize}
+
+All three baselines are called in-process (no subprocess or file-I/O overhead)
+using Go's C foreign-function interface (CGO) for the C-library codecs.
 
 \subsection{Metrics}
 
@@ -783,21 +815,29 @@ M2 Max and $<$5\% on Intel AMD64.
   with \texttt{-O3 -march=native}.
 \end{itemize}
 
-\textbf{Codec variants}:
+\textbf{Codec variants}: All variants produce the same compressed bytes unless
+noted. Differences are in the decoder implementation only.
 \begin{itemize}
-  \item \textbf{MIC-Go}: Pure Go, single-state FSE decoder.
-  \item \textbf{MIC-4state}: Pure Go, four-state FSE decoder.
-  \item \textbf{MIC-4state-C}: C four-state FSE decoder via CGO.
-  \item \textbf{MIC-4state-SIMD}: C four-state FSE with BMI2 (AMD64) or scalar
-  (ARM64) via CGO.
-  \item \textbf{Wavelet+SIMD}: 5/3 wavelet with blocked column layout and
-  Advanced Vector Extensions 2 (AVX2) kernels (AMD64) or scalar blocked
-  (ARM64).
-  \item \textbf{PICS-C-$N$}: Parallel Image Compressed Strips, a strip-parallel
-  mode that splits the image into $N$ horizontal strips, compresses each
-  strip independently with its own FSE table, and decompresses all strips
-  in parallel using a C pthreads worker pool. Strips are independently
-  decodable.
+  \item \textbf{MIC-Go}: Pure Go, single-state FSE decoder
+  (Section~\ref{sec:pipeline}).
+  \item \textbf{MIC-4state}: Pure Go, four-state interleaved FSE decoder
+  (Section~\ref{sec:multistate}).
+  \item \textbf{MIC-4state-C}: C implementation of the four-state FSE decoder,
+  called via CGO. Produces bit-identical output to MIC-4state.
+  \item \textbf{MIC-4state-SIMD}: C four-state FSE decoder with the BMI2
+  \texttt{fse4StateDecompKernel} on AMD64; falls back to the scalar C decoder
+  on ARM64 (ARM64 lacks BMI2). Bit-identical to MIC-4state-C.
+  \item \textbf{Wavelet+SIMD}: Le~Gall 5/3 integer wavelet (blocked column
+  layout for cache efficiency) with AVX2 predict/update kernels on AMD64. On
+  ARM64 the same blocked column layout is used without SIMD (\emph{scalar
+  blocked}): the cache-friendly access pattern still improves throughput over a
+  plain column-by-column transform even without vectorization. Produces a
+  different compressed stream from all MIC variants.
+  \item \textbf{PICS-C-$N$}: Parallel Image Compressed Strips. The image is
+  split into $N$ equal horizontal strips; each strip is compressed
+  independently using its own FSE table. Decompression of all strips runs in
+  parallel using a C pthreads worker pool; strips are independently decodable.
+  $N \in \{2,4,8\}$ in this evaluation.
 \end{itemize}
 
 
@@ -855,121 +895,26 @@ XA1  & 2.00 & 4.37$\times$ & 5.01$\times$ & 4.94$\times$ & 5.04$\times$ & 5.03$\
 
 \textbf{Analysis.} JPEG-LS achieves the highest lossless ratio on all 21
 images, as expected given its context-adaptive MED predictor. MIC's design
-target is not ratio alone but the ratio-throughput-simplicity tradeoff: on
-ARM64, MIC-4state-C achieves approximately 91\% of JPEG-LS's geometric mean
-ratio (3.12$\times$ vs.\ 3.44$\times$) while delivering approximately
-4$\times$ the single-threaded decompression throughput and requiring about
-1/5 the source lines.
-
-Mammography achieves the highest MIC ratios (up to 8.79$\times$) due to smooth
-tissue regions producing near-zero RLE runs. CT with full 16-bit dynamic range
-achieves 2.24$\times$ (MIC) vs.\ 1.67$\times$ (Wavelet): coefficient overflow
-in the 5/3 lifting step inflates Wavelet compressed size.
+target is not ratio alone but the ratio-throughput-simplicity tradeoff: MIC
+achieves approximately 91\% of JPEG-LS's geometric mean ratio
+(3.12$\times$ vs.\ 3.44$\times$) while decoding faster and requiring
+approximately $1/5$ the source lines. Mammography achieves the highest MIC
+ratios (up to 8.79$\times$) due to smooth tissue regions producing near-zero
+RLE runs.
 
 \textbf{PICS strip adaptation.} Each PICS strip receives a dedicated FSE table
 that specializes to its local residual distribution. On large images, this
-per-strip specialization improves ratio slightly because
-$\sum_k |S_k| \cdot H(S_k) < |S| \cdot H(S)$ when residual statistics vary
-across strips.
-
-\subsection{Effect of 16-Bit-Native Residual Coding}
-
-MIC outperforms Delta+Zstandard (zstd level 19) by 5--22\% on all 21 tested
-images (geometric mean $+$14\%). The gap is structural: the mutual information
-$I(X_H;\, X_L)$ of delta residuals ranges from 0.3\,bits/symbol (MR) to
-1.1\,bits/symbol (MG3), matching the empirical range.
-
-\subsection{Decompression Throughput---ARM64}
-
-Table~\ref{tab:decomp-arm} presents decompression throughput on Apple M2 Max.
-MIC-4state-C is the fastest single-threaded decoder on 13/21 images; PICS-C-8
-exceeds HTJ2K on all 21 images.
-
-\begin{table*}[t]
-\centering
-\caption{Decompression throughput (MB/s), Apple M2 Max (ARM64). Bold = fastest
-per row (single-threaded: first 5 cols; PICS: last 3 cols).}
-\label{tab:decomp-arm}
-\scriptsize
-\begin{tabular}{lrrrrrrrr}
-\toprule
-Image & MIC-Go & MIC-4s-C & Wav+SIMD & HTJ2K & JPEG-LS & PICS-C-2 & PICS-C-4 & PICS-C-8 \\
-\midrule
-MR   & 144 & \textbf{348} & 248 & 265 & 102 & 530 & \textbf{710}$^\dagger$ & 482 \\
-CT   & 191 & \textbf{356} & 316 & 307 & 137 & 524 & 955 & \textbf{1,092} \\
-CR   & 296 & 524 & \textbf{567} & 367 & 153 & 867 & 1,635 & \textbf{2,661} \\
-XR   & 308 & 533 & \textbf{627} & 334 & 108 & 874 & 1,666 & \textbf{3,025} \\
-MG1  & 482 & 683 & 678 & \textbf{810} & 409 & 1,205 & 2,112 & \textbf{3,656} \\
-MG2  & 479 & 686 & 697 & \textbf{790} & 416 & 1,225 & 2,120 & \textbf{3,773} \\
-MG3  & 308 & \textbf{531} & 422 & 338 & 153 & 864 & 1,673 & \textbf{3,117} \\
-MG4  & 417 & \textbf{625} & 516 & 548 & 184 & 1,093 & 2,004 & \textbf{3,689} \\
-CT1  & 239 & \textbf{436} & 425 & 362 & 182 & 686 & 1,013 & \textbf{1,183} \\
-CT2  & 238 & 439 & \textbf{481} & 375 & 175 & 676 & 1,041 & \textbf{1,189} \\
-MG-N & 316 & \textbf{536} & 468 & 340 & 153 & 883 & 1,711 & \textbf{3,175} \\
-MR1  & 278 & \textbf{521} & 435 & 325 & 116 & 751 & 1,207 & \textbf{1,402} \\
-MR2  & 333 & \textbf{563} & 498 & 388 & 172 & 913 & 1,552 & \textbf{2,466} \\
-MR3  & 375 & \textbf{639} & 507 & 441 & 236 & 908 & 1,430 & \textbf{1,614} \\
-MR4  & 316 & \textbf{571} & 479 & 406 & 197 & 818 & 1,341 & \textbf{1,558} \\
-NM1  & 327 & \textbf{632} & 575 & 410 & 210 & 888 & 1,400 & \textbf{1,679} \\
-RG1  & 235 & 406 & \textbf{584} & 332 & 104 & 602 & 1,128 & \textbf{2,017} \\
-RG2  & 367 & 590 & \textbf{644} & 443 & 193 & 986 & 1,803 & \textbf{3,194} \\
-RG3  & 374 & 604 & \textbf{656} & 562 & 246 & 1,035 & 1,944 & \textbf{3,302} \\
-SC1  & 375 & \textbf{587} & 388 & 401 & 229 & 1,017 & 1,861 & \textbf{3,279} \\
-XA1  & 331 & \textbf{576} & 459 & 419 & 204 & 928 & 1,583 & \textbf{2,493} \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-$^\dagger$MR is too small for PICS-C-8; PICS-C-4 is best.
-MIC-4state-C is 1.7--5.0$\times$ faster than JPEG-LS on all 21 images.
-PICS-C-8 peaks at 3,773\,MB/s on MG2.
-
-\subsection{Decompression Throughput---AMD64}
-
-Table~\ref{tab:decomp-amd64} presents results on AMD64 where MIC-4state-SIMD
-activates BMI2/PDEP and Wavelet+SIMD gains AVX2 kernels.
-
-\begin{table*}[t]
-\centering
-\caption{Decompression throughput (MB/s), Intel Core Ultra 9 285K (AMD64).
-Bold = fastest per row within single-threaded and PICS groups.}
-\label{tab:decomp-amd64}
-\scriptsize
-\begin{tabular}{lrrrrrrr}
-\toprule
-Image & MIC-Go & MIC-4s-C & MIC-4s-SIMD & Wav+SIMD & HTJ2K & PICS-C-4 & PICS-C-8 \\
-\midrule
-MR   & 251 & 501 & \textbf{708} & 194 & 570 & 301 & 124$^\dagger$ \\
-CT   & 231 & 403 & 487 & 364 & \textbf{544} & \textbf{676} & 339 \\
-CR   & 324 & 599 & \textbf{744} & 723 & 708 & 1,738 & \textbf{2,435} \\
-XR   & 363 & 601 & \textbf{803} & 681 & 570 & 1,714 & \textbf{1,994} \\
-MG1  & 617 & 789 & 1,119 & 746 & \textbf{1,235} & 1,872 & \textbf{2,514} \\
-MG2  & 562 & 800 & 1,166 & 848 & \textbf{1,297} & \textbf{2,244} & 2,085 \\
-MG3  & 357 & 633 & 669 & \textbf{678} & 644 & 1,823 & \textbf{2,538} \\
-MG4  & 523 & 743 & 773 & \textbf{808} & 916 & 2,124 & \textbf{2,707} \\
-CT1  & 322 & 520 & \textbf{676} & 525 & 657 & \textbf{857} & 423 \\
-CT2  & 293 & 514 & 636 & \textbf{705} & 627 & \textbf{847} & 687 \\
-MG-N & 368 & 635 & 669 & \textbf{705} & 643 & 1,872 & \textbf{2,191} \\
-MR1  & 356 & 609 & \textbf{766} & 532 & 654 & \textbf{945} & 366 \\
-MR2  & 352 & 658 & \textbf{975} & 601 & 749 & \textbf{1,121} & 793 \\
-MR3  & 450 & 728 & \textbf{809} & 676 & 802 & \textbf{920} & 705 \\
-MR4  & 390 & 596 & \textbf{861} & 738 & 660 & 493 & \textbf{701} \\
-NM1  & 367 & \textbf{717} & 668 & 715 & 627 & \textbf{783} & 405 \\
-RG1  & 302 & 497 & 593 & \textbf{705} & 557 & 1,248 & \textbf{1,494} \\
-RG2  & 433 & 676 & \textbf{861} & 811 & 823 & 1,841 & \textbf{1,912} \\
-RG3  & 460 & 706 & 858 & 881 & \textbf{894} & \textbf{1,969} & 1,613 \\
-SC1  & 464 & 695 & \textbf{888} & 710 & 728 & 1,819 & \textbf{1,889} \\
-XA1  & 413 & 693 & \textbf{836} & 538 & 797 & 1,173 & \textbf{1,513} \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-$^\dagger$\textbf{MR} is too small for PICS-C-8; PICS-C-4 achieves the highest
-PICS throughput on this image.
-
-On AMD64, MIC-4state-SIMD leads 16/21 images single-threaded; HTJ2K leads on
-MG1, MG2, MG4, CT, and RG3. PICS-C-8 exceeds HTJ2K on all 21 images on both
-platforms.
+per-strip specialization improves ratio slightly. Formally, if $S_k$ denotes
+the RLE symbol sub-sequence for strip $k$, $|S_k|$ its length, and $H(S_k)$
+its Shannon entropy (bits per symbol), then
+\begin{equation}
+  \sum_k |S_k| \cdot H(S_k) \;\leq\; |S| \cdot H(S),
+\end{equation}
+where $S$ is the full sequence and the inequality is strict when residual
+statistics differ across strips. In plain terms: a table that is specialized
+to a strip's own pixel-value distribution is at least as efficient as a single
+global table, and strictly better when different image regions have different
+statistical properties.
 
 \subsection{Encoding Throughput}
 
@@ -1050,6 +995,101 @@ XA1 & 335 & 324 & 449 & 463 & 111 & 357 & 154 & 437 & 708 & \textbf{944} \\
 \end{tabular}
 \end{table*}
 
+\subsection{Decompression Throughput---ARM64}
+
+Table~\ref{tab:decomp-arm} presents decompression throughput on Apple M2 Max
+(ARM64). On ARM64, all MIC variants use pure-Go or C scalar implementations;
+there is no SIMD column. MIC-4state-C is the fastest single-threaded variant
+on 13 of 21 images; PICS-C-8 exceeds HTJ2K decompression throughput on all
+21 images.
+
+\begin{table*}[t]
+\centering
+\caption{Decompression throughput (MB/s), Apple M2 Max (ARM64). Bold = fastest
+per row (single-threaded: first 5 cols; PICS: last 3 cols).}
+\label{tab:decomp-arm}
+\scriptsize
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Image & MIC-Go & MIC-4s-C & Wav+SIMD & HTJ2K & JPEG-LS & PICS-C-2 & PICS-C-4 & PICS-C-8 \\
+\midrule
+MR   & 144 & \textbf{348} & 248 & 265 & 102 & 530 & \textbf{710}$^\dagger$ & 482 \\
+CT   & 191 & \textbf{356} & 316 & 307 & 137 & 524 & 955 & \textbf{1,092} \\
+CR   & 296 & 524 & \textbf{567} & 367 & 153 & 867 & 1,635 & \textbf{2,661} \\
+XR   & 308 & 533 & \textbf{627} & 334 & 108 & 874 & 1,666 & \textbf{3,025} \\
+MG1  & 482 & 683 & 678 & \textbf{810} & 409 & 1,205 & 2,112 & \textbf{3,656} \\
+MG2  & 479 & 686 & 697 & \textbf{790} & 416 & 1,225 & 2,120 & \textbf{3,773} \\
+MG3  & 308 & \textbf{531} & 422 & 338 & 153 & 864 & 1,673 & \textbf{3,117} \\
+MG4  & 417 & \textbf{625} & 516 & 548 & 184 & 1,093 & 2,004 & \textbf{3,689} \\
+CT1  & 239 & \textbf{436} & 425 & 362 & 182 & 686 & 1,013 & \textbf{1,183} \\
+CT2  & 238 & 439 & \textbf{481} & 375 & 175 & 676 & 1,041 & \textbf{1,189} \\
+MG-N & 316 & \textbf{536} & 468 & 340 & 153 & 883 & 1,711 & \textbf{3,175} \\
+MR1  & 278 & \textbf{521} & 435 & 325 & 116 & 751 & 1,207 & \textbf{1,402} \\
+MR2  & 333 & \textbf{563} & 498 & 388 & 172 & 913 & 1,552 & \textbf{2,466} \\
+MR3  & 375 & \textbf{639} & 507 & 441 & 236 & 908 & 1,430 & \textbf{1,614} \\
+MR4  & 316 & \textbf{571} & 479 & 406 & 197 & 818 & 1,341 & \textbf{1,558} \\
+NM1  & 327 & \textbf{632} & 575 & 410 & 210 & 888 & 1,400 & \textbf{1,679} \\
+RG1  & 235 & 406 & \textbf{584} & 332 & 104 & 602 & 1,128 & \textbf{2,017} \\
+RG2  & 367 & 590 & \textbf{644} & 443 & 193 & 986 & 1,803 & \textbf{3,194} \\
+RG3  & 374 & 604 & \textbf{656} & 562 & 246 & 1,035 & 1,944 & \textbf{3,302} \\
+SC1  & 375 & \textbf{587} & 388 & 401 & 229 & 1,017 & 1,861 & \textbf{3,279} \\
+XA1  & 331 & \textbf{576} & 459 & 419 & 204 & 928 & 1,583 & \textbf{2,493} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+$^\dagger$MR is too small for PICS-C-8; PICS-C-4 is best.
+MIC-4state-C is 1.7--5.0$\times$ faster than JPEG-LS on all 21 images.
+PICS-C-8 peaks at 3,773\,MB/s on MG2.
+
+\subsection{Decompression Throughput---AMD64}
+
+Table~\ref{tab:decomp-amd64} presents decompression throughput on Intel Core
+Ultra 9 285K (AMD64). On AMD64, MIC-4state-SIMD uses the BMI2
+\texttt{fse4StateDecompKernel} assembly routine, and Wavelet+SIMD uses AVX2
+predict/update kernels. MIC-4state-SIMD is the fastest single-threaded variant
+on 16 of 21 images; PICS-C-8 exceeds HTJ2K decompression throughput on all
+21 images on both platforms.
+
+\begin{table*}[t]
+\centering
+\caption{Decompression throughput (MB/s), Intel Core Ultra 9 285K (AMD64).
+Bold = fastest per row within single-threaded and PICS groups.}
+\label{tab:decomp-amd64}
+\scriptsize
+\begin{tabular}{lrrrrrrr}
+\toprule
+Image & MIC-Go & MIC-4s-C & MIC-4s-SIMD & Wav+SIMD & HTJ2K & PICS-C-4 & PICS-C-8 \\
+\midrule
+MR   & 251 & 501 & \textbf{708} & 194 & 570 & \textbf{301} & 124$^\dagger$ \\
+CT   & 231 & 403 & 487 & 364 & \textbf{544} & \textbf{676} & 339 \\
+CR   & 324 & 599 & \textbf{744} & 723 & 708 & 1,738 & \textbf{2,435} \\
+XR   & 363 & 601 & \textbf{803} & 681 & 570 & 1,714 & \textbf{1,994} \\
+MG1  & 617 & 789 & 1,119 & 746 & \textbf{1,235} & 1,872 & \textbf{2,514} \\
+MG2  & 562 & 800 & 1,166 & 848 & \textbf{1,297} & \textbf{2,244} & 2,085 \\
+MG3  & 357 & 633 & 669 & \textbf{678} & 644 & 1,823 & \textbf{2,538} \\
+MG4  & 523 & 743 & 773 & 808 & \textbf{916} & 2,124 & \textbf{2,707} \\
+CT1  & 322 & 520 & \textbf{676} & 525 & 657 & \textbf{857} & 423 \\
+CT2  & 293 & 514 & 636 & \textbf{705} & 627 & \textbf{847} & 687 \\
+MG-N & 368 & 635 & 669 & \textbf{705} & 643 & 1,872 & \textbf{2,191} \\
+MR1  & 356 & 609 & \textbf{766} & 532 & 654 & \textbf{945} & 366 \\
+MR2  & 352 & 658 & \textbf{975} & 601 & 749 & \textbf{1,121} & 793 \\
+MR3  & 450 & 728 & \textbf{809} & 676 & 802 & \textbf{920} & 705 \\
+MR4  & 390 & 596 & \textbf{861} & 738 & 660 & 493 & \textbf{701} \\
+NM1  & 367 & \textbf{717} & 668 & 715 & 627 & \textbf{783} & 405 \\
+RG1  & 302 & 497 & 593 & \textbf{705} & 557 & 1,248 & \textbf{1,494} \\
+RG2  & 433 & 676 & \textbf{861} & 811 & 823 & 1,841 & \textbf{1,912} \\
+RG3  & 460 & 706 & 858 & 881 & \textbf{894} & \textbf{1,969} & 1,613 \\
+SC1  & 464 & 695 & \textbf{888} & 710 & 728 & 1,819 & \textbf{1,889} \\
+XA1  & 413 & 693 & \textbf{836} & 538 & 797 & 1,173 & \textbf{1,513} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+$^\dagger$\textbf{MR} is too small for PICS-C-8; PICS-C-4 achieves the highest
+PICS throughput on this image. HTJ2K leads single-threaded on MG1, MG2, MG4,
+CT, and RG3.
+
 \subsection{JavaScript Runtime Results}
 
 Table~\ref{tab:js-perf} reports Node.js single-threaded performance;
@@ -1105,59 +1145,6 @@ simplicity is the priority, the pure Go or JavaScript decoder suffices. For
 maximum single-threaded native throughput on a server, use MIC-4state-C. For
 large images on multicore systems, PICS-C-8 provides the highest decompression
 rates on both ARM64 and AMD64.
-
-% ============================================================
-\section{Discussion}
-\label{sec:discussion}
-
-\subsection{Why a Simple Residual Pipeline Can Be Effective}
-
-A practical conclusion from the current study is that simple prediction can
-already remove much of the redundancy in many medical images. When the residual
-stream becomes concentrated near zero and repeated values are common, a direct
-residual-domain representation can be highly effective. This assumption is most
-likely to hold for smooth modalities (MG, MR, CR) and may break down for noisy
-acquisitions, contrast-enhanced images, high-frequency radiographs with burned-in
-annotations, or non-natural secondary captures.
-
-Fig.~\ref{fig:histogram} shows the empirical delta-residual distributions for
-five representative modalities after the avg spatial predictor. All five are
-sharply concentrated near zero, with MG1 (mammography) placing 69.2\% of all
-residuals at exactly zero, explaining its exceptional compression ratio
-(8.79$\times$).
-
-\begin{figure*}[tbp]
-\centering
-\includegraphics[width=0.85\textwidth]{figures/fig2_histogram.png}
-\caption{Delta-residual distributions ($|r| \leq 30$ shown) after avg spatial
-prediction. MG1's extreme concentration (69.2\% at zero) explains its
-8.79$\times$ compression ratio.}
-\label{fig:histogram}
-\end{figure*}
-
-\subsection{The Cost-of-Complexity Frontier}
-
-MIC's core Delta+RLE+FSE pipeline achieves a geometric-mean ratio of
-3.12$\times$---within 1\% of HTJ2K (3.15$\times$) and 91\% of JPEG-LS
-(3.44$\times$)---while decoding faster than both and fitting in roughly
-1,100 lines of Go (${\sim}$18$\times$ fewer than HTJ2K's ${\sim}$20k-line
-C++ library). JPEG-LS leads on ratio but is the slowest codec evaluated;
-HTJ2K has no browser decoder.
-
-\subsection{Lightweight Client-Side Decoding}
-
-A pure JavaScript decoder (${\sim}$20\,KB, zero dependencies) and a Go
-WebAssembly build enable client-side in-browser decoding directly from object
-storage, eliminating server-side transcoding. Native 16-bit medical image
-decoding in the browser requires a purpose-built implementation; MIC provides
-one at a fraction of the footprint of general-purpose alternatives.
-
-\subsection{Pathway to Clinical Impact}
-
-MIC could be registered as a DICOM Private Transfer Syntax, allowing PACS
-vendors to adopt it without modifying the DICOM standard. The ${\sim}$20\,KB
-JavaScript decoder enables a direct storage-and-serve distribution model that
-bypasses server-side transcoding entirely.
 
 % ============================================================
 \section{Conclusion}
@@ -1220,10 +1207,11 @@ that could have influenced the work reported in this paper.
 % ============================================================
 \section*{Data Availability}
 
-The test images are drawn from publicly available, de-identified DICOM datasets:
-NEMA WG-04 compsamples, NEMA 1997~CD, and the Clunie Breast Tomosynthesis
-Case~1. The MIC implementation, benchmark harness, and reproduction instructions
-are available at \url{https://github.com/pappuks/medical-image-codec}.
+The test images are drawn from publicly available DICOM datasets:
+NEMA WG-04 compression samples~\cite{nema_wg04}, NEMA 1997~CD, and the
+Clunie Breast Tomosynthesis Case~1~\cite{clunie_tomo}. The MIC implementation,
+benchmark harness, and reproduction instructions are available at
+\url{https://github.com/pappuks/medical-image-codec}.
 
 % ============================================================
 \IEEEtriggeratref{35}
@@ -1379,6 +1367,17 @@ Team CharLS,
 ``CharLS: A C/C++ JPEG-LS library implementation,''
 \url{https://github.com/team-charls/charls}, 2024.
 
+\bibitem{nema_wg04}
+NEMA Working Group~4 (WG-04),
+``DICOM Compression Sample Images,''
+National Electrical Manufacturers Association,
+\url{https://www.dicomstandard.org/Resources/Open-Content/Compression-Samples},
+2024.
+
+\bibitem{clunie_tomo}
+D.\,A.\,Clunie,
+``Breast Tomosynthesis Case~1,'' DICOM sample images,
+\url{http://www.dclunie.com/pixelmedimagecases/tomo/case1/}, 2009.
 
 \end{thebibliography}
 
