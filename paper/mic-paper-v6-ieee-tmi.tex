@@ -668,24 +668,25 @@ Table~\ref{tab:fse-combined} reports isolated FSE decompression throughput
 (MB/s over the uncompressed RLE symbol stream) for a representative subset of
 modalities on both platforms.
 
-\textbf{zeroBits condition.} The FSE decoder uses a fast inner loop that
+\textbf{\texttt{zeroBits} flag.} The FSE decoder uses a fast inner loop that
 reads a fixed number of bits per symbol. However, when any symbol's
 normalized count exceeds half the table size (i.e., its probability exceeds
 50\%), some state transitions must emit zero bits---the decoder would call
-\texttt{getBits(0)}. Pure-Go code must branch on this case to avoid a
-zero-shift undefined behavior; the resulting conditional branch (the
-\emph{zeroBits check}) breaks the fast path. The AMD64 BMI2 assembly kernel
-(\texttt{fse4StateDecompKernel}) uses the \texttt{SHRXQ} instruction, which
-handles a shift count of zero correctly without branching, so it sidesteps
-the \texttt{zeroBits} check entirely.
+\texttt{getBits(0)}. A boolean flag named \texttt{zeroBits} (set at
+table-build time in the implementation) tracks this condition; Pure-Go code
+must branch on it to avoid a zero-shift undefined behavior, and the resulting
+conditional branch breaks the fast path. The AMD64 BMI2 assembly function
+\texttt{fse4StateDecompKernel} (described below) uses the \texttt{SHRXQ}
+instruction, which handles a shift count of zero correctly without branching,
+so it sidesteps the \texttt{zeroBits} check entirely.
 
-\texttt{fse4StateDecompKernel} is a hand-written AMD64 assembly routine that
-runs all four interleaved FSE decode chains in a single tight loop. It uses
-BMI2 \texttt{SHLXQ}/\texttt{SHRXQ} instructions for register-saving variable
-shifts (avoiding contention on the \texttt{CL} shift-count register used by
-legacy x86 variable-shift instructions) and issues four simultaneous
-table-lookup address computations to keep the CPU's out-of-order execution
-engine fully occupied.
+\texttt{fse4StateDecompKernel} is a hand-written AMD64 assembly routine in
+the MIC implementation that runs all four interleaved FSE decode chains in a
+single tight loop. It uses BMI2 \texttt{SHLXQ}/\texttt{SHRXQ} instructions
+for register-saving variable shifts (avoiding contention on the \texttt{CL}
+shift-count register used by legacy x86 variable-shift instructions) and
+issues four simultaneous table-lookup address computations to keep the CPU's
+out-of-order execution engine fully occupied.
 
 \begin{table}[htbp]
 \centering
