@@ -86,7 +86,7 @@ de-identified DICOM images spanning nine modalities shows the 16-bit-native
 pipeline improves compression ratio by 5--22\% (geometric mean 14\%) over a
 Delta+Zstandard baseline, reaching a geometric-mean ratio of 3.12
 times---within 1\% of High-Throughput JPEG 2000 (HTJ2K, 3.15 times). A
-four-state decoder yields a 68\% geometric-mean isolated FSE decompression
+four-state decoder yields a 68\% geometric-mean FSE stage decompression
 speedup on ARM64; strip-parallel configurations exceed HTJ2K decompression
 speed on all 21 images on both ARM64 and AMD64. A 20-kilobyte pure JavaScript
 decoder and a Go WebAssembly build enable client-side in-browser
@@ -190,7 +190,7 @@ The main contributions of this paper are as follows.
 
   \item \textbf{A multi-state interleaved entropy decoder.}
   We implement and evaluate two-state and four-state FSE decoding to exploit
-  ILP, achieving a geometric-mean $+$68\% isolated FSE speedup on ARM64
+  ILP, achieving a geometric-mean $+$68\% FSE stage speedup on ARM64
   ($+$43\% on AMD64) with no compression ratio penalty.
 
   \item \textbf{An empirical evaluation against standard codecs and a
@@ -662,11 +662,7 @@ count register used by traditional variable shifts); on ARM64,
 \texttt{LSLV}/\texttt{LSRV} (logical shift left/right variable) serve the same
 role natively. Pure-Go implementations cover all other targets.
 
-\subsection{Isolated FSE Decompression Throughput}
-
-Table~\ref{tab:fse-combined} reports isolated FSE decompression throughput
-(MB/s over the uncompressed RLE symbol stream) for a representative subset of
-modalities on both platforms.
+\subsection{Multi-State FSE Decoder Implementation}
 
 \textbf{\texttt{zeroBits} flag.} The FSE decoder uses a fast inner loop that
 reads a fixed number of bits per symbol. However, when any symbol's
@@ -687,46 +683,6 @@ for register-saving variable shifts (avoiding contention on the \texttt{CL}
 shift-count register used by legacy x86 variable-shift instructions) and
 issues four simultaneous table-lookup address computations to keep the CPU's
 out-of-order execution engine fully occupied.
-
-\begin{table}[htbp]
-\centering
-\caption{Isolated FSE decompression throughput (MB/s) for representative
-modalities. ARM64: Apple M2 Max, pure Go. AMD64: Intel Core Ultra 9 285K,
-4-state uses BMI2 assembly (\texttt{fse4StateDecompKernel}).}
-\label{tab:fse-combined}
-\scriptsize
-\begin{tabular}{lrrrrrr}
-\toprule
- & \multicolumn{3}{c}{ARM64 (MB/s)} & \multicolumn{3}{c}{AMD64 (MB/s)} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-Image & 1-st & 4-st & gain & 1-st & 4-st & gain \\
-\midrule
-MR   &   514 &   841 & $+$64\% &   600 &   828 & $+$38\% \\
-CT   &   829 & 1,295 & $+$56\% &   941 & 1,631 & $+$73\% \\
-CR   &   140 &   966 & $+$590\%$^*$ & 1,994 & 4,535 & $+$127\% \\
-XR   & 1,444 & 1,952 & $+$35\% & 3,195 & 5,771 & $+$81\% \\
-MG1  & 1,140 & 1,873 & $+$64\% & 3,379 & 4,952 & $+$47\% \\
-MG-N & 2,944 & 5,696 & $+$94\% & 2,722 & 4,981 & $+$83\% \\
-NM1  & 1,658 & 2,254 & $+$36\% & 2,078 & 2,407 & $+$16\% \\
-RG1  & 1,676 & 3,128 & $+$87\% & 2,506 & 4,336 & $+$73\% \\
-\midrule
-\textbf{Geomean (21)} & \textbf{1,418} & \textbf{2,375} & \textbf{$+$68\%} &
-\textbf{2,309} & \textbf{3,306} & \textbf{$+$43\%} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-$^*$CR single-state is depressed by the \texttt{zeroBits} branch (see
-above); multi-state interleaving amortizes this overhead across four chains.
-The AMD64 \texttt{fse4StateDecompKernel} sidesteps the branch entirely,
-yielding $+$127\%.
-
-The 4-state decoder delivers a geometric-mean speedup of $+$68\% on ARM64 and
-$+$43\% on AMD64 over the 1-state baseline. The smaller AMD64 gain reflects
-a higher 1-state baseline: the Intel out-of-order engine tolerates the serial
-dependency chain more efficiently, compressing the relative multi-state
-improvement. For C and SIMD variant throughput on AMD64, see
-Table~\ref{tab:decomp-amd64}.
 
 % ============================================================
 \section{Experimental Methodology}
@@ -1091,6 +1047,52 @@ $^\dagger$\textbf{MR} is too small for PICS-C-8; PICS-C-4 achieves the highest
 PICS throughput on this image. HTJ2K leads single-threaded on MG1, MG2, MG4,
 CT, and RG3.
 
+\subsection{FSE Stage Microbenchmarks}
+
+Table~\ref{tab:fse-combined} reports FSE decompression throughput measured in
+isolation (MB/s over the uncompressed RLE symbol stream), decoupling the
+entropy-coding stage from delta and RLE overhead, for a representative subset
+of modalities on both platforms.
+
+\begin{table}[htbp]
+\centering
+\caption{FSE decompression throughput (MB/s) for representative
+modalities. ARM64: Apple M2 Max, pure Go. AMD64: Intel Core Ultra 9 285K,
+4-state uses BMI2 assembly (\texttt{fse4StateDecompKernel}).}
+\label{tab:fse-combined}
+\scriptsize
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{ARM64 (MB/s)} & \multicolumn{3}{c}{AMD64 (MB/s)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Image & 1-st & 4-st & gain & 1-st & 4-st & gain \\
+\midrule
+MR   &   514 &   841 & $+$64\% &   600 &   828 & $+$38\% \\
+CT   &   829 & 1,295 & $+$56\% &   941 & 1,631 & $+$73\% \\
+CR   &   140 &   966 & $+$590\%$^*$ & 1,994 & 4,535 & $+$127\% \\
+XR   & 1,444 & 1,952 & $+$35\% & 3,195 & 5,771 & $+$81\% \\
+MG1  & 1,140 & 1,873 & $+$64\% & 3,379 & 4,952 & $+$47\% \\
+MG-N & 2,944 & 5,696 & $+$94\% & 2,722 & 4,981 & $+$83\% \\
+NM1  & 1,658 & 2,254 & $+$36\% & 2,078 & 2,407 & $+$16\% \\
+RG1  & 1,676 & 3,128 & $+$87\% & 2,506 & 4,336 & $+$73\% \\
+\midrule
+\textbf{Geomean (21)} & \textbf{1,418} & \textbf{2,375} & \textbf{$+$68\%} &
+\textbf{2,309} & \textbf{3,306} & \textbf{$+$43\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+$^*$CR single-state is depressed by the \texttt{zeroBits} branch (see
+Section~\ref{sec:multistate}); multi-state interleaving amortizes this
+overhead across four chains. The AMD64 \texttt{fse4StateDecompKernel}
+sidesteps the branch entirely, yielding $+$127\%.
+
+The 4-state decoder delivers a geometric-mean speedup of $+$68\% on ARM64 and
+$+$43\% on AMD64 over the 1-state baseline. The smaller AMD64 gain reflects
+a higher 1-state baseline: the Intel out-of-order engine tolerates the serial
+dependency chain more efficiently, compressing the relative multi-state
+improvement.
+
 \subsection{JavaScript Runtime Results}
 
 Table~\ref{tab:js-perf} reports Node.js single-threaded performance;
@@ -1141,12 +1143,6 @@ transcoding latency.
 \texttt{worker\_threads}, which does not fully replicate browser Web Worker
 performance. Full browser performance benchmarking remains future work.
 
-\textbf{Practitioner takeaway.} For deployments where implementation
-simplicity is the priority, the pure Go or JavaScript decoder suffices. For
-maximum single-threaded native throughput on a server, use MIC-4state-C. For
-large images on multicore systems, PICS-C-8 provides the highest decompression
-rates on both ARM64 and AMD64.
-
 % ============================================================
 \section{Conclusion}
 \label{sec:conclusion}
@@ -1172,7 +1168,7 @@ spanning nine modalities:
   retains the best lossless ratios (geometric mean 3.44$\times$ vs.\ MIC's
   3.12$\times$).
 
-  \item \textbf{Multi-state decoder}: geometric-mean $+$68\% isolated FSE
+  \item \textbf{Multi-state decoder}: geometric-mean $+$68\% FSE stage
   speedup on ARM64 ($+$43\% AMD64) with no ratio penalty.
 
   \item \textbf{Browser decoder}: ${\sim}$20\,KB pure JS decoder; PICS with
@@ -1185,9 +1181,17 @@ spanning nine modalities:
 Overall, the study indicates that 16-bit-native entropy coding is a useful
 design point for lossless medical image compression, particularly in
 applications where decompression throughput, implementation simplicity, and
-deployment portability are important. Future work should strengthen the evidence
-base with larger datasets, shuffle-based general-purpose baselines, formal
-statistical reporting, and direct browser benchmarking.
+deployment portability are important.
+
+\textbf{Deployment guidance.} For deployments where implementation simplicity
+is the priority, the pure Go or JavaScript decoder suffices. For maximum
+single-threaded native throughput on a server, use MIC-4state-C. For large
+images on multicore systems, PICS-C-8 provides the highest decompression rates
+on both ARM64 and AMD64.
+
+Future work should strengthen the evidence base with larger datasets,
+shuffle-based general-purpose baselines, formal statistical reporting, and
+direct browser benchmarking.
 
 MIC is open-source and available at
 \url{https://github.com/pappuks/medical-image-codec}.
