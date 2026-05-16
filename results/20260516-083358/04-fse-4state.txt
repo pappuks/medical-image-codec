@@ -1,0 +1,69 @@
+goos: darwin
+goarch: arm64
+pkg: mic
+cpu: Apple M4 Pro
+BenchmarkFSEDecompress4State/MR/1state-14         	      10	    167142 ns/op	 784.70 MB/s	 1102079 B/op	      13 allocs/op
+BenchmarkFSEDecompress4State/MR/2state-14         	      10	    161454 ns/op	 812.34 MB/s	 1098169 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MR/4state-14         	      10	    126454 ns/op	1037.18 MB/s	 1098088 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/CT/1state-14         	      10	    501438 ns/op	1064.46 MB/s	 3039470 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/CT/2state-14         	      10	    347542 ns/op	1535.82 MB/s	 3039748 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/CT/4state-14         	      10	    258888 ns/op	2061.74 MB/s	 3039934 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/CR/1state-14         	      10	   2386958 ns/op	3150.92 MB/s	31674851 B/op	      13 allocs/op
+BenchmarkFSEDecompress4State/CR/2state-14         	      10	   1592025 ns/op	4724.25 MB/s	31674824 B/op	      13 allocs/op
+BenchmarkFSEDecompress4State/CR/4state-14         	      10	   1329696 ns/op	5656.27 MB/s	31674798 B/op	      13 allocs/op
+BenchmarkFSEDecompress4State/XR/1state-14         	      10	   2905671 ns/op	3634.42 MB/s	35782945 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/XR/2state-14         	      10	   1863154 ns/op	5668.04 MB/s	35783100 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/XR/4state-14         	      10	   1865004 ns/op	5662.41 MB/s	35782846 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MG1/1state-14        	      10	    847304 ns/op	3782.10 MB/s	13406617 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/MG1/2state-14        	      10	    745150 ns/op	4300.59 MB/s	13406590 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/MG1/4state-14        	      10	    666062 ns/op	4811.24 MB/s	13406712 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/MG2/1state-14        	      10	    935512 ns/op	3431.59 MB/s	13406737 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/MG2/2state-14        	      10	    774467 ns/op	4145.17 MB/s	13406257 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/MG2/4state-14        	      10	    706525 ns/op	4543.78 MB/s	13406835 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/MG3/1state-14        	      10	   8231071 ns/op	3397.71 MB/s	105660657 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/MG3/2state-14        	      10	   5575771 ns/op	5015.76 MB/s	105660716 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/MG3/4state-14        	      10	   4407962 ns/op	6344.60 MB/s	105693484 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/MG4/1state-14        	      10	   3844038 ns/op	3750.57 MB/s	46030897 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MG4/2state-14        	      10	   2649304 ns/op	5441.94 MB/s	46031185 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MG4/4state-14        	      10	   2747996 ns/op	5246.49 MB/s	46031230 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/CT1/1state-14        	      10	    285575 ns/op	1462.73 MB/s	 2138638 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/CT1/2state-14        	      10	    296279 ns/op	1409.88 MB/s	 2138616 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/CT1/4state-14        	      10	    200067 ns/op	2087.89 MB/s	 2138161 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/CT2/1state-14        	      10	    276700 ns/op	1509.90 MB/s	 2121848 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/CT2/2state-14        	      10	    227504 ns/op	1836.41 MB/s	 2122017 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/CT2/4state-14        	      10	    216271 ns/op	1931.79 MB/s	 2122028 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/MG-N/1state-14       	      10	   8076262 ns/op	3461.96 MB/s	105612183 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/MG-N/2state-14       	      10	   5248367 ns/op	5327.31 MB/s	105611745 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/MG-N/4state-14       	      10	   4575879 ns/op	6110.23 MB/s	105611720 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/MR1/1state-14        	      10	    350783 ns/op	1494.99 MB/s	 2351209 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MR1/2state-14        	      10	    204550 ns/op	2563.76 MB/s	 2351212 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MR1/4state-14        	      10	    186583 ns/op	2810.64 MB/s	 2351153 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MR2/1state-14        	      10	    687625 ns/op	2428.68 MB/s	 8008014 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/MR2/2state-14        	      10	    503783 ns/op	3314.96 MB/s	 8008076 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/MR2/4state-14        	      10	    442333 ns/op	3775.48 MB/s	 8008243 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/MR3/1state-14        	      10	    151292 ns/op	1860.10 MB/s	 1491004 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/MR3/2state-14        	      10	    149596 ns/op	1881.19 MB/s	 1490993 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/MR3/4state-14        	      10	    126704 ns/op	2221.06 MB/s	 1490993 B/op	       8 allocs/op
+BenchmarkFSEDecompress4State/MR4/1state-14        	      10	    221138 ns/op	1842.49 MB/s	 1786216 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MR4/2state-14        	      10	    181104 ns/op	2249.78 MB/s	 1786072 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/MR4/4state-14        	      10	    164396 ns/op	2478.43 MB/s	 1785939 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/NM1/1state-14        	      10	    197592 ns/op	1714.22 MB/s	 1714355 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/NM1/2state-14        	      10	    164529 ns/op	2058.70 MB/s	 1714513 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/NM1/4state-14        	      10	    138583 ns/op	2444.13 MB/s	 1714584 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/RG1/1state-14        	      10	   4013788 ns/op	1793.50 MB/s	25780273 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/RG1/2state-14        	      10	   2547062 ns/op	2826.29 MB/s	25780572 B/op	       9 allocs/op
+BenchmarkFSEDecompress4State/RG1/4state-14        	      10	   1723958 ns/op	4175.70 MB/s	25781203 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/RG2/1state-14        	      10	   1474275 ns/op	3530.28 MB/s	20885875 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/RG2/2state-14        	      10	   1298346 ns/op	4008.64 MB/s	20885985 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/RG2/4state-14        	      10	   1100833 ns/op	4727.87 MB/s	20885816 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/RG3/1state-14        	      10	   1316925 ns/op	2767.07 MB/s	16298081 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/RG3/2state-14        	      10	   1027142 ns/op	3547.73 MB/s	16298380 B/op	      12 allocs/op
+BenchmarkFSEDecompress4State/RG3/4state-14        	      10	    816712 ns/op	4461.82 MB/s	16298440 B/op	      13 allocs/op
+BenchmarkFSEDecompress4State/SC1/1state-14        	      10	   1625592 ns/op	3519.91 MB/s	23314961 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/SC1/2state-14        	      10	   1281342 ns/op	4465.58 MB/s	23323057 B/op	      10 allocs/op
+BenchmarkFSEDecompress4State/SC1/4state-14        	      10	   1399021 ns/op	4089.95 MB/s	23380472 B/op	      11 allocs/op
+BenchmarkFSEDecompress4State/XA1/1state-14        	      10	    597150 ns/op	2776.03 MB/s	 8620473 B/op	      13 allocs/op
+BenchmarkFSEDecompress4State/XA1/2state-14        	      10	    487679 ns/op	3399.17 MB/s	 8620580 B/op	      13 allocs/op
+BenchmarkFSEDecompress4State/XA1/4state-14        	      10	    444046 ns/op	3733.19 MB/s	 8620436 B/op	      13 allocs/op
+PASS
+ok  	mic	3.189s

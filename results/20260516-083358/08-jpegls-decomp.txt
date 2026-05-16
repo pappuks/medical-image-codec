@@ -1,0 +1,117 @@
+# mic/ojph.test
+ld: warning: duplicate -rpath '/usr/local/lib' ignored
+ld: warning: duplicate -rpath '/opt/homebrew/lib' ignored
+ld: warning: duplicate -rpath '/home/dibba/.local/lib' ignored
+ld: warning: ignoring duplicate libraries: '-lc++'
+ld: warning: search path '/home/dibba/.local/lib' not found
+goos: darwin
+goarch: arm64
+pkg: mic/ojph
+cpu: Apple M4 Pro
+BenchmarkJPEGLSDecomp/MR/MIC-14         	      10	    476492 ns/op	 275.08 MB/s	 1230881 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR/MIC-4state-14  	      10	    331362 ns/op	 395.55 MB/s	 1230892 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR/MIC-4state-C-14         	      10	    183925 ns/op	 712.64 MB/s	  131072 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR/MIC-4state-SIMD-14      	      10	    185933 ns/op	 704.94 MB/s	  131072 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR/JPEGLS-14               	      10	    788912 ns/op	 166.14 MB/s	  131073 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-14                  	      10	   2293992 ns/op	 228.55 MB/s	 3629067 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-4state-14           	      10	   1788542 ns/op	 293.14 MB/s	 3629068 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-4state-C-14         	      10	   1150108 ns/op	 455.86 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-4state-SIMD-14      	      10	   1105900 ns/op	 474.08 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT/JPEGLS-14               	      10	   2916692 ns/op	 179.75 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-14                  	      10	  20837721 ns/op	 361.50 MB/s	39212612 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-4state-14           	      10	  18791271 ns/op	 400.87 MB/s	39212076 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-4state-C-14         	      10	  11340367 ns/op	 664.25 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-4state-SIMD-14      	      10	  11547450 ns/op	 652.33 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CR/JPEGLS-14               	      10	  37873879 ns/op	 198.89 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-14                  	      10	  27797154 ns/op	 379.73 MB/s	46346262 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-4state-14           	      10	  25205867 ns/op	 418.77 MB/s	46346240 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-4state-C-14         	      10	  15649050 ns/op	 674.51 MB/s	10559488 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-4state-SIMD-14      	      10	  15807796 ns/op	 667.73 MB/s	10559488 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XR/JPEGLS-14               	      10	  73421625 ns/op	 143.76 MB/s	10559488 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-14                 	      10	  17175342 ns/op	 571.07 MB/s	23221248 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-4state-14          	      10	  16142154 ns/op	 607.62 MB/s	23221259 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-4state-C-14        	      10	  11363817 ns/op	 863.12 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-4state-SIMD-14     	      10	  11252667 ns/op	 871.65 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG1/JPEGLS-14              	      10	  18591129 ns/op	 527.58 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-14                 	      10	  17572883 ns/op	 558.15 MB/s	23221248 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-4state-14          	      10	  16443642 ns/op	 596.48 MB/s	23221248 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-4state-C-14        	      10	  11670179 ns/op	 840.46 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-4state-SIMD-14     	      10	  12240950 ns/op	 801.27 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG2/JPEGLS-14              	      10	  19070217 ns/op	 514.33 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-14                 	      10	  76583029 ns/op	 382.00 MB/s	134926358 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-4state-14          	      10	  68325871 ns/op	 428.17 MB/s	134959126 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-4state-C-14        	      10	  42963804 ns/op	 680.92 MB/s	29261824 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-4state-SIMD-14     	      10	  42603242 ns/op	 686.69 MB/s	29261824 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG3/JPEGLS-14              	      10	 145204117 ns/op	 201.48 MB/s	29261824 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-14                 	      10	  55034146 ns/op	 495.38 MB/s	73297920 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-4state-14          	      10	  51213679 ns/op	 532.34 MB/s	73297931 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-4state-C-14        	      10	  33990371 ns/op	 802.08 MB/s	27262976 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-4state-SIMD-14     	      10	  33999429 ns/op	 801.87 MB/s	27262976 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG4/JPEGLS-14              	      10	 107160062 ns/op	 254.41 MB/s	27262976 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-14                 	      10	   1892433 ns/op	 277.04 MB/s	 2727958 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-4state-14          	      10	   1556654 ns/op	 336.80 MB/s	 2727947 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-4state-C-14        	      10	    966533 ns/op	 542.44 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-4state-SIMD-14     	      10	   1003762 ns/op	 522.32 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT1/JPEGLS-14              	      10	   2232579 ns/op	 234.84 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-14                 	      10	   1831854 ns/op	 286.21 MB/s	 2711552 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-4state-14          	      10	   1537138 ns/op	 341.08 MB/s	 2711552 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-4state-C-14        	      10	    930829 ns/op	 563.25 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-4state-SIMD-14     	      10	    950508 ns/op	 551.59 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT2/JPEGLS-14              	      10	   2356917 ns/op	 222.45 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-14                	      10	  73581575 ns/op	 388.43 MB/s	134197248 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-4state-14         	      10	  66962954 ns/op	 426.82 MB/s	134197259 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-4state-C-14       	      10	  42355083 ns/op	 674.79 MB/s	28581888 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-4state-SIMD-14    	      10	  41665888 ns/op	 685.96 MB/s	28581888 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/JPEGLS-14             	      10	 144314462 ns/op	 198.05 MB/s	28581888 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-14                 	      10	   1469979 ns/op	 356.66 MB/s	 2879488 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-4state-14          	      10	   1303800 ns/op	 402.12 MB/s	 2879488 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-4state-C-14        	      10	    766646 ns/op	 683.87 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-4state-SIMD-14     	      10	    748512 ns/op	 700.44 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR1/JPEGLS-14              	      10	   3404158 ns/op	 154.01 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-14                 	      10	   5149733 ns/op	 407.24 MB/s	10105856 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-4state-14          	      10	   4831554 ns/op	 434.05 MB/s	10105867 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-4state-C-14        	      10	   2900758 ns/op	 722.97 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-4state-SIMD-14     	      10	   2932592 ns/op	 715.12 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR2/JPEGLS-14              	      10	   9501212 ns/op	 220.72 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-14                 	      10	   1143296 ns/op	 458.58 MB/s	 2017280 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-4state-14          	      10	   1025554 ns/op	 511.22 MB/s	 2017280 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-4state-C-14        	      10	    631488 ns/op	 830.24 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-4state-SIMD-14     	      10	    625046 ns/op	 838.80 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR3/JPEGLS-14              	      10	   1648188 ns/op	 318.10 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-14                 	      10	   1329908 ns/op	 394.23 MB/s	 2314240 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-4state-14          	      10	   1170671 ns/op	 447.85 MB/s	 2314240 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-4state-C-14        	      10	    671671 ns/op	 780.57 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-4state-SIMD-14     	      10	    663471 ns/op	 790.22 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR4/JPEGLS-14              	      10	   2027779 ns/op	 258.55 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-14                 	      10	   1239821 ns/op	 422.87 MB/s	 2238976 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-4state-14          	      10	   1131229 ns/op	 463.47 MB/s	 2238976 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-4state-C-14        	      10	    629317 ns/op	 833.11 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-4state-SIMD-14     	      10	    624129 ns/op	 840.03 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/NM1/JPEGLS-14              	      10	   1846683 ns/op	 283.91 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-14                 	      10	  26947279 ns/op	 267.13 MB/s	33013771 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-4state-14          	      10	  20753554 ns/op	 346.85 MB/s	33013771 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-4state-C-14        	      10	  14913158 ns/op	 482.68 MB/s	 7200768 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-4state-SIMD-14     	      10	  14947600 ns/op	 481.57 MB/s	 7200768 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG1/JPEGLS-14              	      10	  56053104 ns/op	 128.42 MB/s	 7200768 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-14                 	      10	  16941642 ns/op	 444.63 MB/s	28423168 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-4state-14          	      10	  15479471 ns/op	 486.63 MB/s	28423168 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-4state-C-14        	      10	   9913229 ns/op	 759.87 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-4state-SIMD-14     	      10	  10513467 ns/op	 716.49 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG2/JPEGLS-14              	      10	  29634842 ns/op	 254.19 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-14                 	      10	  13299796 ns/op	 465.81 MB/s	22500352 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-4state-14          	      10	  12178575 ns/op	 508.70 MB/s	22500352 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-4state-C-14        	      10	   8068208 ns/op	 767.85 MB/s	 6201344 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-4state-SIMD-14     	      10	   8512838 ns/op	 727.75 MB/s	 6201344 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG3/JPEGLS-14              	      10	  18745612 ns/op	 330.49 MB/s	 6201344 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-14                 	      10	  22034988 ns/op	 462.30 MB/s	33517579 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-4state-14          	      10	  21342758 ns/op	 477.29 MB/s	33574923 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-4state-C-14        	      10	  13553038 ns/op	 751.62 MB/s	10190848 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-4state-SIMD-14     	      10	  13553112 ns/op	 751.62 MB/s	10190848 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/SC1/JPEGLS-14              	      10	  35011638 ns/op	 290.95 MB/s	10190848 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-14                 	      10	   5179800 ns/op	 404.87 MB/s	10717707 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-4state-14          	      10	   4608667 ns/op	 455.05 MB/s	10717696 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-4state-C-14        	      10	   2770000 ns/op	 757.09 MB/s	 2097163 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-4state-SIMD-14     	      10	   2765521 ns/op	 758.32 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XA1/JPEGLS-14              	      10	   7465604 ns/op	 280.91 MB/s	 2097152 B/op	       1 allocs/op
+PASS
+ok  	mic/ojph	23.889s

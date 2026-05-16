@@ -98,30 +98,40 @@ func BenchmarkDeltaZstdDecompress(b *testing.B) {
 			var s ScratchU16
 			micComp, _ := FSECompressU16(deltaComp, &s)
 
-			// Prepare zstd compressed data (level 3)
+			// Prepare zstd compressed data (level 19 — matches the paper's
+			// Δ+Zstd-19 column in Table 1).
 			deltaOnly, _ := DeltaCompressU16(shortData, cols, rows, maxShort)
 			deltaBytes := uint16SliceToBytes(deltaOnly)
-			zstdFile := writeTempZstd(b, deltaBytes, 3)
+			zstdFile := writeTempZstd(b, deltaBytes, 19)
 			defer os.Remove(zstdFile)
 
-			b.SetBytes(int64(len(byteData)))
+			origBytes := len(byteData)
+			micRatio := float64(origBytes) / float64(len(micComp))
+			zstdRatio := 0.0
+			if fi, err := os.Stat(zstdFile); err == nil {
+				zstdRatio = float64(origBytes) / float64(fi.Size())
+			}
+
+			b.SetBytes(int64(origBytes))
 			b.ResetTimer()
 
 			b.Run("MIC", func(b *testing.B) {
-				b.SetBytes(int64(len(byteData)))
+				b.SetBytes(int64(origBytes))
 				for i := 0; i < b.N; i++ {
 					var s2 ScratchU16
 					fseOut, _ := FSEDecompressU16(micComp, &s2)
 					var drd DeltaRleDecompressU16
 					drd.Decompress(fseOut, cols, rows)
 				}
+				b.ReportMetric(micRatio, "ratio")
 			})
 
-			b.Run("zstd-3", func(b *testing.B) {
-				b.SetBytes(int64(len(byteData)))
+			b.Run("zstd-19", func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
 				for i := 0; i < b.N; i++ {
 					decompressWithZstdFile(zstdFile)
 				}
+				b.ReportMetric(zstdRatio, "ratio")
 			})
 		})
 	}

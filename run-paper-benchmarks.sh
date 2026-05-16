@@ -134,3 +134,14 @@ echo
 echo "All benchmarks complete."
 echo "Results in: ${OUTDIR}"
 ls -1 "${OUTDIR}"
+
+# Post-process: emit paper-style tables (Tables 1, 2/3, 4/5, 6).
+# The script writes paper-tables.txt into ${OUTDIR} and also prints to stdout.
+if command -v python3 >/dev/null 2>&1 && [ -x ./paper-tables.py ]; then
+  echo
+  echo "=== Paper-format tables ==="
+  ./paper-tables.py "${OUTDIR}"
+else
+  echo
+  echo "Skipping paper-format tables: python3 or paper-tables.py not available."
+fi
