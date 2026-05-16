@@ -8,6 +8,16 @@ capture peer-review feedback applied in v5 covering: SE explainability, acronym
 expansion, em-dash reduction, duplicate removal, numerical consistency, and
 platform descriptions.
 
+## Paper Benchmark Rules
+
+When (re)producing, quoting, or modifying benchmark numbers that appear in the
+paper, follow the rules in [`.claude/benchmark-rules.md`](.claude/benchmark-rules.md).
+These cover: the canonical `run-paper-benchmarks.sh` workflow, serial vs
+parallel benchmark semantics, hardware/platform requirements, re-running and
+variance policy, and the paper-table → source-benchmark map. The accompanying
+inventory of every benchmark in the repo is in
+[`docs/benchmarks.md`](docs/benchmarks.md).
+
 ## Project Overview
 
 MIC is a lossless compression codec for 16-bit medical images (DICOM) implemented in Go. It uses a pipeline of Delta Encoding + RLE + FSE/Huffman to achieve compression ratios of 1.7x-8.9x with very high decompression throughput (up to 16 GB/s).

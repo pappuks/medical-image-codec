@@ -1,60 +1,422 @@
-# MIC Benchmark Results
+# MIC Benchmarks
 
-This document contains detailed decompression benchmark results across hardware platforms. All benchmarks measure **decompression throughput** — the primary use case is real-time rendering of compressed DICOM images.
+This document is the reference for every benchmark in the repository: what each
+one measures, how it's structured, how to run it, and which paper table (if
+any) it feeds. The benchmarks fall into two structural groups (serial and
+parallel) — be sure to read the methodology section before comparing numbers
+across groups, because the units are different.
 
-## Benchmark Methodology
+---
 
-All decompression benchmarks (`BenchmarkDeltaRLEFSECompress`, `BenchmarkFSEDecompress`, `BenchmarkDeltaRLEFSEDecompress`, `BenchmarkFSE2StateSummary`) spawn one goroutine per iteration and run all `b.N` goroutines concurrently. The reported MB/s reflects **aggregate multi-core throughput** across all available CPUs, not single-core speed. With `-benchtime=200x` on a 64-core machine, all 200 frames decompress in parallel — matching the real-world use case of concurrent multi-frame rendering. Use `-benchtime=1x` for single-iteration (single-goroutine) measurements.
+## 1. Methodology — serial vs parallel benchmarks
 
-> **Note:** RAM speed has a larger impact than CPU clock speed. Machines with DDR5 RAM outperform older machines even at lower core counts.
+The MIC benchmarks come in two structurally different shapes.
 
-## Running the Benchmarks
+### Serial benchmarks — single-thread throughput
+
+```go
+for i := 0; i < b.N; i++ {
+    decode(blob)
+}
+```
+
+The reported `MB/s` is the throughput of a single decompression on a single
+core. This is what should be reported in the paper for all "single-threaded
+variant" columns (MIC-Go, MIC-4state, MIC-4state-C, MIC-4state-SIMD, HTJ2K,
+JPEG-LS, Wav+SIMD, etc.).
+
+### Parallel benchmarks — aggregate multi-core throughput
+
+```go
+var wg sync.WaitGroup
+for i := 0; i < b.N; i++ {
+    wg.Add(1)
+    go func() { defer wg.Done(); decode(blob) }()
+}
+wg.Wait()
+```
+
+This launches `b.N` goroutines concurrently and waits for all of them. The
+reported `MB/s` is the **aggregate throughput** across all available P-cores.
+With `-benchtime=10x` on a 14-core machine, all 10 goroutines run in parallel,
+so the number scales with `min(b.N, GOMAXPROCS)` and is several × the serial
+number.
+
+This is what the FSE entropy-coder microbenchmarks (Table 6) and the legacy
+pipeline benchmarks in [fseu16_test.go](../fseu16_test.go) report. **Do not
+compare a parallel benchmark's MB/s against a serial benchmark's MB/s** — they
+are not on the same scale.
+
+If you need single-thread throughput from a parallel benchmark, run it with
+`-benchtime=1x` (one iteration, one goroutine).
+
+### Quick check: is a given benchmark serial or parallel?
 
 ```bash
-# Full Delta+RLE+FSE pipeline (parallel, 200 concurrent goroutines)
-go test -benchmem -run=^$ -benchtime=200x -bench ^BenchmarkDeltaRLEFSECompress$ mic
+grep -A2 "func BenchmarkXxx" some_test.go | grep -E "wg.Add|go func|sync.WaitGroup"
+```
 
-# Compare single-state vs two-state FSE decompression (isolated)
-go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSEDecompress mic
+The inventory in §6 below tags each benchmark accordingly.
 
-# Compare single-state vs two-state: full Delta+RLE+FSE pipeline
-go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkDeltaRLEFSEDecompress mic
+---
 
-# Human-readable speedup table (parallel)
-go test -benchmem -run=^$ -benchtime=10x -bench BenchmarkFSE2StateSummary -v mic
+## 2. Running the paper benchmarks
 
-# Parallel single-image (PICS) benchmarks — 1/2/4/8 strips
-go test -benchmem -run=^$ -benchtime=5x -bench ^BenchmarkParallelStrips mic
+All numbers in [paper/mic-paper-v6-ieee-tmi.tex](../paper/mic-paper-v6-ieee-tmi.tex)
+are produced by [run-paper-benchmarks.sh](../run-paper-benchmarks.sh), which
+runs the seven benchmarks below and post-processes them with
+[paper-tables.py](../paper-tables.py).
 
-# Wavelet SIMD vs scalar
-go test -benchmem -run=^$ -benchtime=5x \
-  -bench "^(BenchmarkWaveletV2RLEFSECompress|BenchmarkWaveletV2SIMDRLEFSECompressU16)$" mic
+```bash
+# Full paper suite (10x iterations, takes ~10 min on M2 Max).
+./run-paper-benchmarks.sh
 
-# All benchmarks
-go test -bench=. -benchtime=10x
+# Faster smoke test.
+BENCHTIME=3x ./run-paper-benchmarks.sh
+
+# Custom output directory.
+OUTDIR=/tmp/mic-bench ./run-paper-benchmarks.sh
+```
+
+The script writes per-benchmark output into `results/<timestamp>/` and then
+emits `paper-tables.txt` in that same directory with the ASCII versions of all
+four paper tables.
+
+Prerequisite for the cgo benchmarks: `libopenjph` and `libcharls` must be
+installed (`brew install openjph charls` on macOS). The script preflights this
+and fails fast.
+
+### Mapping benchmarks → paper tables
+
+| Paper table | Source benchmark | File produced | Parallelism |
+|---|---|---|---|
+| Table 1 (`tab:ratios`) — compression ratios | `BenchmarkAllCodecs` (ratios) + `BenchmarkDeltaZstdDecompress` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…txt`, `05-…txt`, `06-…txt` | serial |
+| Table 2 (`tab:enc-amd64`) — AMD64 encoding | `BenchmarkAllCodecsEncode` | `02-…txt` | serial |
+| Table 3 (`tab:enc-arm64-full`) — ARM64 encoding | `BenchmarkAllCodecsEncode` | `02-…txt` | serial |
+| Table 4 (`tab:decomp-arm`) — ARM64 decoding | `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…txt`, `06-…txt` | serial |
+| Table 5 (`tab:decomp-amd64`) — AMD64 decoding | `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…txt`, `06-…txt` | serial |
+| Table 6 (`tab:fse-combined`) — FSE 1/4-state | `BenchmarkFSEDecompress` + `BenchmarkFSEDecompress4State` | `03-…txt`, `04-…txt` | **parallel** |
+
+Table 6 reports **aggregate parallel FSE-only throughput** by design — that
+table is a microbenchmark of the entropy coder running flat-out across all
+cores, isolated from the surrounding pipeline. Tables 4/5 report
+**single-thread end-to-end** throughput for the full Delta+RLE+FSE pipeline.
+The numbers are not directly comparable.
+
+The PICS columns in Tables 4/5 (`PICS-C-2/4/8`) are *also* parallel, but the
+parallelism is internal to the codec (pthread-based strip decoder), driven by
+a serial benchmark loop. That correctly measures wall-clock decode time of one
+image using N threads — apples to apples with the other single-image columns.
+
+---
+
+## 3. Codec comparison benchmarks
+
+### `BenchmarkAllCodecs` ([ojph/mic_c_test.go:371](../ojph/mic_c_test.go#L371))
+
+Decompression throughput (serial) across every codec variant on the 21-image
+paper corpus. Reports MB/s and compression ratio for each (image, codec)
+combination. Requires `-tags cgo_ojph`.
+
+Variants exercised:
+
+- `MIC-Go` — pure-Go 2-state FSE pipeline (Delta+RLE+FSE)
+- `MIC-4state` — pure-Go 4-state FSE pipeline
+- `MIC-4state-C` — C 4-state decoder via CGO
+- `MIC-4state-SIMD` — C 4-state decoder with platform SIMD (BMI2 on AMD64, scalar on ARM64)
+- `MIC-C` — C 2-state decoder
+- `MIC-SIMD` — C 2-state decoder with SIMD
+- `HTJ2K` — OpenJPH in-process
+- `JPEGLS` — CharLS in-process
+- `PICS-N` for N ∈ {2, 4, 8} — Go strip decoder with N goroutines
+- `PICS-C-N` for N ∈ {2, 4, 8} — C strip decoder with N pthreads + per-strip SIMD
+
+```bash
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x \
+  -bench '^BenchmarkAllCodecs$' ./ojph/
+```
+
+### `BenchmarkAllCodecsEncode` ([ojph/mic_c_test.go:528](../ojph/mic_c_test.go#L528))
+
+Encoding-side counterpart of the above. Same variant list, plus `Wavelet+SIMD`
+(serial wavelet compress). Powers Tables 2/3.
+
+```bash
+go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x \
+  -bench '^BenchmarkAllCodecsEncode$' ./ojph/
+```
+
+### `BenchmarkHTJ2KFairDecomp` ([ojph/htj2k_fair_comparison_test.go:285](../ojph/htj2k_fair_comparison_test.go#L285))
+
+Sanity cross-check for the HTJ2K column in `BenchmarkAllCodecs`. Same
+methodology (in-process CGO), narrower scope. Serial.
+
+### `BenchmarkJPEGLSDecomp` ([ojph/jpegls_comparison_test.go:177](../ojph/jpegls_comparison_test.go#L177))
+
+Sanity cross-check for the JPEG-LS column. Also reports MIC, MIC-4state,
+MIC-4state-C, MIC-4state-SIMD side-by-side. Serial.
+
+### `BenchmarkMICvsHTJ2K` ([htj2k_comparison_test.go:329](../htj2k_comparison_test.go#L329))
+
+Older standalone MIC-vs-HTJ2K bench, predates `BenchmarkAllCodecs`. Kept for
+historical comparison. Serial.
+
+### `BenchmarkMICFullCPipelineVsHTJ2K` ([ojph/mic_c_test.go:695](../ojph/mic_c_test.go#L695))
+
+End-to-end C pipeline (delta + RLE + FSE all in C) vs HTJ2K. Serial.
+
+### `BenchmarkDeltaZstdDecompress` ([comparison_test.go:86](../comparison_test.go#L86))
+
+Δ+Zstd-19 baseline column for Table 1. Note: Zstd is invoked via the CLI
+(subprocess), so timings include process-launch overhead — this benchmark is
+only useful for the *ratio* column (Table 1), not for throughput. Serial.
+
+### `BenchmarkMEDPredictor` ([comparison_test.go:185](../comparison_test.go#L185))
+
+MED predictor (median-edge-detection) vs the default avg-of-neighbors
+predictor. Compares ratio + decompression throughput. Serial.
+
+---
+
+## 4. Entropy-coder microbenchmarks
+
+These isolate the entropy step from the surrounding Delta+RLE pipeline. Input
+is the Delta+RLE residual stream; output is the same stream after
+entropy-decode. Bytes are counted over the *uncompressed RLE symbol stream*,
+not the original pixels. **All benchmarks in this section are parallel
+(aggregate multi-core throughput).**
+
+### `BenchmarkFSEDecompress` ([fse2state_test.go:269](../fse2state_test.go#L269))
+
+1-state vs 2-state FSE decompression isolated. Feeds Table 6 (1-state column).
+
+```bash
+go test -benchmem -run=^$ -benchtime=10x -bench '^BenchmarkFSEDecompress$' .
+```
+
+### `BenchmarkFSEDecompress4State` ([fse4state_test.go:150](../fse4state_test.go#L150))
+
+1-state vs 2-state vs 4-state FSE decompression. Feeds Table 6 (4-state
+column).
+
+```bash
+go test -benchmem -run=^$ -benchtime=10x -bench '^BenchmarkFSEDecompress4State$' .
+```
+
+### `BenchmarkRANSDecompress8State` ([rans8state_test.go:151](../rans8state_test.go#L151))
+
+1/2/4-state FSE alongside an 8-state rANS variant. Exploratory — not used in
+the paper.
+
+### `BenchmarkFSE2StateSummary` ([fse2state_test.go:436](../fse2state_test.go#L436))
+
+Human-readable speedup table printed when run with `-v`. Aggregates the
+2-state-vs-1-state ratio per image. Parallel.
+
+### `BenchmarkFSECompressCompare` ([fse2state_test.go:334](../fse2state_test.go#L334))
+
+Compression-side 1-state vs 2-state. Serial.
+
+### `BenchmarkDeltaRLEFSEDecompress` ([fse2state_test.go:371](../fse2state_test.go#L371))
+
+Full Delta+RLE+FSE pipeline for both FSE variants. Parallel. Older —
+superseded by `BenchmarkAllCodecs` for paper purposes.
+
+---
+
+## 5. Pipeline component microbenchmarks
+
+Lower-level benches for individual stages. Most are in
+[fseu16_test.go](../fseu16_test.go) and predate the paper-table refactor;
+several use parallel goroutines and are flagged accordingly.
+
+| Benchmark | File | Parallelism | What it measures |
+|---|---|---|---|
+| `BenchmarkDeltaRLEHuffCompress` | [fseu16_test.go:99](../fseu16_test.go#L99) | parallel | Full Delta+RLE+Huffman pipeline decompression |
+| `BenchmarkDeltaRLEHuffCompress2` | [fseu16_test.go:140](../fseu16_test.go#L140) | serial | Same pipeline, fused decode path |
+| `BenchmarkDeltaRLEFSECompress` | [fseu16_test.go:161](../fseu16_test.go#L161) | parallel | Full Delta+RLE+FSE pipeline decompression (legacy; use `BenchmarkAllCodecs` for paper) |
+| `BenchmarkDeltaZZRLEHuffCompress` | [fseu16_test.go:193](../fseu16_test.go#L193) | serial | Delta+ZigZag+RLE+Huffman pipeline |
+| `BenchmarkRLEHuffCompress` | [fseu16_test.go:217](../fseu16_test.go#L217) | serial | RLE+Huffman without delta |
+| `BenchmarkDelta` | [fseu16_test.go:243](../fseu16_test.go#L243) | serial | Delta alone |
+| `BenchmarkRLECompress` | [fseu16_test.go:259](../fseu16_test.go#L259) | serial | RLE alone |
+| `BenchmarkDeltaZZRLEFSECompress` | [fseu16_test.go:278](../fseu16_test.go#L278) | serial | Delta+ZigZag+RLE+FSE pipeline |
+| `BenchmarkRLEFSECompress` | [fseu16_test.go:299](../fseu16_test.go#L299) | serial | RLE+FSE without delta |
+| `BenchmarkDeltaZZFSECompress` | [fseu16_test.go:322](../fseu16_test.go#L322) | serial | Delta+ZigZag+FSE (no RLE) |
+| `BenchmarkFSECompress` | [fseu16_test.go:344](../fseu16_test.go#L344) | serial | FSE-only on raw pixels |
+| `BenchmarkHuffCompress` | [fseu16_test.go:361](../fseu16_test.go#L361) | serial | Huffman-only on raw pixels |
+| `BenchmarkDeltaRLEFSEEncodeSpeed` | [fseu16_test.go:1219](../fseu16_test.go#L1219) | serial | Encode-side pipeline throughput |
+| `BenchmarkFSETableMemory` | [fseu16_test.go:1245](../fseu16_test.go#L1245) | serial | symbolTT/decTable memory footprint sweep |
+| `BenchmarkGradDeltaRLEFSECompress` | [deltagradcompressu16_test.go:97](../deltagradcompressu16_test.go#L97) | serial | Gradient predictor variant of Delta+RLE+FSE |
+
+---
+
+## 6. Wavelet (5/3 integer wavelet pipelines)
+
+All wavelet decompression benchmarks are now serial (single-thread) — see
+[the recent fix](../waveletu16_test.go) that replaced parallel goroutines with
+a serial loop so the Wav+SIMD column in Tables 4/5 is comparable to the other
+single-thread columns.
+
+| Benchmark | File | Parallelism | Pipeline |
+|---|---|---|---|
+| `BenchmarkWaveletFSECompress` | [waveletu16_test.go:165](../waveletu16_test.go#L165) | serial | Wavelet (1-level) + FSE, no RLE |
+| `BenchmarkWaveletRLEFSECompress` | [waveletu16_test.go:305](../waveletu16_test.go#L305) | serial | Wavelet (1-level) + RLE + FSE |
+| `BenchmarkWaveletV2RLEFSECompress` | [waveletu16_test.go:421](../waveletu16_test.go#L421) | serial | Wavelet V2 (5-level, Mallat layout) + RLE + FSE — scalar |
+| `BenchmarkWaveletV2SIMDRLEFSECompress` | [waveletu16_test.go:446](../waveletu16_test.go#L446) | serial | Same as V2 but with blocked-column + AVX2 (AMD64) / scalar-blocked (ARM64) kernels — **this is the bench used for the paper's Wav+SIMD column** |
+
+Compressed streams of the SIMD and scalar V2 pipelines are bit-identical;
+only the transform kernel differs.
+
+```bash
+# Scalar vs SIMD V2 side-by-side
+go test -benchmem -run=^$ -benchtime=10x \
+  -bench '^(BenchmarkWaveletV2RLEFSECompress|BenchmarkWaveletV2SIMDRLEFSECompress)$' .
 ```
 
 ---
 
-## Delta+RLE+FSE Decompression — Multi-Core Throughput
+## 7. PICS (parallel single-image, strip-based)
 
-### AWS c7g.metal — ARM64 | 64 cores
+PICS splits a single image into horizontal strips and decompresses them in
+parallel. The PICS strip benchmarks run a serial benchmark loop wrapping
+internally-parallel code, so `MB/s` is the wall-clock throughput of one
+image decoded with N threads.
 
-| Modality | FPS | Decompression Speed |
-|----------|-----|---------------------|
-| MR (256×256) | **17 411** | 2 282 MB/s |
-| CT (512×512) | **8 455** | 4 433 MB/s |
-| CR (2140×1760) | **1 132** | 8 527 MB/s |
-| XR (2048×2577) | **892** | 9 411 MB/s |
-| MG1 (2457×1996) | **1 671** | **16 387 MB/s** |
-| MG2 (2457×1996) | **1 634** | 16 023 MB/s |
-| MG3 (4774×3064) | **281** | 8 044 MB/s |
-| MG4 (4096×3328) | **558** | 15 213 MB/s |
+| Benchmark | File | What it measures |
+|---|---|---|
+| `BenchmarkParallelStripsCompress` | [parallelstrips_test.go:149](../parallelstrips_test.go#L149) | Compress at strips ∈ {1,2,4,8} on CR image |
+| `BenchmarkParallelStripsDecompress` | [parallelstrips_test.go:169](../parallelstrips_test.go#L169) | Decompress at strips ∈ {1,2,4,8} on CR image |
+| `BenchmarkPICSVsAllCodecs` | [parallelstrips_test.go:195](../parallelstrips_test.go#L195) | PICS-1/2/4/8 vs MIC-Go and MIC-4state across all 21 images (no CGO) |
+| `BenchmarkParallelStripsAdaptive` | [parallelstripsadaptive_test.go:79](../parallelstripsadaptive_test.go#L79) | PICA (adaptive: avg vs grad predictor per strip) at strips ∈ {1,2,4,8} on MR image |
 
-### AWS c7i.8xlarge — AMD64 | 32 cores (Intel Xeon Platinum 8488C)
+The CGO `PICS-C-N` numbers in `BenchmarkAllCodecs` are the variants used for
+the paper.
 
-| Modality | FPS | Decompression Speed |
-|----------|-----|---------------------|
+---
+
+## 8. RGB / YCoCg-R benchmarks
+
+For single-frame RGB images (US, VL). Pipeline is YCoCg-R color transform →
+Delta+RLE+FSE per plane. All in [rgbbench_test.go](../rgbbench_test.go).
+
+| Benchmark | Parallelism | Pipeline |
+|---|---|---|
+| `BenchmarkRGBDeltaRLEHuffCompress` | parallel | YCoCg-R + Delta+RLE+Huffman per plane |
+| `BenchmarkRGBDeltaRLEFSECompress` | parallel | YCoCg-R + Delta+RLE+FSE per plane (production path) |
+| `BenchmarkRGBDeltaZZRLEHuffCompress` | serial | YCoCg-R + Delta+ZZ+RLE+Huffman per plane |
+| `BenchmarkRGBRLEHuffCompress` | serial | YCoCg-R + RLE+Huffman per plane |
+| `BenchmarkRGBDeltaZZRLEFSECompress` | serial | YCoCg-R + Delta+ZZ+RLE+FSE per plane |
+| `BenchmarkRGBRLEFSECompress` | serial | YCoCg-R + RLE+FSE per plane |
+| `BenchmarkRGBDeltaZZFSECompress` | serial | YCoCg-R + Delta+ZZ+FSE per plane |
+| `BenchmarkRGBFSECompress` | serial | YCoCg-R + FSE per plane |
+
+---
+
+## 9. WSI (whole slide imaging, MIC3 format)
+
+For tiled RGB pathology images. All in [wsi_test.go](../wsi_test.go), all
+serial.
+
+| Benchmark | What it measures |
+|---|---|
+| `BenchmarkWSITileCompressTissue` | Compress one 256×256 H&E-stained tile |
+| `BenchmarkWSITileDecompressTissue` | Decompress one 256×256 H&E-stained tile |
+| `BenchmarkWSITileCompressWhite` | Compress one all-white 256×256 tile (constant-plane fast path) |
+| `BenchmarkWSICompress1024` | Compress 1024×1024 image (16 tiles), single worker |
+| `BenchmarkWSICompressParallel1024` | Same image, all cores (`Workers: 0`) — measures intra-image parallelism |
+
+---
+
+## 10. Complete inventory
+
+Sorted by file. P = parallel goroutines per iteration; S = serial loop.
+
+| File | Benchmark | P/S |
+|---|---|---|
+| comparison_test.go | `BenchmarkDeltaZstdDecompress` | S |
+| comparison_test.go | `BenchmarkMEDPredictor` | S |
+| deltagradcompressu16_test.go | `BenchmarkGradDeltaRLEFSECompress` | S |
+| fse2state_test.go | `BenchmarkFSEDecompress` | **P** |
+| fse2state_test.go | `BenchmarkFSECompressCompare` | S |
+| fse2state_test.go | `BenchmarkDeltaRLEFSEDecompress` | **P** |
+| fse2state_test.go | `BenchmarkFSE2StateSummary` | **P** |
+| fse4state_test.go | `BenchmarkFSEDecompress4State` | **P** |
+| fseu16_test.go | `BenchmarkDeltaRLEHuffCompress` | **P** |
+| fseu16_test.go | `BenchmarkDeltaRLEHuffCompress2` | S |
+| fseu16_test.go | `BenchmarkDeltaRLEFSECompress` | **P** |
+| fseu16_test.go | `BenchmarkDeltaZZRLEHuffCompress` | S |
+| fseu16_test.go | `BenchmarkRLEHuffCompress` | S |
+| fseu16_test.go | `BenchmarkDelta` | S |
+| fseu16_test.go | `BenchmarkRLECompress` | S |
+| fseu16_test.go | `BenchmarkDeltaZZRLEFSECompress` | S |
+| fseu16_test.go | `BenchmarkRLEFSECompress` | S |
+| fseu16_test.go | `BenchmarkDeltaZZFSECompress` | S |
+| fseu16_test.go | `BenchmarkFSECompress` | S |
+| fseu16_test.go | `BenchmarkHuffCompress` | S |
+| fseu16_test.go | `BenchmarkDeltaRLEFSEEncodeSpeed` | S |
+| fseu16_test.go | `BenchmarkFSETableMemory` | S |
+| htj2k_comparison_test.go | `BenchmarkMICvsHTJ2K` | S |
+| ojph/htj2k_fair_comparison_test.go | `BenchmarkHTJ2KFairDecomp` | S |
+| ojph/jpegls_comparison_test.go | `BenchmarkJPEGLSDecomp` | S |
+| ojph/mic_c_test.go | `BenchmarkAllCodecs` | S |
+| ojph/mic_c_test.go | `BenchmarkAllCodecsEncode` | S |
+| ojph/mic_c_test.go | `BenchmarkMICFullCPipelineVsHTJ2K` | S |
+| parallelstrips_test.go | `BenchmarkParallelStripsCompress` | S |
+| parallelstrips_test.go | `BenchmarkParallelStripsDecompress` | S |
+| parallelstrips_test.go | `BenchmarkPICSVsAllCodecs` | S |
+| parallelstripsadaptive_test.go | `BenchmarkParallelStripsAdaptive` | S |
+| rans8state_test.go | `BenchmarkRANSDecompress8State` | **P** |
+| rgbbench_test.go | `BenchmarkRGBDeltaRLEHuffCompress` | **P** |
+| rgbbench_test.go | `BenchmarkRGBDeltaRLEFSECompress` | **P** |
+| rgbbench_test.go | `BenchmarkRGBDeltaZZRLEHuffCompress` | S |
+| rgbbench_test.go | `BenchmarkRGBRLEHuffCompress` | S |
+| rgbbench_test.go | `BenchmarkRGBDeltaZZRLEFSECompress` | S |
+| rgbbench_test.go | `BenchmarkRGBRLEFSECompress` | S |
+| rgbbench_test.go | `BenchmarkRGBDeltaZZFSECompress` | S |
+| rgbbench_test.go | `BenchmarkRGBFSECompress` | S |
+| waveletu16_test.go | `BenchmarkWaveletFSECompress` | S |
+| waveletu16_test.go | `BenchmarkWaveletRLEFSECompress` | S |
+| waveletu16_test.go | `BenchmarkWaveletV2RLEFSECompress` | S |
+| waveletu16_test.go | `BenchmarkWaveletV2SIMDRLEFSECompress` | S |
+| wsi_test.go | `BenchmarkWSITileCompressTissue` | S |
+| wsi_test.go | `BenchmarkWSITileDecompressTissue` | S |
+| wsi_test.go | `BenchmarkWSITileCompressWhite` | S |
+| wsi_test.go | `BenchmarkWSICompress1024` | S |
+| wsi_test.go | `BenchmarkWSICompressParallel1024` | S |
+
+---
+
+## 11. Historical hardware results
+
+The numbers in this section come from the parallel `BenchmarkDeltaRLEFSECompress`,
+`BenchmarkFSE2StateSummary`, and (the now-fixed) parallel wavelet benches.
+They report **aggregate multi-core throughput**, not single-thread MB/s — so
+they are higher than the equivalent rows in the paper's Tables 4/5.
+
+> These are kept for historical reference. To reproduce current numbers,
+> run `./run-paper-benchmarks.sh` and look at `paper-tables.txt` in the
+> results directory; those are the apples-to-apples numbers that go into
+> the paper.
+
+### `BenchmarkDeltaRLEFSECompress` — parallel pipeline aggregate
+
+**AWS c7g.metal — ARM64 | 64 cores**
+
+| Modality | FPS | Aggregate Decomp |
+|----------|-----|------------------|
+| MR (256×256) | 17 411 | 2 282 MB/s |
+| CT (512×512) | 8 455 | 4 433 MB/s |
+| CR (2140×1760) | 1 132 | 8 527 MB/s |
+| XR (2048×2577) | 892 | 9 411 MB/s |
+| MG1 (2457×1996) | 1 671 | **16 387 MB/s** |
+| MG2 (2457×1996) | 1 634 | 16 023 MB/s |
+| MG3 (4774×3064) | 281 | 8 044 MB/s |
+| MG4 (4096×3328) | 558 | 15 213 MB/s |
+
+**AWS c7i.8xlarge — AMD64 | 32 cores (Intel Xeon Platinum 8488C)**
+
+| Modality | FPS | Aggregate Decomp |
+|----------|-----|------------------|
 | MR | 8 714 | 1 142 MB/s |
 | CT | 2 303 | 1 208 MB/s |
 | CR | 421 | 3 172 MB/s |
@@ -64,10 +426,10 @@ go test -bench=. -benchtime=10x
 | MG3 | 121 | 3 468 MB/s |
 | MG4 | 182 | 4 964 MB/s |
 
-### AWS c7g.8xlarge — ARM64 | 32 cores
+**AWS c7g.8xlarge — ARM64 | 32 cores**
 
-| Modality | FPS | Decompression Speed |
-|----------|-----|---------------------|
+| Modality | FPS | Aggregate Decomp |
+|----------|-----|------------------|
 | MR | 11 627 | 1 524 MB/s |
 | CT | 4 170 | 2 186 MB/s |
 | CR | 570 | 4 290 MB/s |
@@ -77,10 +439,10 @@ go test -bench=. -benchtime=10x
 | MG3 | 156 | 4 455 MB/s |
 | MG4 | 262 | 7 132 MB/s |
 
-### Mac Studio — Apple M2 Max | ARM64 | 12 cores
+**Mac Studio — Apple M2 Max | ARM64 | 12 cores**
 
-| Modality | FPS | Decompression Speed |
-|----------|-----|---------------------|
+| Modality | FPS | Aggregate Decomp |
+|----------|-----|------------------|
 | MR | 8 044 | 1 054 MB/s |
 | CT | 2 137 | 1 121 MB/s |
 | CR | 277 | 2 089 MB/s |
@@ -89,93 +451,3 @@ go test -bench=. -benchtime=10x
 | MG2 | 373 | 3 659 MB/s |
 | MG3 | 78 | 2 239 MB/s |
 | MG4 | 117 | 3 188 MB/s |
-
----
-
-## Two-State FSE Speedup
-
-`BenchmarkFSE2StateSummary` — full Delta+RLE+FSE pipeline, 200 iterations, Mac Studio (Apple M2 Max, 12 cores):
-
-| Image | 1-state (MB/s) | 2-state (MB/s) | Speedup | Ratio |
-|-------|:--------------:|:--------------:|:-------:|:-----:|
-| MR (256×256)    | 1 403.5 | 2 284.7 | **1.63×** | 2.35× |
-| CT (512×512)    | 1 556.4 | 2 028.9 | **1.30×** | 2.28× |
-| CR (2140×1760)  | 3 777.6 | 5 323.3 | **1.41×** | 3.62× |
-| XR (2048×2577)  | 3 889.8 | 5 787.2 | **1.49×** | 1.74× |
-| MG1 (2457×1996) | 3 722.1 | 5 148.3 | **1.38×** | 2.80× |
-| MG2 (2457×1996) | 3 636.7 | 4 751.1 | **1.31×** | 2.80× |
-| MG3 (4774×3064) | 1 916.8 | 5 705.3 | **2.98×** | 2.19× |
-| MG4 (4096×3328) | 4 230.0 | 6 001.2 | **1.42×** | 1.84× |
-
-Two-state FSE delivers **1.3–3.0× faster decompression** across all modalities. MG3 shows the largest gain (2.98×) due to its symbol distribution characteristics.
-
-Isolated FSE decompression speedup (Intel Xeon @ 2.80 GHz):
-
-| Image | 1-State | 2-State | Δ |
-|-------|---------|---------|---|
-| MR 256×256 | 164 MB/s | 207 MB/s | **+26%** |
-| MG3 4774×3064 | 243 MB/s | 312 MB/s | **+28%** |
-| MG4 4096×3328 | 256 MB/s | 321 MB/s | **+25%** |
-
----
-
-## Wavelet SIMD vs Scalar
-
-Intel Xeon @ 2.80 GHz, 4 cores, 10 concurrent goroutines (5-level transform, 4-state FSE):
-
-| Modality | Scalar+4FSE (MB/s) | SIMD+4FSE (MB/s) | Speedup | Ratio |
-|----------|--------------------|-------------------|:-------:|:-----:|
-| MR   256×256   | 150 | 165 | **+10%** | 2.38× |
-| CT   512×512   | 152 | 190 | **+25%** | 1.67× |
-| CR   2140×1760 | 166 | **210** | **+27%** | 3.81× |
-| XR   2048×2577 | 193 | 214 | **+11%** | 1.76× |
-| MG1  2457×1996 | 182 | 227 | **+25%** | 8.67× |
-| MG2  2457×1996 | 193 | 241 | **+25%** | 8.65× |
-| MG3  4774×3064 | 118 | 112 | — | 2.32× |
-| MG4  4096×3328 | 144 | **198** | **+38%** | 3.59× |
-
-The CR and MG4 images show the largest gains — their column passes are most cache-bound (wide rows, high L2 miss count). MG3 is memory-bandwidth bound on this configuration.
-
----
-
-## PICS Parallel Strip Throughput
-
-### Compression Ratio Impact (all modalities)
-
-For CR/XR/MG modalities, strip-local FSE table adaptation at higher strip counts actually **improves** ratio. Only small images (MR, CT) show boundary overhead:
-
-| Image | 1-strip | 4-strip | 8-strip | Δ(1→4) |
-|-------|:-------:|:-------:|:-------:|:------:|
-| MR (256×256) | 2.35× | 2.28× | 2.21× | −3.0% |
-| CT (512×512) | 2.24× | 2.15× | 1.96× | −4.0% |
-| CR (1760×2140) | 3.63× | **3.66×** | 3.68× | +0.8% |
-| XR (2048×2577) | 1.74× | **1.75×** | 1.76× | +0.6% |
-| MG1 (2457×1996) | 8.57× | **8.69×** | 8.77× | +1.4% |
-| MG3 (4774×3064) | 2.29× | **2.36×** | 2.39× | +3.1% |
-| MG4 (4096×3328) | 3.47× | **3.59×** | 3.62× | +3.5% |
-
-### Throughput Scaling (CR 1760×2140, Intel Xeon @ 2.10 GHz, 4 cores)
-
-| Strips | Compress (MB/s) | Speedup | Decompress (MB/s) | Speedup |
-|--------|:--------------:|:-------:|:----------------:|:-------:|
-| 1 | 133 | 1.0× | 186 | 1.0× |
-| 2 | 219 | **1.7×** | 346 | **1.9×** |
-| 4 | 401 | **3.0×** | 583 | **3.1×** |
-| 8 | 479 | **3.6×** | 540 | 2.9× |
-
-### PICS-2, PICS-4 and PICS-8 vs Single-Thread — All Modalities (MB/s)
-
-Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`):
-
-| Image | MIC-4state-C | PICS-2 | PICS-4 | PICS-8 | Speedup (PICS-4) | Speedup (PICS-8) |
-|-------|:------------:|:------:|:------:|:------:|:----------------:|:----------------:|
-| MR (256×256) | 353 | 320 | 313 | 283 | 0.9× ⚠ | 0.8× ⚠ |
-| CT (512×512) | 389 | 341 | **495** | 477 | **1.3×** | 1.2× |
-| CR (2140×1760) | 534 | 561 | 1010 | **1718** | **1.9×** | **3.2×** |
-| XR (2048×2577) | 540 | 574 | 1039 | **1367** | **1.9×** | **2.5×** |
-| MG1 (2457×1996) | 666 | 902 | 1477 | **2449** | **2.2×** | **3.7×** |
-| MG2 (2457×1996) | 692 | 901 | 1480 | **2414** | **2.1×** | **3.5×** |
-| MG3 (4774×3064) | 543 | 573 | 1097 | **1850** | **2.0×** | **3.4×** |
-| MG4 (4096×3328) | 626 | 790 | 1358 | **2437** | **2.2×** | **3.9×** |
-
-> ⚠ MR (256×256) is too small for PICS — goroutine overhead exceeds the workload. For images ≥ 0.5 MB, PICS-4 delivers 1.9–2.2× and PICS-8 delivers 2.5–3.9× speedup over single-threaded MIC.

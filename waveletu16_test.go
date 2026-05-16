@@ -6,7 +6,6 @@ package mic
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 )
@@ -174,15 +173,9 @@ func BenchmarkWaveletFSECompress(b *testing.B) {
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(compressed)), "ratio")
-			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					WaveletFSEDecompressU16(compressed)
-				}()
+				WaveletFSEDecompressU16(compressed)
 			}
-			wg.Wait()
 			b.ReportMetric((float64(len(byteData)) / (1 << 20)), "original")
 			b.ReportMetric((float64(len(compressed)) / (1 << 20)), "comp")
 			b.ReportMetric(1/float64(b.Elapsed().Seconds()/float64(b.N)), "fps")
@@ -320,15 +313,9 @@ func BenchmarkWaveletRLEFSECompress(b *testing.B) {
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(compressed)), "ratio")
-			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					WaveletRLEFSEDecompressU16(compressed)
-				}()
+				WaveletRLEFSEDecompressU16(compressed)
 			}
-			wg.Wait()
 			b.ReportMetric((float64(len(byteData)) / (1 << 20)), "original")
 			b.ReportMetric((float64(len(compressed)) / (1 << 20)), "comp")
 			b.ReportMetric(1/float64(b.Elapsed().Seconds()/float64(b.N)), "fps")
@@ -442,15 +429,9 @@ func BenchmarkWaveletV2RLEFSECompress(b *testing.B) {
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(compressed)), "ratio")
-			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					WaveletV2RLEFSEDecompressU16(compressed)
-				}()
+				WaveletV2RLEFSEDecompressU16(compressed)
 			}
-			wg.Wait()
 			b.ReportMetric((float64(len(byteData)) / (1 << 20)), "original")
 			b.ReportMetric((float64(len(compressed)) / (1 << 20)), "comp")
 			b.ReportMetric(1/float64(b.Elapsed().Seconds()/float64(b.N)), "fps")
@@ -474,15 +455,9 @@ func BenchmarkWaveletV2SIMDRLEFSECompress(b *testing.B) {
 			b.SetBytes(int64(len(byteData)))
 			b.ResetTimer()
 			b.ReportMetric(float64(len(byteData))/float64(len(compressed)), "ratio")
-			var wg sync.WaitGroup
 			for i := 0; i < b.N; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					WaveletV2SIMDRLEFSEDecompressU16(compressed)
-				}()
+				WaveletV2SIMDRLEFSEDecompressU16(compressed)
 			}
-			wg.Wait()
 			b.ReportMetric((float64(len(byteData)) / (1 << 20)), "original")
 			b.ReportMetric((float64(len(compressed)) / (1 << 20)), "comp")
 			b.ReportMetric(1/float64(b.Elapsed().Seconds()/float64(b.N)), "fps")
