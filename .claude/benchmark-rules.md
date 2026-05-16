@@ -72,7 +72,59 @@ the Wav+SIMD column in Tables 1, 4, 5.
 
 ---
 
-## 3. Hardware and Platform
+## 3. Cross-Platform Table Parity
+
+Paper tables that report the same metric on ARM64 and AMD64 (encoding,
+decompression, FSE microbench) must have the same set of codec columns.
+Silently omitting a codec from one platform creates a misleading
+comparison: the reader cannot tell whether the codec is absent because it
+performs poorly, because it is unavailable on that platform, or because
+nobody ran the benchmark yet.
+
+Rules:
+
+- If a codec runs on both platforms, both tables must include it. No
+  exceptions.
+- If a codec is genuinely unavailable on one platform (e.g.\ MIC-4state-SIMD
+  has no NEON kernel on ARM64 today), the corresponding column may be
+  omitted, but the caption text must say so explicitly: "ARM64 has no
+  equivalent of AMD64's BMI2 four-state kernel, so MIC-4state-SIMD is
+  reported only for AMD64."
+- A codec implemented with different mechanisms on the two platforms (e.g.\
+  the wavelet variant: AVX2 on AMD64, scalar on ARM64) should be labelled
+  to reflect what actually runs — for example, "Wav+SIMD" on AMD64 and
+  "Wavelet" on ARM64. Do not paste a "+SIMD" label onto a column that runs
+  scalar code.
+- A codec that is *expected* to run on both platforms but has not yet been
+  measured on one of them is a paper-blocking bug, not a column to omit
+  silently. File the measurement gap explicitly in the paper's Future Work
+  section as well as in this rules file's TODO list (below).
+
+### TODO: known cross-platform gaps to close
+
+These are open as of v8 of the paper. Each must be closed before the
+corresponding column is treated as final in any future revision.
+
+- **JPEG-LS on AMD64 decompression.** `BenchmarkAllCodecs` produces the
+  ARM64 JPEG-LS column, but the AMD64 decompression table currently has
+  no JPEG-LS row. Re-run on the AMD64 reference platform and update
+  Table `tab:decomp-amd64`.
+- **PICS-C-2 on AMD64.** ARM64 reports PICS-C-2/4/8; AMD64 reports only
+  PICS-C-4/8. Add PICS-C-2 to the AMD64 run.
+- **Wavelet NEON kernel on ARM64.** Until a NEON predict/update kernel
+  exists, the Wavelet column on ARM64 must keep the *Wavelet* label, not
+  *Wav+SIMD*. When the NEON kernel ships, rename the column and update
+  the variant description in Section V.D.
+- **JavaScript benchmarks on the current reference platform.** The
+  paper's JavaScript tables (`tab:js-perf`, `tab:pics-js`) are M2 Max
+  numbers carried over from v6. When the Go benchmarks move to a new
+  ARM64 reference (currently M4 Pro), the JS tables must be re-measured
+  on the same chip; until then, the JS captions must explicitly note the
+  platform mismatch.
+
+---
+
+## 4. Hardware and Platform
 
 The paper claims numbers on exactly two reference platforms. Numbers from
 other hardware can be reported only as additional/historical results — they
@@ -106,7 +158,7 @@ System hygiene before a paper-quality run:
 
 ---
 
-## 4. Paper Table → Benchmark Map
+## 5. Paper Table → Benchmark Map
 
 This map must be kept in sync with `run-paper-benchmarks.sh` and
 `paper-tables.py`. If you change any of the three, change all three.
@@ -127,7 +179,7 @@ Any other benchmark in the repo (e.g. `BenchmarkDeltaRLEFSECompress`,
 
 ---
 
-## 5. CGO Prerequisites
+## 6. CGO Prerequisites
 
 `BenchmarkAllCodecs`, `BenchmarkAllCodecsEncode`, `BenchmarkHTJ2KFairDecomp`,
 and `BenchmarkJPEGLSDecomp` require the `cgo_ojph` build tag plus two C
@@ -148,7 +200,7 @@ need to add `-I/usr/local/include` / `-L/usr/local/lib` instead.
 
 ---
 
-## 6. Re-running Policy
+## 7. Re-running Policy
 
 Trigger a re-run when:
 
@@ -169,7 +221,7 @@ normal; investigate only if it exceeds 10%.
 
 ---
 
-## 7. Adding a New Column to a Paper Table
+## 8. Adding a New Column to a Paper Table
 
 Three artifacts must be changed together. If only some of them change, the
 column will silently disappear from the next paper rebuild.
@@ -192,7 +244,7 @@ LaTeX still referencing it.
 
 ---
 
-## 8. Things NOT to Do
+## 9. Things NOT to Do
 
 - ❌ Quote numbers from `BenchmarkDeltaRLEFSECompress` in the paper. It's a
   parallel aggregate microbench in `fseu16_test.go` that predates the
@@ -221,7 +273,7 @@ LaTeX still referencing it.
 
 ---
 
-## 9. Wavelet+SIMD Specifics
+## 10. Wavelet+SIMD Specifics
 
 The Wav+SIMD column in Tables 1, 4, 5 must be sourced from
 `BenchmarkWaveletV2SIMDRLEFSECompress`, which is a serial loop after the
@@ -240,7 +292,7 @@ recent fix.
 
 ---
 
-## 10. PICS Specifics
+## 11. PICS Specifics
 
 - PICS-C-N (C pthreads + per-strip SIMD) is the canonical PICS column in
   Tables 4/5. The Go-only PICS-N variant is reported alongside but is not
@@ -255,7 +307,7 @@ recent fix.
 
 ---
 
-## 11. Quoting Numbers in the Paper
+## 12. Quoting Numbers in the Paper
 
 - Always cite the platform when stating a throughput: "On Apple M2 Max,
   MIC-4state-C achieves ..." Never "MIC-4state-C achieves X MB/s" without

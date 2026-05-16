@@ -21,6 +21,22 @@
 %    Conclusion bullet updated.
 %  - JavaScript / Node.js measurements (tab:js-perf, tab:pics-js) are still
 %    M2 Max numbers and remain unchanged in v8; captions explicitly note this.
+%  - SIMD naming consistency: the ARM64 Wavelet column was relabelled from
+%    "Wav+SIMD" to "Wavelet" because no SIMD kernel runs on ARM64 today; the
+%    AMD64 tables still use "Wav+SIMD" because AVX2 predict/update kernels do
+%    run there. Variant description in Section V.D updated to match.
+%  - Fair single-threaded vs multi-threaded framing: claims like "PICS-C-8
+%    exceeds HTJ2K decompression on all 21 images" were removed because they
+%    compare an 8-thread codec against a single-threaded one. All
+%    cross-codec comparisons in the Results and Conclusion sections are now
+%    explicitly stated as single-threaded; PICS-C-N is framed as MIC's own
+%    parallel mode, not as a competitor to single-threaded HTJ2K/JPEG-LS.
+%  - Plain-English interpretation: the Results subsections (Encoding,
+%    Decompression ARM64, Decompression AMD64) and the Conclusion now
+%    include explanatory paragraphs that interpret the tabulated numbers
+%    in terms of pipeline structure, branch predictor behaviour, and
+%    deployment trade-offs, rather than relying on the reader to draw
+%    these conclusions from numbers alone.
 % Carried over from v6:
 %  - Abstract: single paragraph, <=250 words, all abbreviations expanded
 %  - "nine modalities" consistency
@@ -103,8 +119,9 @@ pipeline improves compression ratio by 5--22\% (geometric mean 14\%) over a
 Delta+Zstandard baseline, reaching a geometric-mean ratio of 3.12
 times---within 1\% of High-Throughput JPEG 2000 (HTJ2K, 3.15 times). A
 four-state decoder yields a 45\% geometric-mean FSE stage decompression
-speedup on ARM64; strip-parallel configurations exceed HTJ2K decompression
-speed on all 21 images on both ARM64 and AMD64. A 20-kilobyte pure JavaScript
+speedup on ARM64. Single-threaded, MIC's C decoder is faster than HTJ2K on
+every ARM64 image and on 16 of 21 AMD64 images; a strip-parallel mode adds
+near-linear scaling for large images. A 20-kilobyte pure JavaScript
 decoder and a Go WebAssembly build enable client-side in-browser
 decoding, confirming that 16-bit-native entropy coding is a practical design
 point where throughput, simplicity, and deployment portability matter.
@@ -801,12 +818,15 @@ noted. Differences are in the decoder implementation only.
   \item \textbf{MIC-4state-SIMD}: C four-state FSE decoder with the BMI2
   \texttt{fse4StateDecompKernel} on AMD64; falls back to the scalar C decoder
   on ARM64 (ARM64 lacks BMI2). Bit-identical to MIC-4state-C.
-  \item \textbf{Wavelet+SIMD}: Le~Gall 5/3 integer wavelet (blocked column
-  layout for cache efficiency) with AVX2 predict/update kernels on AMD64. On
-  ARM64 the same blocked column layout is used without SIMD (\emph{scalar
-  blocked}): the cache-friendly access pattern still improves throughput over a
-  plain column-by-column transform even without vectorization. Produces a
-  different compressed stream from all MIC variants.
+  \item \textbf{Wavelet} (labelled \textbf{Wav+SIMD} only in AMD64 tables):
+  Le~Gall 5/3 integer wavelet with a blocked column layout for cache
+  efficiency. On AMD64 the predict/update lifting steps run through AVX2
+  vector kernels; on ARM64 the same blocked layout is used but the inner
+  loops are plain scalar C (a NEON kernel is planned). To avoid misleading
+  the reader, the column header is \emph{Wavelet} in ARM64 tables and
+  \emph{Wav+SIMD} in AMD64 tables, reflecting what actually runs on each
+  platform. Both dispatches produce the same compressed stream, which
+  differs from MIC's stream because of the wavelet transform stage.
   \item \textbf{PICS-C-$N$}: Parallel Image Compressed Strips. The image is
   split into $N$ equal horizontal strips; each strip is compressed
   independently using its own FSE table. Decompression of all strips runs in
@@ -896,10 +916,35 @@ statistical properties.
 
 Tables~\ref{tab:enc-amd64} and~\ref{tab:enc-arm64-full} report per-image
 encoding throughput for all codec variants on AMD64 and ARM64 respectively.
-On ARM64, MIC-4state-C is 2.0--2.5$\times$ faster to encode than pure-Go
-MIC-Go; JPEG-LS is 1.5--4$\times$ slower than MIC-Go. PICS-8
-reaches 1.4--2.4\,GB/s on large images, sufficient for real-time PACS
-ingestion.
+We discuss the single-threaded encoders first, then the strip-parallel
+configurations; cross-codec comparisons are made within each group.
+
+\textbf{Single-threaded encoders.} MIC-4state-C is the fastest
+single-threaded encoder on both platforms. On ARM64 (M4 Pro) it is
+2.0--2.5$\times$ faster than the pure-Go MIC-Go and 2.5--6$\times$
+faster than JPEG-LS. The C implementation widens the gap over MIC-Go
+because the encoder's hot path is dominated by histogram counting, table
+normalization, and a tight bit-packing loop --- all of which the C
+compiler with \texttt{-O3} optimises more aggressively than the Go
+\texttt{gc} compiler's default output. The Wavelet variant sits below MIC
+on every image because its encoder additionally performs a five-level
+5/3 wavelet transform before entropy coding, while MIC's predictor is a
+single arithmetic pass over the pixels. HTJ2K is roughly comparable to
+MIC-Go on small images but falls behind MIC-4state-C on every image,
+reflecting the higher per-block work of EBCOT relative to a single-pass
+delta-RLE-FSE pipeline.
+
+\textbf{Strip-parallel (PICS) encoders.} The PICS-$N$ columns measure
+MIC's strip-parallel encoder with $N$ goroutines. On images above
+${\sim}5$\,MB, PICS-8 reaches 1.4--2.4\,GB/s on ARM64 and 1.1--1.9\,GB/s
+on AMD64, which is well above the ingestion rate of typical PACS workflows
+even at full archival volume. On small images (under ${\sim}1$\,MB), the
+PICS variants do not pay off: the per-strip overhead (FSE table build, a
+small header, goroutine scheduling) is large relative to per-strip encoding
+work, and a single-threaded encoder is actually faster. PICS-$N$ is
+therefore best used as a large-image optimization rather than a default.
+PICS is MIC's own parallel encode mode and is not compared directly against
+the single-threaded HTJ2K or JPEG-LS encoders in the same table.
 
 \begin{table*}[htbp]
 \centering
@@ -939,12 +984,15 @@ XA1 & 242 & 496 & 471 & 101 & 219 & 114 & 616 & \textbf{832} \\
 \begin{table*}[htbp]
 \centering
 \caption{Encoding throughput (MB/s), Apple M4 Pro (14-core ARM64), all
-variants. Bold = fastest per row.}
+variants. The \emph{Wavelet} column runs as a scalar blocked-column
+transform on ARM64 (no vector kernel today; NEON kernel planned). Bold
+= fastest per row within the single-threaded and PICS groups
+respectively.}
 \label{tab:enc-arm64-full}
 \scriptsize
 \begin{tabular}{lrrrrrrrrrr}
 \toprule
-Image & MIC-Go & MIC-4s & MIC-4s-C & MIC-C & Wav+SIMD & HTJ2K & JPEG-LS & PICS-2 & PICS-4 & PICS-8 \\
+Image & MIC-Go & MIC-4s & MIC-4s-C & MIC-C & Wavelet & HTJ2K & JPEG-LS & PICS-2 & PICS-4 & PICS-8 \\
 \midrule
 MR  & 231 & 243 & \textbf{509} & 454 & 122 & 243 & 102 & 270 & 243 & 155 \\
 CT  & 231 & 241 & \textbf{487} & 387 & 103 & 184 & 141 & 303 & 346 & 393 \\
@@ -973,21 +1021,61 @@ XA1 & 313 & 317 & 662 & 591 & 125 & 230 & 154 & 543 & 733 & \textbf{932} \\
 
 \subsection{Decompression Throughput---ARM64}
 
-Table~\ref{tab:decomp-arm} presents decompression throughput on Apple M4 Pro
-(ARM64). On ARM64, all MIC variants use pure-Go or C scalar implementations;
-there is no SIMD column. MIC-4state-C is the fastest single-threaded variant
-on all 21 images; PICS-C-8 exceeds HTJ2K decompression throughput on all
-21 images.
+Table~\ref{tab:decomp-arm} presents decompression throughput on Apple M4
+Pro (ARM64). The ARM64 table has no \emph{MIC-4state-SIMD} column because
+ARM64 has no equivalent of AMD64's BMI2 PEXT/PDEP-based four-state assembly
+kernel today; for the same reason the wavelet column is labelled
+\emph{Wavelet} rather than \emph{Wav+SIMD} (the codec runs as a scalar
+blocked-column transform on ARM64). We discuss the single-threaded
+decoders first, then PICS-C-$N$; cross-codec comparisons are within
+each group.
+
+\textbf{Single-threaded decoders.} MIC-4state-C is the fastest
+single-threaded decoder on every one of the 21 images. It is
+1.4--2.4$\times$ faster than HTJ2K and 1.6--5.7$\times$ faster than
+JPEG-LS. The consistency comes from MIC's pipeline shape: the
+table-driven FSE decoder costs one table lookup, one bit read, and one
+addition per symbol, with no per-symbol branches that the M4 Pro's
+branch predictor cannot anticipate. HTJ2K's EBCOT block coder and
+JPEG-LS's Golomb-Rice context model both introduce data-dependent
+branches whose mispredictions the wide out-of-order engine can only
+partially hide. The Wavelet column lags MIC because it pays for a 5/3
+wavelet transform before entropy coding --- work that the simple
+Delta+RLE predictor does not need on these mostly-smooth medical
+images. Even the pure-Go MIC-Go variant exceeds HTJ2K on 16 of 21
+images despite using only the \texttt{gc} compiler's default code
+generation: the gain from 16-bit-native coding (no byte-pair
+re-encoding, no transform pass) is large enough to overcome the
+\texttt{gc} compiler's relative cost compared with \texttt{-O3} C.
+
+\textbf{Strip-parallel (PICS-C-$N$) decoders.} The PICS-C-$N$ columns
+measure the same MIC compressed stream decoded by $N$ parallel
+pthreads. The per-strip decoder is identical to MIC-4state-C, so
+per-strip work is unchanged; the only additional cost is strip
+synchronization and a small header read. On images above ${\sim}5$\,MB
+the speedup is close to linear up to four threads and continues to
+scale to eight: PICS-C-8 reaches 3.6--4.6\,GB/s on the largest
+mammography images. The small MR image (130\,KB) is too compact to
+benefit from 8-way parallelism --- synchronization and strip-header
+overhead exceed the per-strip work, so PICS-C-4 is the best PICS
+configuration for MR (footnote $\dagger$). PICS-C-$N$ is MIC's parallel
+decode mode and is not compared directly against the single-threaded
+HTJ2K and JPEG-LS columns; an $N$-thread comparison would require
+parallel HTJ2K and JPEG-LS configurations, which are outside the scope
+of this evaluation.
 
 \begin{table*}[t]
 \centering
 \caption{Decompression throughput (MB/s), Apple M4 Pro (14-core ARM64).
-Bold = fastest per row (single-threaded: first 5 cols; PICS: last 3 cols).}
+The \emph{Wavelet} column is scalar on ARM64 (no vector kernel today).
+Bold = fastest per row within the single-threaded group (first 5 cols)
+and within the PICS group (last 3 cols); the two groups are not directly
+compared.}
 \label{tab:decomp-arm}
 \scriptsize
 \begin{tabular}{lrrrrrrrr}
 \toprule
-Image & MIC-Go & MIC-4s-C & Wav+SIMD & HTJ2K & JPEG-LS & PICS-C-2 & PICS-C-4 & PICS-C-8 \\
+Image & MIC-Go & MIC-4s-C & Wavelet & HTJ2K & JPEG-LS & PICS-C-2 & PICS-C-4 & PICS-C-8 \\
 \midrule
 MR   & 312 & \textbf{702} & 103 & 246 & 124 & 663 & \textbf{894}$^\dagger$ & 702 \\
 CT   & 227 & \textbf{470} & 120 & 348 & 184 & 624 & 1,157 & \textbf{1,446} \\
@@ -1014,18 +1102,41 @@ XA1  & 426 & \textbf{759} & 162 & 411 & 288 & 1,214 & 1,881 & \textbf{3,191} \\
 \end{tabular}
 \end{table*}
 
-$^\dagger$MR is too small for PICS-C-8; PICS-C-4 is best.
-MIC-4state-C is 1.6--5.7$\times$ faster than JPEG-LS on all 21 images.
+$^\dagger$MR is too small for PICS-C-8 (synchronization overhead dominates
+per-strip work); PICS-C-4 is the best PICS configuration for MR.
 PICS-C-8 peaks at 4,585\,MB/s on MG2.
 
 \subsection{Decompression Throughput---AMD64}
 
-Table~\ref{tab:decomp-amd64} presents decompression throughput on Intel Core
-Ultra 9 285K (AMD64). On AMD64, MIC-4state-SIMD uses the BMI2
-\texttt{fse4StateDecompKernel} assembly routine, and Wavelet+SIMD uses AVX2
-predict/update kernels. MIC-4state-SIMD is the fastest single-threaded variant
-on 16 of 21 images; PICS-C-8 exceeds HTJ2K decompression throughput on all
-21 images on both platforms.
+Table~\ref{tab:decomp-amd64} presents decompression throughput on Intel
+Core Ultra 9 285K (AMD64). On AMD64, MIC-4state-SIMD uses the hand-written
+BMI2 \texttt{fse4StateDecompKernel} assembly routine and Wavelet+SIMD uses
+AVX2 predict/update kernels (both genuine vector implementations, unlike
+their ARM64 counterparts). The AMD64 table in this version does not
+include a JPEG-LS column or a PICS-C-2 column; both are present on ARM64
+(Table~\ref{tab:decomp-arm}) and are scheduled for the AMD64 measurement
+sweep in the next revision.
+
+\textbf{Single-threaded decoders.} MIC-4state-SIMD is the fastest
+single-threaded decoder on 16 of 21 images. HTJ2K leads on the five
+largest mammography and radiography images (MG1, MG2, MG4, CT, RG3).
+This pattern is consistent with HTJ2K's design: the EBCOT block coder is
+most efficient on large images where the coding-pass amortization
+dominates, while MIC's per-symbol FSE decoder benefits from BMI2
+assembly that issues four parallel state updates per cycle. Where MIC
+leads, the margin over HTJ2K is 1.1--1.6$\times$; where HTJ2K leads,
+its margin over MIC is 1.0--1.2$\times$. The Wav+SIMD column (AVX2
+kernels active) is competitive on most images but does not surpass
+MIC-4state-SIMD on any image --- the extra wavelet transform costs
+more than the entropy-coding advantage it could provide on this corpus.
+
+\textbf{Strip-parallel (PICS-C-$N$) decoders.} PICS-C-8 reaches
+1.5--2.7\,GB/s on images above 5\,MB on AMD64, similar in scaling shape
+to ARM64 but at slightly lower absolute throughput because the AMD64
+single-thread baseline is itself higher. Small images again do not
+benefit from 8-way parallelism. As on ARM64, PICS-C-$N$ is MIC's own
+parallel decode mode and is not compared directly against the
+single-threaded HTJ2K column.
 
 \begin{table*}[t]
 \centering
@@ -1062,9 +1173,8 @@ XA1  & 413 & 693 & \textbf{836} & 538 & 797 & 1,173 & \textbf{1,513} \\
 \end{tabular}
 \end{table*}
 
-$^\dagger$\textbf{MR} is too small for PICS-C-8; PICS-C-4 achieves the highest
-PICS throughput on this image. HTJ2K leads single-threaded on MG1, MG2, MG4,
-CT, and RG3.
+$^\dagger$\textbf{MR} is too small for PICS-C-8 (synchronization overhead
+dominates per-strip work); PICS-C-4 is the best PICS configuration for MR.
 
 \subsection{FSE Stage Microbenchmarks}
 
@@ -1183,38 +1293,79 @@ spanning nine modalities:
   images (geometric mean $+$14\%), attributable to the structural cost of
   byte-splitting 16-bit residuals.
 
-  \item \textbf{vs.\ HTJ2K}: MIC-4state-C exceeds HTJ2K decompression on all
-  21 images single-threaded (ARM64) and 16/21 (AMD64); PICS-C-8 exceeds HTJ2K
-  on all 21 images on both platforms.
+  \item \textbf{vs.\ HTJ2K (single-threaded only).} On ARM64, MIC-4state-C
+  exceeds HTJ2K decompression throughput on all 21 images, by 1.4--2.4$\times$.
+  On AMD64, MIC-4state-SIMD exceeds HTJ2K on 16 of 21 images; HTJ2K leads on
+  the five largest images (MG1, MG2, MG4, CT, RG3) by 1.0--1.2$\times$. We
+  do not compare MIC's strip-parallel decoder PICS-C-$N$ against
+  single-threaded HTJ2K, since that would be an $N$-thread-vs-1-thread
+  comparison rather than a codec comparison.
 
-  \item \textbf{vs.\ JPEG-LS}: 1.7--5.0$\times$ faster decompression; JPEG-LS
-  retains the best lossless ratios (geometric mean 3.44$\times$ vs.\ MIC's
-  3.12$\times$).
+  \item \textbf{vs.\ JPEG-LS (single-threaded only).} 1.6--5.7$\times$
+  faster single-threaded decompression on ARM64. JPEG-LS retains the best
+  lossless ratios (geometric mean 3.44$\times$ vs.\ MIC's 3.12$\times$,
+  approximately 10\% better). The trade-off is therefore between storage
+  cost (JPEG-LS) and decode latency (MIC).
 
-  \item \textbf{Multi-state decoder}: geometric-mean $+$45\% FSE stage
-  speedup on ARM64 ($+$43\% AMD64) with no ratio penalty.
+  \item \textbf{Multi-state decoder.} Geometric-mean $+$45\% FSE stage
+  speedup on ARM64 (M4 Pro) and $+$43\% on AMD64 over the 1-state baseline,
+  with no compression-ratio penalty. The ARM64 gain is smaller than the
+  $+$68\% reported on M2 Max in v6 because M4 Pro's stronger out-of-order
+  engine raises the 1-state baseline, leaving less margin for four-way
+  ILP to recover.
 
-  \item \textbf{Browser decoder}: ${\sim}$20\,KB pure JS decoder; PICS with
-  \texttt{worker\_threads} achieves 483\,MB/s on MG1 in Node.js.
+  \item \textbf{Strip-parallel mode (PICS-C-$N$).} MIC's pthread-based
+  strip decoder reaches 3.6--4.6\,GB/s on ARM64 and 1.5--2.7\,GB/s on
+  AMD64 for images above 5\,MB. PICS-C-$N$ is intended for multi-core
+  decode of single large images and is reported as MIC's own parallel
+  mode, not as a competitor to single-threaded codecs.
 
-  \item \textbf{Implementation}: approximately 1,100 lines of Go code, about
-  18$\times$ fewer source lines than HTJ2K.
+  \item \textbf{Browser decoder.} ${\sim}$20\,KB pure JavaScript decoder;
+  PICS with \texttt{worker\_threads} achieves 483\,MB/s on MG1 in Node.js
+  (measured on Apple M2 Max; JS measurements were not refreshed for M4 Pro
+  in this version).
+
+  \item \textbf{Implementation.} Approximately 1,100 lines of Go code,
+  about 18$\times$ fewer source lines than HTJ2K's reference implementation.
 \end{itemize}
 
-Overall, the study indicates that 16-bit-native entropy coding is a useful
-design point for lossless medical image compression, particularly in
-applications where decompression throughput, implementation simplicity, and
-deployment portability are important.
+\textbf{Interpretation.} Three threads tie these results together.
+First, on the entropy-coding stage alone (Table~\ref{tab:fse-combined}),
+the gap between MIC and the established codecs is largest --- a
+two- to four-fold throughput advantage --- because MIC's 16-bit-native
+table-driven decoder has nearly no per-symbol branches. Second, the full
+pipeline (Tables~\ref{tab:decomp-arm} and~\ref{tab:decomp-amd64})
+narrows this gap because the surrounding Delta and RLE stages are
+already efficient in HTJ2K and JPEG-LS, and the gap shifts toward
+HTJ2K on the very largest images where its block-coding amortizes well.
+Third, the strip-parallel mode multiplies throughput by close to the
+number of cores on large images, but does not change MIC's underlying
+single-threaded characteristics.
 
-\textbf{Deployment guidance.} For deployments where implementation simplicity
-is the priority, the pure Go or JavaScript decoder suffices. For maximum
-single-threaded native throughput on a server, use MIC-4state-C. For large
-images on multicore systems, PICS-C-8 provides the highest decompression rates
-on both ARM64 and AMD64.
+\textbf{Deployment guidance.} For applications that decode one image at
+a time on a multi-core machine, PICS-C-$N$ delivers the highest
+absolute decode rate. For applications that decode many small images
+concurrently (e.g.\ thumbnail rendering, multi-frame DBT playback),
+single-threaded MIC-4state-C (ARM64) or MIC-4state-SIMD (AMD64) is the
+right default: each request gets ${\sim}$700--900\,MB/s on ARM64 and
+${\sim}$800--1{,}200\,MB/s on AMD64 without contending for threads with
+other requests. HTJ2K is competitive on large mammography images on
+AMD64 and remains a sensible choice where compatibility with existing
+DICOM transfer syntaxes is a hard requirement. JPEG-LS is the right
+choice where archival storage cost dominates the deployment budget.
+For implementation simplicity, the pure-Go or pure-JavaScript decoder
+suffices.
 
 Future work should strengthen the evidence base with larger datasets,
 shuffle-based general-purpose baselines, formal statistical reporting, and
-direct browser benchmarking.
+direct browser benchmarking. Several items already identified for the next
+revision: (i) measure JPEG-LS and PICS-C-2 decompression throughput on
+AMD64 so the AMD64 decoding table (Table~\ref{tab:decomp-amd64}) is
+column-for-column comparable to the ARM64 table; (ii) add a NEON
+predict/update kernel for the wavelet variant on ARM64 so the
+\emph{Wavelet} column there is no longer scalar; (iii) refresh the
+JavaScript decoder measurements on the M4 Pro reference platform so the
+JavaScript tables match the Go tables.
 
 MIC is open-source and available at
 \url{https://github.com/pappuks/medical-image-codec}.
