@@ -3,27 +3,36 @@
 # run-paper-benchmarks.sh
 #
 # Runs every Go benchmark that produces a number reported in
-#   paper/mic-paper-v6-ieee-tmi.tex
+#   paper/mic-paper-v8-ieee-tmi.tex
 #
 # Mapping of paper tables -> benchmarks driven here:
 #
 #   Table 1  (tab:ratios)            Lossless compression ratios
 #                                      BenchmarkAllCodecs              (MIC/HTJ2K/JPEG-LS/PICS ratios)
-#                                      BenchmarkDeltaZstdDecompress    (Delta+Zstd-19 column)
+#                                      BenchmarkMICCDeltaZstdDecomp    (Delta+Zstd-19 column, in-process libzstd)
 #                                      BenchmarkWaveletV2SIMDRLEFSECompress  (Wavelet column)
 #
 #   Table 2  (tab:enc-amd64)         Encoding throughput, AMD64
 #   Table 3  (tab:enc-arm64-full)    Encoding throughput, ARM64
 #                                      BenchmarkAllCodecsEncode
+#                                      BenchmarkMICCDeltaZstdEnc       (Delta+Zstd-19 encoding column)
 #
 #   Table 4  (tab:decomp-arm)        Decomp throughput, ARM64
 #   Table 5  (tab:decomp-amd64)      Decomp throughput, AMD64
 #                                      BenchmarkAllCodecs
+#                                      BenchmarkMICCDeltaZstdDecomp    (Delta+Zstd-19 decoding column)
 #                                      BenchmarkWaveletV2SIMDRLEFSECompress  (Wavelet+SIMD column)
 #
 #   Table 6  (tab:fse-combined)      FSE microbench, 1-state vs 4-state
 #                                      BenchmarkFSEDecompress          (1-state)
 #                                      BenchmarkFSEDecompress4State    (4-state)
+#
+# The Delta+Zstd-19 row is produced by BenchmarkMICCDeltaZstdDecomp /
+# BenchmarkMICCDeltaZstdEnc in ojph/delta_zstd_micc_test.go (build tags
+# cgo_ojph + cgo_zstd). They link libzstd in-process for a fair C-vs-C
+# comparison against MIC's four-state C decoder. The older
+# BenchmarkDeltaZstdDecompress uses the zstd CLI subprocess and is no
+# longer the source of paper numbers — see .claude/benchmark-rules.md.
 #
 # JavaScript tables (tab:js-perf, tab:pics-js) are produced by a separate
 # Node.js harness and are out of scope for this script.
@@ -58,6 +67,18 @@ if ! go build -tags cgo_ojph ./ojph/ 2>"${OUTDIR}/preflight.err"; then
   echo "ERROR: cgo_ojph build failed. Required:" >&2
   echo "  brew install openjph charls            (Apple Silicon: /opt/homebrew)" >&2
   echo "  ojph/ojph.go must include -I/opt/homebrew/include and -L/opt/homebrew/lib" >&2
+  exit 1
+fi
+echo "  ok"
+
+# Preflight — cgo_zstd build (needed for the Delta+Zstd-19 throughput row).
+echo "=== preflight: cgo_zstd build ==="
+if ! go build -tags "cgo_ojph cgo_zstd" ./ojph/ 2>"${OUTDIR}/preflight-zstd.err"; then
+  cat "${OUTDIR}/preflight-zstd.err" >&2
+  echo >&2
+  echo "ERROR: cgo_zstd build failed. Required:" >&2
+  echo "  brew install zstd                      (Apple Silicon: /opt/homebrew)" >&2
+  echo "  apt install libzstd-dev                (Linux)" >&2
   exit 1
 fi
 echo "  ok"
@@ -101,11 +122,17 @@ run_bench "FSE 4-state microbench              (Table 6:      BenchmarkFSEDecomp
   -benchmem -run=^$ -benchtime="${BENCHTIME}" \
   -bench '^BenchmarkFSEDecompress4State$' .
 
-# -------- Table 1: Delta+Zstd-19 baseline column --------
-run_bench "Delta+Zstd-19 baseline              (Table 1 column)" \
-  "05-delta-zstd.txt" \
-  -benchmem -run=^$ -benchtime="${BENCHTIME}" \
-  -bench '^BenchmarkDeltaZstdDecompress$' .
+# -------- Tables 1, 4, 5: Delta+Zstd-19 decoding column (in-process libzstd) --------
+run_bench "Delta+Zstd-19 decoding              (Tables 1/4/5 column)" \
+  "05a-delta-zstd-decomp.txt" \
+  -tags "cgo_ojph cgo_zstd" -benchmem -run=^$ -benchtime="${BENCHTIME}" \
+  -bench '^BenchmarkMICCDeltaZstdDecomp$' ./ojph/
+
+# -------- Tables 2, 3: Delta+Zstd-19 encoding column (in-process libzstd) --------
+run_bench "Delta+Zstd-19 encoding              (Tables 2/3 column)" \
+  "05b-delta-zstd-enc.txt" \
+  -tags "cgo_ojph cgo_zstd" -benchmem -run=^$ -benchtime="${BENCHTIME}" \
+  -bench '^BenchmarkMICCDeltaZstdEnc$' ./ojph/
 
 # -------- Tables 1, 4, 5: Wavelet+SIMD column --------
 run_bench "Wavelet+SIMD pipeline               (Tables 1/4/5: Wavelet column)" \

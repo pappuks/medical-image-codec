@@ -7,6 +7,37 @@
 #include <string.h>
 
 // ---------------------------------------------------------------------------
+// Mask table for the branchless zero-bits-safe bit reader. nb_bits is in
+// [0, 17] (tableLog <= 17 by construction in read_ncount), so a 33-entry
+// table is enough headroom. mask32[0] == 0 is the load-bearing value: it
+// turns the n==0 case into a no-op without a runtime branch.
+// ---------------------------------------------------------------------------
+static const uint32_t nbits_mask32[33] = {
+    0x00000000u, 0x00000001u, 0x00000003u, 0x00000007u, 0x0000000Fu,
+    0x0000001Fu, 0x0000003Fu, 0x0000007Fu, 0x000000FFu, 0x000001FFu,
+    0x000003FFu, 0x000007FFu, 0x00000FFFu, 0x00001FFFu, 0x00003FFFu,
+    0x00007FFFu, 0x0000FFFFu, 0x0001FFFFu, 0x0003FFFFu, 0x0007FFFFu,
+    0x000FFFFFu, 0x001FFFFFu, 0x003FFFFFu, 0x007FFFFFu, 0x00FFFFFFu,
+    0x01FFFFFFu, 0x03FFFFFFu, 0x07FFFFFFu, 0x0FFFFFFFu, 0x1FFFFFFFu,
+    0x3FFFFFFFu, 0x7FFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+};
+
+// dec_table_alloc returns a cache-line aligned (64-byte) decode-table buffer
+// of the requested entry count. Aligning to a cache line is two wins:
+// (1) the table starts on a line boundary so the first entry's load can't
+// straddle two lines; (2) it lets the inner loop apply
+// __builtin_assume_aligned(dt, 64), which lets the compiler drop alignment
+// fixups on AArch64 LDRH / LDR pairs.
+static inline void *dec_table_alloc(size_t entries, size_t entry_size) {
+    size_t bytes = entries * entry_size;
+    // Round up to a multiple of 64 so aligned_alloc's contract is met.
+    size_t rounded = (bytes + 63u) & ~(size_t)63u;
+    void *p = NULL;
+    if (posix_memalign(&p, 64, rounded) != 0) return NULL;
+    return p;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 #define MAX_SYMBOL_VALUE 65535
@@ -118,6 +149,20 @@ static inline uint32_t bit_reader_get_bits_fast(bit_reader_t *br, uint8_t n) {
 static inline uint32_t bit_reader_get_bits(bit_reader_t *br, uint8_t n) {
     if (n == 0 || br->bits_read >= 64) return 0;
     return bit_reader_get_bits_fast(br, n);
+}
+
+// bit_reader_get_bits_nz is the branchless equivalent of bit_reader_get_bits
+// for the hot inner loop, where bit_reader_fill_fast has already guaranteed
+// br->bits_read < 64. On AArch64 LSRV / x86-64 SHRX have defined identity
+// semantics when the shift count is zero (ARM ARM C6.2.176; Intel SDM Vol 2
+// SHRX). The mask table makes the n==0 case return 0 anyway, replacing the
+// "if (zero_bits)" hot-loop branch in fse_decompress_*_state.
+static inline uint32_t bit_reader_get_bits_nz(bit_reader_t *br, uint8_t n) {
+    uint64_t shifted = br->value << (br->bits_read & 63);
+    uint32_t v = (uint32_t)(shifted >> ((64 - n) & 63));
+    v &= nbits_mask32[n];
+    br->bits_read += n;
+    return v;
 }
 
 static inline int bit_reader_finished(bit_reader_t *br) {
@@ -327,8 +372,12 @@ static int fse_decompress_two_state(const uint8_t *data, size_t data_len,
                                     uint16_t *out, int count,
                                     dec_symbol_t *dt, uint8_t table_log,
                                     int zero_bits) {
+    (void)zero_bits;  // See fse_decompress_four_state: handled by mask-table
+                      // path in bit_reader_get_bits_nz.
     bit_reader_t br;
     if (bit_reader_init(&br, data, data_len) != 0) return -1;
+
+    dec_symbol_t *dt_a = (dec_symbol_t *)__builtin_assume_aligned(dt, 64);
 
     // Read initial states: A first (it was written last in the reversed stream)
     uint32_t stateA = bit_reader_get_bits_fast(&br, table_log);
@@ -337,60 +386,31 @@ static int fse_decompress_two_state(const uint8_t *data, size_t data_len,
     int remaining = count;
     int off = 0;
 
-    if (!zero_bits) {
-        while (br.off >= 8 && remaining >= 4) {
-            bit_reader_fill_fast(&br);
+    while (br.off >= 8 && remaining >= 4) {
+        bit_reader_fill_fast(&br);
 
-            dec_symbol_t nA0 = dt[stateA];
-            dec_symbol_t nB0 = dt[stateB];
-            uint32_t lowA0 = bit_reader_get_bits_fast(&br, nA0.nb_bits);
-            uint32_t lowB0 = bit_reader_get_bits_fast(&br, nB0.nb_bits);
-            stateA = nA0.new_state + lowA0;
-            stateB = nB0.new_state + lowB0;
+        dec_symbol_t nA0 = dt_a[stateA];
+        dec_symbol_t nB0 = dt_a[stateB];
+        uint32_t lowA0 = bit_reader_get_bits_nz(&br, nA0.nb_bits);
+        uint32_t lowB0 = bit_reader_get_bits_nz(&br, nB0.nb_bits);
+        stateA = nA0.new_state + lowA0;
+        stateB = nB0.new_state + lowB0;
 
-            bit_reader_fill_fast(&br);
+        bit_reader_fill_fast(&br);
 
-            dec_symbol_t nA1 = dt[stateA];
-            dec_symbol_t nB1 = dt[stateB];
-            uint32_t lowA1 = bit_reader_get_bits_fast(&br, nA1.nb_bits);
-            uint32_t lowB1 = bit_reader_get_bits_fast(&br, nB1.nb_bits);
-            stateA = nA1.new_state + lowA1;
-            stateB = nB1.new_state + lowB1;
+        dec_symbol_t nA1 = dt_a[stateA];
+        dec_symbol_t nB1 = dt_a[stateB];
+        uint32_t lowA1 = bit_reader_get_bits_nz(&br, nA1.nb_bits);
+        uint32_t lowB1 = bit_reader_get_bits_nz(&br, nB1.nb_bits);
+        stateA = nA1.new_state + lowA1;
+        stateB = nB1.new_state + lowB1;
 
-            out[off + 0] = nA0.symbol;
-            out[off + 1] = nB0.symbol;
-            out[off + 2] = nA1.symbol;
-            out[off + 3] = nB1.symbol;
-            off += 4;
-            remaining -= 4;
-        }
-    } else {
-        while (br.off >= 8 && remaining >= 4) {
-            bit_reader_fill_fast(&br);
-
-            dec_symbol_t nA0 = dt[stateA];
-            dec_symbol_t nB0 = dt[stateB];
-            uint32_t lowA0 = bit_reader_get_bits(&br, nA0.nb_bits);
-            uint32_t lowB0 = bit_reader_get_bits(&br, nB0.nb_bits);
-            stateA = nA0.new_state + lowA0;
-            stateB = nB0.new_state + lowB0;
-
-            bit_reader_fill_fast(&br);
-
-            dec_symbol_t nA1 = dt[stateA];
-            dec_symbol_t nB1 = dt[stateB];
-            uint32_t lowA1 = bit_reader_get_bits(&br, nA1.nb_bits);
-            uint32_t lowB1 = bit_reader_get_bits(&br, nB1.nb_bits);
-            stateA = nA1.new_state + lowA1;
-            stateB = nB1.new_state + lowB1;
-
-            out[off + 0] = nA0.symbol;
-            out[off + 1] = nB0.symbol;
-            out[off + 2] = nA1.symbol;
-            out[off + 3] = nB1.symbol;
-            off += 4;
-            remaining -= 4;
-        }
+        out[off + 0] = nA0.symbol;
+        out[off + 1] = nB0.symbol;
+        out[off + 2] = nA1.symbol;
+        out[off + 3] = nB1.symbol;
+        off += 4;
+        remaining -= 4;
     }
 
     // Tail: alternate A, B
@@ -783,8 +803,15 @@ static int fse_decompress_four_state(const uint8_t *data, size_t data_len,
                                      uint16_t *out, int count,
                                      dec_symbol_t *dt, uint8_t table_log,
                                      int zero_bits) {
+    (void)zero_bits;  // Unified inner loop: bit_reader_get_bits_nz handles
+                      // nb_bits==0 branchlessly via nbits_mask32[0]==0.
     bit_reader_t br;
     if (bit_reader_init(&br, data, data_len) != 0) return -1;
+
+    // The decode table is 64-byte-aligned (allocated via dec_table_alloc).
+    // Telling the compiler unlocks alignment-aware loads on AArch64 and lets
+    // x86-64 use AVX-friendly addressing modes.
+    dec_symbol_t *dt_a = (dec_symbol_t *)__builtin_assume_aligned(dt, 64);
 
     // Read initial states: A, B, (fill), C, (fill), D — mirrors Go decompress4State.
     uint32_t stateA = bit_reader_get_bits_fast(&br, table_log);
@@ -797,60 +824,31 @@ static int fse_decompress_four_state(const uint8_t *data, size_t data_len,
     int remaining = count;
     int off = 0;
 
-    if (!zero_bits) {
-        while (br.off >= 8 && remaining >= 4) {
-            bit_reader_fill_fast(&br);
+    while (br.off >= 8 && remaining >= 4) {
+        bit_reader_fill_fast(&br);
 
-            dec_symbol_t nA = dt[stateA];
-            dec_symbol_t nB = dt[stateB];
-            uint32_t lowA = bit_reader_get_bits_fast(&br, nA.nb_bits);
-            uint32_t lowB = bit_reader_get_bits_fast(&br, nB.nb_bits);
-            stateA = nA.new_state + lowA;
-            stateB = nB.new_state + lowB;
+        dec_symbol_t nA = dt_a[stateA];
+        dec_symbol_t nB = dt_a[stateB];
+        uint32_t lowA = bit_reader_get_bits_nz(&br, nA.nb_bits);
+        uint32_t lowB = bit_reader_get_bits_nz(&br, nB.nb_bits);
+        stateA = nA.new_state + lowA;
+        stateB = nB.new_state + lowB;
 
-            bit_reader_fill_fast(&br);
+        bit_reader_fill_fast(&br);
 
-            dec_symbol_t nC = dt[stateC];
-            dec_symbol_t nD = dt[stateD];
-            uint32_t lowC = bit_reader_get_bits_fast(&br, nC.nb_bits);
-            uint32_t lowD = bit_reader_get_bits_fast(&br, nD.nb_bits);
-            stateC = nC.new_state + lowC;
-            stateD = nD.new_state + lowD;
+        dec_symbol_t nC = dt_a[stateC];
+        dec_symbol_t nD = dt_a[stateD];
+        uint32_t lowC = bit_reader_get_bits_nz(&br, nC.nb_bits);
+        uint32_t lowD = bit_reader_get_bits_nz(&br, nD.nb_bits);
+        stateC = nC.new_state + lowC;
+        stateD = nD.new_state + lowD;
 
-            out[off + 0] = nA.symbol;
-            out[off + 1] = nB.symbol;
-            out[off + 2] = nC.symbol;
-            out[off + 3] = nD.symbol;
-            off += 4;
-            remaining -= 4;
-        }
-    } else {
-        while (br.off >= 8 && remaining >= 4) {
-            bit_reader_fill_fast(&br);
-
-            dec_symbol_t nA = dt[stateA];
-            dec_symbol_t nB = dt[stateB];
-            uint32_t lowA = bit_reader_get_bits(&br, nA.nb_bits);
-            uint32_t lowB = bit_reader_get_bits(&br, nB.nb_bits);
-            stateA = nA.new_state + lowA;
-            stateB = nB.new_state + lowB;
-
-            bit_reader_fill_fast(&br);
-
-            dec_symbol_t nC = dt[stateC];
-            dec_symbol_t nD = dt[stateD];
-            uint32_t lowC = bit_reader_get_bits(&br, nC.nb_bits);
-            uint32_t lowD = bit_reader_get_bits(&br, nD.nb_bits);
-            stateC = nC.new_state + lowC;
-            stateD = nD.new_state + lowD;
-
-            out[off + 0] = nA.symbol;
-            out[off + 1] = nB.symbol;
-            out[off + 2] = nC.symbol;
-            out[off + 3] = nD.symbol;
-            off += 4;
-            remaining -= 4;
-        }
+        out[off + 0] = nA.symbol;
+        out[off + 1] = nB.symbol;
+        out[off + 2] = nC.symbol;
+        out[off + 3] = nD.symbol;
+        off += 4;
+        remaining -= 4;
     }
 
     // Tail: drain remaining in A, B, C, D order.
@@ -923,7 +921,7 @@ int mic_decompress_two_state(const uint8_t *compressed, size_t compressed_len,
 
     // Build decode table
     uint32_t table_size = 1u << table_log;
-    dec_symbol_t *dt = (dec_symbol_t *)malloc(table_size * sizeof(dec_symbol_t));
+    dec_symbol_t *dt = (dec_symbol_t *)dec_table_alloc(table_size, sizeof(dec_symbol_t));
     if (!dt) return -3;
 
     if (build_dtable(norm, symbol_len, table_log, dt) != 0) {
@@ -995,7 +993,7 @@ int mic_decompress_two_state_simd(const uint8_t *compressed, size_t compressed_l
 
     // Build decode table
     uint32_t table_size = 1u << table_log;
-    dec_symbol_t *dt = (dec_symbol_t *)malloc(table_size * sizeof(dec_symbol_t));
+    dec_symbol_t *dt = (dec_symbol_t *)dec_table_alloc(table_size, sizeof(dec_symbol_t));
     if (!dt) return -3;
 
     if (build_dtable(norm, symbol_len, table_log, dt) != 0) {
@@ -1066,7 +1064,7 @@ static int parse_four_state_header(const uint8_t *compressed, size_t compressed_
         return -2;
 
     uint32_t table_size = 1u << *table_log_out;
-    dec_symbol_t *dt = (dec_symbol_t *)malloc(table_size * sizeof(dec_symbol_t));
+    dec_symbol_t *dt = (dec_symbol_t *)dec_table_alloc(table_size, sizeof(dec_symbol_t));
     if (!dt) return -3;
 
     if (build_dtable(norm, symbol_len, *table_log_out, dt) != 0) {

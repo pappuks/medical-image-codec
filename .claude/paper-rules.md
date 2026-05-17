@@ -241,3 +241,54 @@ section before using the acronym in results tables. Include:
 - Use colon (`:`) not em dash (`---`) as subtitle separator in table captions
 - Expand all abbreviations in table headers and footers (no "Gen.", "Part.", etc.)
 - "LOC" → "Source lines" in table headers
+
+---
+
+## 10. First-Submission Voice
+
+The paper is written for journal reviewers and readers who are seeing it
+for the first time. Internally we may iterate through many local
+revisions (v3, v6, v7, v8, ...) and may change reference platforms or
+benchmark code between iterations, but **the paper itself must read as if
+this is the first and only version**. Anything that betrays revision
+history must be removed before the file is sent for review.
+
+### Remove from prose, captions, and comments:
+
+- Inline file-header changelogs (e.g., "% Changes from v6: ...") — strip
+  the whole block; LaTeX source comments are still copied with the file
+  and reviewers can see them.
+- Phrases that reference a prior measurement run: "previously 13/21 on
+  M2 Max", "the +68% gain reported on M2 Max in v6", "have not been
+  refreshed for the M4 Pro reference platform", "rose from 1,418 to
+  2,403 MB/s between platforms".
+- Phrases that reference upcoming work as "next revision": prefer "left
+  to future work" or list under the Future Work paragraph.
+- Words that imply a timeline relative to a prior version: "today",
+  "now" (when contrasting with an earlier state), "currently"
+  (when implying the value will change in a later revision), "refresh",
+  "carried over from v6".
+- Cross-version comparisons between reference platforms (M2 Max vs
+  M4 Pro, old vs new Intel chip, etc.). Identify the platform a number
+  was measured on, but do not narrate the upgrade.
+
+### Keep:
+
+- A single clean platform identification per measurement section, e.g.
+  "Apple M4 Pro (14-core ARM64)" for the C/Go benchmarks and "Apple
+  M2 Max (12-core ARM64), Node.js v24.8" for the JavaScript section. If
+  different sub-sections used different hardware, list each as a fact
+  in its own section without flagging the inconsistency.
+- "Prior work" references to the published literature — that is the
+  standard academic meaning and is not a self-version reference.
+- Future Work bullets that describe extensions (e.g., "extend the
+  JavaScript decoder evaluation to the AMD64 platform"). These look
+  forward and do not imply a prior version.
+
+### Quick checklist before submission
+
+1. `grep -n "v[0-9]" mic-paper-*.tex` — any hit other than `\$x\_L\$`
+   style math or platform-version (e.g. `Node.js v24.8`) is suspect.
+2. `grep -in "previous\|earlier\|refresh\|next revision\|in v6\|in v7\|in v8"` — should return nothing in prose.
+3. `grep -n "M2 Max\|M4 Pro"` — every hit should be a clean platform
+   disclosure, never a contrast between the two.

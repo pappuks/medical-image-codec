@@ -165,12 +165,31 @@ This map must be kept in sync with `run-paper-benchmarks.sh` and
 
 | Paper table | LaTeX label | Source benchmark(s) | Output file | Parallelism |
 |---|---|---|---|---|
-| Table 1 — Compression ratios | `tab:ratios` | `BenchmarkAllCodecs` (ratio metric) + `BenchmarkDeltaZstdDecompress` (zstd-19 column) + `BenchmarkWaveletV2SIMDRLEFSECompress` (wavelet column) | `01-…`, `05-…`, `06-…` | Serial |
-| Table 2 — AMD64 encoding | `tab:enc-amd64` | `BenchmarkAllCodecsEncode` | `02-…` | Serial |
-| Table 3 — ARM64 encoding | `tab:enc-arm64-full` | `BenchmarkAllCodecsEncode` | `02-…` | Serial |
-| Table 4 — ARM64 decoding | `tab:decomp-arm` | `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…`, `06-…` | Serial |
-| Table 5 — AMD64 decoding | `tab:decomp-amd64` | `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…`, `06-…` | Serial |
+| Table 1 — Compression ratios | `tab:ratios` | `BenchmarkAllCodecs` (ratio metric) + `BenchmarkMICCDeltaZstdDecomp` (zstd-19 column) + `BenchmarkWaveletV2SIMDRLEFSECompress` (wavelet column) | `01-…`, `05a-…`, `06-…` | Serial |
+| Table 2 — AMD64 encoding | `tab:enc-amd64` | `BenchmarkAllCodecsEncode` + `BenchmarkMICCDeltaZstdEnc` | `02-…`, `05b-…` | Serial |
+| Table 3 — ARM64 encoding | `tab:enc-arm64-full` | `BenchmarkAllCodecsEncode` + `BenchmarkMICCDeltaZstdEnc` | `02-…`, `05b-…` | Serial |
+| Table 4 — ARM64 decoding | `tab:decomp-arm` | `BenchmarkAllCodecs` + `BenchmarkMICCDeltaZstdDecomp` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…`, `05a-…`, `06-…` | Serial |
+| Table 5 — AMD64 decoding | `tab:decomp-amd64` | `BenchmarkAllCodecs` + `BenchmarkMICCDeltaZstdDecomp` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…`, `05a-…`, `06-…` | Serial |
 | Table 6 — FSE 1-state vs 4-state | `tab:fse-combined` | `BenchmarkFSEDecompress` + `BenchmarkFSEDecompress4State` | `03-…`, `04-…` | **Parallel** |
+
+### Delta+Zstd-19 source-of-truth
+
+Both the ratio column in Table 1 and the throughput rows in Tables 2/3/4/5
+for the **Delta+Zstandard-19 baseline** come from `BenchmarkMICCDeltaZstdDecomp`
+and `BenchmarkMICCDeltaZstdEnc` in
+[`ojph/delta_zstd_micc_test.go`](../ojph/delta_zstd_micc_test.go) (build
+tags `cgo_ojph cgo_zstd`). These call libzstd **in-process via CGO** so
+they are apples-to-apples with the MIC-4state-C numbers (also in-process
+C). The older `BenchmarkDeltaZstdDecompress` in `comparison_test.go` shells
+out to the `zstd` CLI via `exec.Command` and includes subprocess launch
+overhead — it is **not** the source of paper numbers; treat it as a
+sanity-check fallback only.
+
+Throughput here is meant to be the C-vs-C comparison the paper actually
+needs: MIC's four-state C decoder vs in-process libzstd. The pure-Go-MIC
+vs in-process-libzstd variant in `zstd/delta_zstd_bench_test.go` is for
+the codec design discussion (and shows the structural cost of using a
+pure-Go decoder), not for paper-table numbers.
 
 Any other benchmark in the repo (e.g. `BenchmarkDeltaRLEFSECompress`,
 `BenchmarkRANSDecompress8State`, `BenchmarkPICSVsAllCodecs`,
@@ -190,13 +209,28 @@ brew install openjph charls         # Apple Silicon: /opt/homebrew
 # Linux:  apt install libopenjph-dev libcharls-dev   (or build from source)
 ```
 
-`run-paper-benchmarks.sh` preflights the cgo build and fails fast with a
+`BenchmarkMICCDeltaZstdDecomp` and `BenchmarkMICCDeltaZstdEnc` additionally
+require the `cgo_zstd` tag and libzstd:
+
+```bash
+brew install zstd                   # Apple Silicon: /opt/homebrew
+# Linux:  apt install libzstd-dev
+```
+
+The combined tag set is `-tags "cgo_ojph cgo_zstd"`. The CGO wrappers live
+in `zstd/zstd.go` (libzstd bindings) and `ojph/delta_zstd_micc_test.go`
+(the MIC-C vs Δ+Zstd-19 comparison driver).
+
+`run-paper-benchmarks.sh` preflights both cgo builds and fails fast with a
 helpful message. If the preflight fails, fix the install — do not skip the
-cgo benchmarks and submit a paper with empty HTJ2K/JPEG-LS columns.
+cgo benchmarks and submit a paper with empty HTJ2K/JPEG-LS/Δ+Zstd columns.
 
 The `ojph/ojph.go` and `ojph/charls.go` files include
 `-I/opt/homebrew/include` / `-L/opt/homebrew/lib` for macOS. On Linux you may
-need to add `-I/usr/local/include` / `-L/usr/local/lib` instead.
+need to add `-I/usr/local/include` / `-L/usr/local/lib` instead. The
+`zstd/zstd.go` file follows the same convention plus an
+`-I/opt/homebrew/opt/zstd/include` path because Homebrew installs zstd as
+a keg-only formula on some configurations.
 
 ---
 
