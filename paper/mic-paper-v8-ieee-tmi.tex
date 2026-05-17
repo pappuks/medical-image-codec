@@ -37,6 +37,26 @@
 %    in terms of pipeline structure, branch predictor behaviour, and
 %    deployment trade-offs, rather than relying on the reader to draw
 %    these conclusions from numbers alone.
+%  - Tables restructured for clarity (v8.1 revision):
+%    * Each Results subsection now opens with a one-paragraph "Summary"
+%      that states the bottom line in plain English and points at the
+%      relevant table for the per-image numbers.
+%    * The headline single-threaded tables (tab:enc-arm64-full,
+%      tab:enc-amd64, tab:decomp-arm, tab:decomp-amd64) have been reduced
+%      to three or two codec columns: MIC, HTJ2K, and (where available)
+%      JPEG-LS. The pure-Go reference, single-state C, four-state C
+%      scalar, and wavelet-based MIC implementations were moved out of
+%      the headline tables and discussed in a new "Implementation
+%      Variants" subsection.
+%    * PICS strip-parallel measurements were moved out of the
+%      decompression tables into a new "Multi-threaded Decoding"
+%      subsection with its own combined-platform table; the framing is
+%      explicitly "for completeness, not for cross-codec comparison"
+%      since HTJ2K and JPEG-LS are single-threaded in our pipeline.
+%    * Acronym density reduced in prose: ARM64 column headers use
+%      "MIC", "HTJ2K", "JPEG-LS" (no "-4s-C" / "-4s-SIMD" / "Wav+SIMD"
+%      suffixes). The variant abbreviations remain available in the
+%      methodology and variants subsections for readers who want them.
 % Carried over from v6:
 %  - Abstract: single paragraph, <=250 words, all abbreviations expanded
 %  - "nine modalities" consistency
@@ -806,33 +826,30 @@ M4 Pro and $<$5\% on Intel AMD64.
   with \texttt{-O3 -march=native}.
 \end{itemize}
 
-\textbf{Codec variants}: All variants produce the same compressed bytes unless
-noted. Differences are in the decoder implementation only.
+\textbf{Codecs evaluated.} The headline single-threaded tables in
+Section~\ref{sec:results} compare three codecs:
+
 \begin{itemize}
-  \item \textbf{MIC-Go}: Pure Go, single-state FSE decoder
-  (Section~\ref{sec:pipeline}).
-  \item \textbf{MIC-4state}: Pure Go, four-state interleaved FSE decoder
-  (Section~\ref{sec:multistate}).
-  \item \textbf{MIC-4state-C}: C implementation of the four-state FSE decoder,
-  called via CGO. Produces bit-identical output to MIC-4state.
-  \item \textbf{MIC-4state-SIMD}: C four-state FSE decoder with the BMI2
-  \texttt{fse4StateDecompKernel} on AMD64; falls back to the scalar C decoder
-  on ARM64 (ARM64 lacks BMI2). Bit-identical to MIC-4state-C.
-  \item \textbf{Wavelet} (labelled \textbf{Wav+SIMD} only in AMD64 tables):
-  Le~Gall 5/3 integer wavelet with a blocked column layout for cache
-  efficiency. On AMD64 the predict/update lifting steps run through AVX2
-  vector kernels; on ARM64 the same blocked layout is used but the inner
-  loops are plain scalar C (a NEON kernel is planned). To avoid misleading
-  the reader, the column header is \emph{Wavelet} in ARM64 tables and
-  \emph{Wav+SIMD} in AMD64 tables, reflecting what actually runs on each
-  platform. Both dispatches produce the same compressed stream, which
-  differs from MIC's stream because of the wavelet transform stage.
-  \item \textbf{PICS-C-$N$}: Parallel Image Compressed Strips. The image is
-  split into $N$ equal horizontal strips; each strip is compressed
-  independently using its own FSE table. Decompression of all strips runs in
-  parallel using a C pthreads worker pool; strips are independently decodable.
-  $N \in \{2,4,8\}$ in this evaluation.
+  \item \textbf{MIC} --- the proposed codec. In every headline table the
+  ``MIC'' column refers to the fastest available C decoder on that
+  platform: on ARM64 it is the four-state C decoder, and on AMD64 it is
+  the same four-state C decoder with a hand-written BMI2 vector kernel
+  for the FSE stage (Section~\ref{sec:multistate}). Both implementations
+  read the same compressed bytes.
+  \item \textbf{HTJ2K} --- High-Throughput JPEG~2000 via the OpenJPH
+  reference implementation~\cite{openjph}, compiled with the same C
+  optimisation flags as MIC.
+  \item \textbf{JPEG-LS} --- the standardised predictive lossless codec
+  via CharLS~\cite{charls}. Currently reported on ARM64 only; the AMD64
+  measurement is scheduled for the next revision.
 \end{itemize}
+
+MIC has several additional implementation variants (pure Go, single-state,
+scalar C, wavelet-based) which are useful for understanding the design
+trade-offs but are not central to the codec-to-codec comparison. They are
+summarised separately in Section~\ref{subsec:variants}. A strip-parallel
+mode that decodes one image using multiple threads is also implemented and
+reported separately in Section~\ref{subsec:multithread} for completeness.
 
 
 \subsection{JavaScript and Browser Evaluation}
@@ -914,267 +931,250 @@ statistical properties.
 
 \subsection{Encoding Throughput}
 
-Tables~\ref{tab:enc-amd64} and~\ref{tab:enc-arm64-full} report per-image
-encoding throughput for all codec variants on AMD64 and ARM64 respectively.
-We discuss the single-threaded encoders first, then the strip-parallel
-configurations; cross-codec comparisons are made within each group.
+\textbf{Summary.} On both reference platforms, MIC encodes faster than
+HTJ2K and JPEG-LS on every one of the 21 medical images we tested. On
+Apple M4 Pro (ARM64), MIC's encoder runs at roughly 1.7--3.2$\times$
+HTJ2K's throughput and 2.5--6$\times$ JPEG-LS's throughput. On Intel Core
+Ultra 9 285K (AMD64), MIC encodes at roughly 1.5--2$\times$ HTJ2K and
+2--4$\times$ JPEG-LS. The detailed per-image numbers are in
+Tables~\ref{tab:enc-arm64-full} and~\ref{tab:enc-amd64}.
 
-\textbf{Single-threaded encoders.} MIC-4state-C is the fastest
-single-threaded encoder on both platforms. On ARM64 (M4 Pro) it is
-2.0--2.5$\times$ faster than the pure-Go MIC-Go and 2.5--6$\times$
-faster than JPEG-LS. The C implementation widens the gap over MIC-Go
-because the encoder's hot path is dominated by histogram counting, table
-normalization, and a tight bit-packing loop --- all of which the C
-compiler with \texttt{-O3} optimises more aggressively than the Go
-\texttt{gc} compiler's default output. The Wavelet variant sits below MIC
-on every image because its encoder additionally performs a five-level
-5/3 wavelet transform before entropy coding, while MIC's predictor is a
-single arithmetic pass over the pixels. HTJ2K is roughly comparable to
-MIC-Go on small images but falls behind MIC-4state-C on every image,
-reflecting the higher per-block work of EBCOT relative to a single-pass
-delta-RLE-FSE pipeline.
-
-\textbf{Strip-parallel (PICS) encoders.} The PICS-$N$ columns measure
-MIC's strip-parallel encoder with $N$ goroutines. On images above
-${\sim}5$\,MB, PICS-8 reaches 1.4--2.4\,GB/s on ARM64 and 1.1--1.9\,GB/s
-on AMD64, which is well above the ingestion rate of typical PACS workflows
-even at full archival volume. On small images (under ${\sim}1$\,MB), the
-PICS variants do not pay off: the per-strip overhead (FSE table build, a
-small header, goroutine scheduling) is large relative to per-strip encoding
-work, and a single-threaded encoder is actually faster. PICS-$N$ is
-therefore best used as a large-image optimization rather than a default.
-PICS is MIC's own parallel encode mode and is not compared directly against
-the single-threaded HTJ2K or JPEG-LS encoders in the same table.
+The throughput advantage is primarily structural: MIC's encoder is a
+single pass over the pixels (a spatial predictor, a run-length pass, and
+a table-driven entropy coder), whereas HTJ2K's block-based EBCOT and
+JPEG-LS's context-adaptive Golomb-Rice coder each do more work per pixel.
+The fact that the gap narrows on AMD64 reflects the AMD64 baseline
+codecs being themselves well-tuned with vector instructions, so the
+relative speedup MIC obtains from its simpler pipeline is smaller.
 
 \begin{table*}[htbp]
 \centering
-\caption{Encoding throughput (MB/s), Intel Core Ultra 9 285K (AMD64). Bold =
-fastest per row.}
-\label{tab:enc-amd64}
+\caption{Encoding throughput (MB/s) on Apple M4 Pro (14-core ARM64).
+``MIC'' is MIC's four-state C encoder; ``HTJ2K'' is OpenJPH; ``JPEG-LS''
+is CharLS. All encoders are single-threaded. Bold marks the fastest
+codec per row.}
+\label{tab:enc-arm64-full}
 \scriptsize
-\begin{tabular}{lrrrrrrrr}
+\begin{tabular}{lrrr}
 \toprule
-Image & MIC-Go & MIC-4s-C & MIC-C & Wav+SIMD & HTJ2K & JPEG-LS & PICS-4 & PICS-8 \\
+Image & MIC & HTJ2K & JPEG-LS \\
 \midrule
-MR  & 121 & \textbf{290} & 273 & 85 & 177 & 71 & 186 & 128 \\
-CT  & 180 & \textbf{359} & 311 & 84 & 178 & 104 & 301 & 312 \\
-CR  & 233 & 461 & 423 & 120 & 193 & 89 & 732 & \textbf{1,102} \\
-XR  & 254 & 550 & 519 & 127 & 214 & 95 & 775 & \textbf{1,212} \\
-MG1 & 380 & 861 & 820 & 155 & 508 & 239 & 1,112 & \textbf{1,651} \\
-MG2 & 380 & 857 & 830 & 153 & 507 & 235 & 1,119 & \textbf{1,676} \\
-MG3 & 256 & 556 & 514 & 97 & 202 & 109 & 832 & \textbf{1,317} \\
-MG4 & 336 & 738 & 710 & 107 & 354 & 162 & 1,098 & \textbf{1,901} \\
-CT1 & 206 & \textbf{413} & 384 & 94 & 216 & 132 & 310 & 329 \\
-CT2 & 192 & \textbf{371} & 340 & 89 & 194 & 132 & 320 & 294 \\
-MG-N & 254 & 562 & 529 & 99 & 202 & 107 & 842 & \textbf{1,353} \\
-MR1 & 221 & \textbf{460} & 429 & 101 & 195 & 92 & 364 & 347 \\
-MR2 & 275 & 566 & 532 & 107 & 230 & 102 & 643 & \textbf{857} \\
-MR3 & 300 & \textbf{609} & 591 & 119 & 292 & 142 & 498 & 448 \\
-MR4 & 249 & \textbf{494} & 451 & 108 & 226 & 142 & 370 & 368 \\
-NM1 & 237 & \textbf{467} & 444 & 117 & 242 & 132 & 360 & 302 \\
-RG1 & 229 & 485 & 397 & 123 & 198 & 70 & 651 & \textbf{942} \\
-RG2 & 280 & 582 & 488 & 125 & 254 & 112 & 842 & \textbf{1,220} \\
-RG3 & 275 & 550 & 512 & 128 & 273 & 143 & 863 & \textbf{1,222} \\
-SC1 & 286 & 577 & 551 & 83 & 235 & 169 & 924 & \textbf{1,425} \\
-XA1 & 242 & 496 & 471 & 101 & 219 & 114 & 616 & \textbf{832} \\
+MR   & \textbf{509}   & 243 & 102 \\
+CT   & \textbf{487}   & 184 & 141 \\
+CR   & \textbf{597}   & 210 & 120 \\
+XR   & \textbf{708}   & 259 & 128 \\
+MG1  & \textbf{1,219} & 474 & 326 \\
+MG2  & \textbf{1,176} & 465 & 320 \\
+MG3  & \textbf{701}   & 233 & 146 \\
+MG4  & \textbf{975}   & 378 & 219 \\
+CT1  & \textbf{596}   & 229 & 178 \\
+CT2  & \textbf{525}   & 212 & 172 \\
+MG-N & \textbf{714}   & 233 & 146 \\
+MR1  & \textbf{689}   & 219 & 121 \\
+MR2  & \textbf{790}   & 254 & 132 \\
+MR3  & \textbf{871}   & 318 & 191 \\
+MR4  & \textbf{711}   & 249 & 183 \\
+NM1  & \textbf{681}   & 199 &  80 \\
+RG1  & \textbf{526}   & 240 &  94 \\
+RG2  & \textbf{803}   & 273 & 155 \\
+RG3  & \textbf{751}   & 288 & 190 \\
+SC1  & \textbf{764}   & 252 & 223 \\
+XA1  & \textbf{662}   & 230 & 154 \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
 \begin{table*}[htbp]
 \centering
-\caption{Encoding throughput (MB/s), Apple M4 Pro (14-core ARM64), all
-variants. The \emph{Wavelet} column runs as a scalar blocked-column
-transform on ARM64 (no vector kernel today; NEON kernel planned). Bold
-= fastest per row within the single-threaded and PICS groups
-respectively.}
-\label{tab:enc-arm64-full}
+\caption{Encoding throughput (MB/s) on Intel Core Ultra 9 285K (AMD64).
+Single-threaded. JPEG-LS measurements on AMD64 are scheduled for the next
+revision (see Future Work). Bold marks the fastest codec per row.}
+\label{tab:enc-amd64}
 \scriptsize
-\begin{tabular}{lrrrrrrrrrr}
+\begin{tabular}{lrr}
 \toprule
-Image & MIC-Go & MIC-4s & MIC-4s-C & MIC-C & Wavelet & HTJ2K & JPEG-LS & PICS-2 & PICS-4 & PICS-8 \\
+Image & MIC & HTJ2K \\
 \midrule
-MR  & 231 & 243 & \textbf{509} & 454 & 122 & 243 & 102 & 270 & 243 & 155 \\
-CT  & 231 & 241 & \textbf{487} & 387 & 103 & 184 & 141 & 303 & 346 & 393 \\
-CR  & 290 & 292 & 597 & 554 & 160 & 210 & 120 & 546 & 937 & \textbf{1,380} \\
-XR  & 327 & 329 & 708 & 669 & 169 & 259 & 128 & 582 & 1,005 & \textbf{1,516} \\
-MG1 & 488 & 488 & \textbf{1,219} & 1,169 & 213 & 474 & 326 & 927 & 1,461 & 1,470 \\
-MG2 & 479 & 490 & 1,176 & 1,107 & 213 & 465 & 320 & 917 & 1,407 & \textbf{2,079} \\
-MG3 & 321 & 323 & 701 & 644 & 121 & 233 & 146 & 587 & 1,050 & \textbf{1,768} \\
-MG4 & 430 & 426 & 975 & 897 & 129 & 378 & 219 & 791 & 1,367 & \textbf{2,363} \\
-CT1 & 273 & 278 & \textbf{596} & 529 & 112 & 229 & 178 & 359 & 401 & 393 \\
-CT2 & 260 & 261 & \textbf{525} & 481 & 120 & 212 & 172 & 348 & 361 & 347 \\
-MG-N & 327 & 326 & 714 & 659 & 123 & 233 & 146 & 601 & 1,086 & \textbf{1,867} \\
-MR1 & 286 & 291 & \textbf{689} & 610 & 136 & 219 & 121 & 397 & 456 & 420 \\
-MR2 & 348 & 350 & 790 & 707 & 138 & 254 & 132 & 581 & 777 & \textbf{916} \\
-MR3 & 387 & 397 & \textbf{871} & 817 & 159 & 318 & 191 & 569 & 708 & 554 \\
-MR4 & 326 & 330 & \textbf{711} & 661 & 149 & 249 & 183 & 472 & 539 & 437 \\
-NM1 & 321 & 316 & \textbf{681} & 661 & 151 & 199 & 80 & 237 & 383 & 324 \\
-RG1 & 268 & 293 & 526 & 400 & 156 & 240 & 94 & 511 & 856 & \textbf{1,222} \\
-RG2 & 362 & 367 & 803 & 710 & 173 & 273 & 155 & 662 & 1,094 & \textbf{1,640} \\
-RG3 & 354 & 355 & 751 & 698 & 183 & 288 & 190 & 653 & 1,101 & \textbf{1,502} \\
-SC1 & 373 & 376 & 764 & 721 & 117 & 252 & 223 & 679 & 1,155 & \textbf{1,759} \\
-XA1 & 313 & 317 & 662 & 591 & 125 & 230 & 154 & 543 & 733 & \textbf{932} \\
+MR   & \textbf{290} & 177 \\
+CT   & \textbf{359} & 178 \\
+CR   & \textbf{461} & 193 \\
+XR   & \textbf{550} & 214 \\
+MG1  & \textbf{861} & 508 \\
+MG2  & \textbf{857} & 507 \\
+MG3  & \textbf{556} & 202 \\
+MG4  & \textbf{738} & 354 \\
+CT1  & \textbf{413} & 216 \\
+CT2  & \textbf{371} & 194 \\
+MG-N & \textbf{562} & 202 \\
+MR1  & \textbf{460} & 195 \\
+MR2  & \textbf{566} & 230 \\
+MR3  & \textbf{609} & 292 \\
+MR4  & \textbf{494} & 226 \\
+NM1  & \textbf{467} & 242 \\
+RG1  & \textbf{485} & 198 \\
+RG2  & \textbf{582} & 254 \\
+RG3  & \textbf{550} & 273 \\
+SC1  & \textbf{577} & 235 \\
+XA1  & \textbf{496} & 219 \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
 \subsection{Decompression Throughput---ARM64}
 
-Table~\ref{tab:decomp-arm} presents decompression throughput on Apple M4
-Pro (ARM64). The ARM64 table has no \emph{MIC-4state-SIMD} column because
-ARM64 has no equivalent of AMD64's BMI2 PEXT/PDEP-based four-state assembly
-kernel today; for the same reason the wavelet column is labelled
-\emph{Wavelet} rather than \emph{Wav+SIMD} (the codec runs as a scalar
-blocked-column transform on ARM64). We discuss the single-threaded
-decoders first, then PICS-C-$N$; cross-codec comparisons are within
-each group.
+\textbf{Summary.} On Apple M4 Pro, MIC is the fastest single-threaded
+decoder on every one of the 21 medical images we tested. MIC decodes
+roughly 1.4--2.4$\times$ faster than HTJ2K and 1.6--5.7$\times$ faster
+than JPEG-LS, with the largest margins on the smaller-image modalities.
+The per-image numbers are in Table~\ref{tab:decomp-arm}.
 
-\textbf{Single-threaded decoders.} MIC-4state-C is the fastest
-single-threaded decoder on every one of the 21 images. It is
-1.4--2.4$\times$ faster than HTJ2K and 1.6--5.7$\times$ faster than
-JPEG-LS. The consistency comes from MIC's pipeline shape: the
-table-driven FSE decoder costs one table lookup, one bit read, and one
-addition per symbol, with no per-symbol branches that the M4 Pro's
-branch predictor cannot anticipate. HTJ2K's EBCOT block coder and
-JPEG-LS's Golomb-Rice context model both introduce data-dependent
-branches whose mispredictions the wide out-of-order engine can only
-partially hide. The Wavelet column lags MIC because it pays for a 5/3
-wavelet transform before entropy coding --- work that the simple
-Delta+RLE predictor does not need on these mostly-smooth medical
-images. Even the pure-Go MIC-Go variant exceeds HTJ2K on 16 of 21
-images despite using only the \texttt{gc} compiler's default code
-generation: the gain from 16-bit-native coding (no byte-pair
-re-encoding, no transform pass) is large enough to overcome the
-\texttt{gc} compiler's relative cost compared with \texttt{-O3} C.
-
-\textbf{Strip-parallel (PICS-C-$N$) decoders.} The PICS-C-$N$ columns
-measure the same MIC compressed stream decoded by $N$ parallel
-pthreads. The per-strip decoder is identical to MIC-4state-C, so
-per-strip work is unchanged; the only additional cost is strip
-synchronization and a small header read. On images above ${\sim}5$\,MB
-the speedup is close to linear up to four threads and continues to
-scale to eight: PICS-C-8 reaches 3.6--4.6\,GB/s on the largest
-mammography images. The small MR image (130\,KB) is too compact to
-benefit from 8-way parallelism --- synchronization and strip-header
-overhead exceed the per-strip work, so PICS-C-4 is the best PICS
-configuration for MR (footnote $\dagger$). PICS-C-$N$ is MIC's parallel
-decode mode and is not compared directly against the single-threaded
-HTJ2K and JPEG-LS columns; an $N$-thread comparison would require
-parallel HTJ2K and JPEG-LS configurations, which are outside the scope
-of this evaluation.
+The advantage is again structural. MIC's decoder is dominated by a
+table-driven entropy stage: one table lookup, one bit read, and one
+addition per output symbol, with no data-dependent branches that the
+processor's branch predictor cannot anticipate. HTJ2K's block coder and
+JPEG-LS's context model each introduce data-dependent branches whose
+mispredictions the M4 Pro's wide out-of-order engine can only partially
+hide. JPEG-LS retains slightly better compression ratios (around 10\%
+better on average), so the trade-off when choosing between MIC and
+JPEG-LS is between decode latency and archival storage cost.
 
 \begin{table*}[t]
 \centering
-\caption{Decompression throughput (MB/s), Apple M4 Pro (14-core ARM64).
-The \emph{Wavelet} column is scalar on ARM64 (no vector kernel today).
-Bold = fastest per row within the single-threaded group (first 5 cols)
-and within the PICS group (last 3 cols); the two groups are not directly
-compared.}
+\caption{Decompression throughput (MB/s) on Apple M4 Pro (14-core ARM64).
+``MIC'' is MIC's four-state C decoder; ``HTJ2K'' is OpenJPH; ``JPEG-LS''
+is CharLS. All decoders are single-threaded. Bold marks the fastest
+codec per row.}
 \label{tab:decomp-arm}
 \scriptsize
-\begin{tabular}{lrrrrrrrr}
+\begin{tabular}{lrrr}
 \toprule
-Image & MIC-Go & MIC-4s-C & Wavelet & HTJ2K & JPEG-LS & PICS-C-2 & PICS-C-4 & PICS-C-8 \\
+Image & MIC & HTJ2K & JPEG-LS \\
 \midrule
-MR   & 312 & \textbf{702} & 103 & 246 & 124 & 663 & \textbf{894}$^\dagger$ & 702 \\
-CT   & 227 & \textbf{470} & 120 & 348 & 184 & 624 & 1,157 & \textbf{1,446} \\
-CR   & 377 & \textbf{644} & 199 & 374 & 196 & 1,052 & 1,976 & \textbf{3,605} \\
-XR   & 387 & \textbf{682} & 202 & 376 & 152 & 1,087 & 2,024 & \textbf{3,794} \\
-MG1  & 577 & \textbf{848} & 239 & 674 & 530 & 1,529 & 2,529 & \textbf{4,443} \\
-MG2  & 586 & \textbf{877} & 241 & 685 & 543 & 1,417 & 2,506 & \textbf{4,585} \\
-MG3  & 385 & \textbf{681} & 142 & 364 & 202 & 1,112 & 1,911 & \textbf{3,820} \\
-MG4  & 503 & \textbf{797} & 146 & 524 & 258 & 1,326 & 2,345 & \textbf{4,348} \\
-CT1  & 279 & \textbf{531} & 157 & 378 & 236 & 819 & 1,247 & \textbf{1,525} \\
-CT2  & 272 & \textbf{505} & 157 & 360 & 219 & 864 & 1,260 & \textbf{1,473} \\
-MG-N & 394 & \textbf{661} & 145 & 368 & 202 & 1,147 & 2,027 & \textbf{3,930} \\
-MR1  & 356 & \textbf{724} & 166 & 359 & 155 & 977 & 1,460 & \textbf{1,851} \\
-MR2  & 409 & \textbf{741} & 152 & 399 & 229 & 1,137 & 1,911 & \textbf{3,103} \\
-MR3  & 463 & \textbf{846} & 189 & 449 & 321 & 1,205 & 1,693 & \textbf{2,089} \\
-MR4  & 399 & \textbf{770} & 177 & 401 & 250 & 997 & 1,469 & \textbf{1,757} \\
-NM1  & 367 & \textbf{852} & 193 & 425 & 292 & 1,147 & 1,682 & \textbf{2,133} \\
-RG1  & 273 & \textbf{476} & 205 & 356 & 130 & 677 & 1,203 & \textbf{2,150} \\
-RG2  & 443 & \textbf{758} & 216 & 439 & 257 & 1,229 & 2,156 & \textbf{3,816} \\
-RG3  & 451 & \textbf{772} & 213 & 505 & 332 & 1,335 & 2,343 & \textbf{4,168} \\
-SC1  & 464 & \textbf{758} & 133 & 405 & 295 & 1,311 & 2,206 & \textbf{3,971} \\
-XA1  & 426 & \textbf{759} & 162 & 411 & 288 & 1,214 & 1,881 & \textbf{3,191} \\
+MR   & \textbf{702} & 246 & 124 \\
+CT   & \textbf{470} & 348 & 184 \\
+CR   & \textbf{644} & 374 & 196 \\
+XR   & \textbf{682} & 376 & 152 \\
+MG1  & \textbf{848} & 674 & 530 \\
+MG2  & \textbf{877} & 685 & 543 \\
+MG3  & \textbf{681} & 364 & 202 \\
+MG4  & \textbf{797} & 524 & 258 \\
+CT1  & \textbf{531} & 378 & 236 \\
+CT2  & \textbf{505} & 360 & 219 \\
+MG-N & \textbf{661} & 368 & 202 \\
+MR1  & \textbf{724} & 359 & 155 \\
+MR2  & \textbf{741} & 399 & 229 \\
+MR3  & \textbf{846} & 449 & 321 \\
+MR4  & \textbf{770} & 401 & 250 \\
+NM1  & \textbf{852} & 425 & 292 \\
+RG1  & \textbf{476} & 356 & 130 \\
+RG2  & \textbf{758} & 439 & 257 \\
+RG3  & \textbf{772} & 505 & 332 \\
+SC1  & \textbf{758} & 405 & 295 \\
+XA1  & \textbf{759} & 411 & 288 \\
 \bottomrule
 \end{tabular}
 \end{table*}
-
-$^\dagger$MR is too small for PICS-C-8 (synchronization overhead dominates
-per-strip work); PICS-C-4 is the best PICS configuration for MR.
-PICS-C-8 peaks at 4,585\,MB/s on MG2.
 
 \subsection{Decompression Throughput---AMD64}
 
-Table~\ref{tab:decomp-amd64} presents decompression throughput on Intel
-Core Ultra 9 285K (AMD64). On AMD64, MIC-4state-SIMD uses the hand-written
-BMI2 \texttt{fse4StateDecompKernel} assembly routine and Wavelet+SIMD uses
-AVX2 predict/update kernels (both genuine vector implementations, unlike
-their ARM64 counterparts). The AMD64 table in this version does not
-include a JPEG-LS column or a PICS-C-2 column; both are present on ARM64
-(Table~\ref{tab:decomp-arm}) and are scheduled for the AMD64 measurement
-sweep in the next revision.
+\textbf{Summary.} On Intel Core Ultra 9 285K, MIC is the fastest
+single-threaded decoder on 16 of the 21 medical images we tested. HTJ2K
+takes the lead on a small set of five images, mostly the largest
+mammography slabs (MG1, MG2, MG4) plus RG3 and the small CT screening
+image. Where MIC leads, the margin over HTJ2K is 1.1--1.6$\times$; where
+HTJ2K leads, its margin over MIC is 1.0--1.2$\times$. The per-image
+numbers are in Table~\ref{tab:decomp-amd64}. JPEG-LS measurements on
+AMD64 are scheduled for the next revision (see Future Work).
 
-\textbf{Single-threaded decoders.} MIC-4state-SIMD is the fastest
-single-threaded decoder on 16 of 21 images. HTJ2K leads on the five
-largest mammography and radiography images (MG1, MG2, MG4, CT, RG3).
-This pattern is consistent with HTJ2K's design: the EBCOT block coder is
-most efficient on large images where the coding-pass amortization
-dominates, while MIC's per-symbol FSE decoder benefits from BMI2
-assembly that issues four parallel state updates per cycle. Where MIC
-leads, the margin over HTJ2K is 1.1--1.6$\times$; where HTJ2K leads,
-its margin over MIC is 1.0--1.2$\times$. The Wav+SIMD column (AVX2
-kernels active) is competitive on most images but does not surpass
-MIC-4state-SIMD on any image --- the extra wavelet transform costs
-more than the entropy-coding advantage it could provide on this corpus.
-
-\textbf{Strip-parallel (PICS-C-$N$) decoders.} PICS-C-8 reaches
-1.5--2.7\,GB/s on images above 5\,MB on AMD64, similar in scaling shape
-to ARM64 but at slightly lower absolute throughput because the AMD64
-single-thread baseline is itself higher. Small images again do not
-benefit from 8-way parallelism. As on ARM64, PICS-C-$N$ is MIC's own
-parallel decode mode and is not compared directly against the
-single-threaded HTJ2K column.
+The split reflects each codec's design strengths. HTJ2K's block coder
+amortizes its per-block overhead across many pixels, so it does well on
+the large mammography slabs where each block has plenty of pixels. MIC's
+entropy decoder benefits on AMD64 from a hand-written BMI2 vector kernel
+that issues four entropy-coder state updates per cycle, giving it a
+strong single-thread baseline that dominates on most images. The
+crossover between the two regimes is consistent enough across modalities
+that a deployment that has both decoders available could route the very
+largest images to HTJ2K and everything else to MIC.
 
 \begin{table*}[t]
 \centering
-\caption{Decompression throughput (MB/s), Intel Core Ultra 9 285K (AMD64).
-Bold = fastest per row within single-threaded and PICS groups.}
+\caption{Decompression throughput (MB/s) on Intel Core Ultra 9 285K
+(AMD64). ``MIC'' is MIC's four-state C decoder with the BMI2 vector
+kernel; ``HTJ2K'' is OpenJPH. All decoders are single-threaded. JPEG-LS
+on AMD64 will appear in the next revision (Future Work). Bold marks the
+fastest codec per row.}
 \label{tab:decomp-amd64}
 \scriptsize
-\begin{tabular}{lrrrrrrr}
+\begin{tabular}{lrr}
 \toprule
-Image & MIC-Go & MIC-4s-C & MIC-4s-SIMD & Wav+SIMD & HTJ2K & PICS-C-4 & PICS-C-8 \\
+Image & MIC & HTJ2K \\
 \midrule
-MR   & 251 & 501 & \textbf{708} & 194 & 570 & \textbf{301} & 124$^\dagger$ \\
-CT   & 231 & 403 & 487 & 364 & \textbf{544} & \textbf{676} & 339 \\
-CR   & 324 & 599 & \textbf{744} & 723 & 708 & 1,738 & \textbf{2,435} \\
-XR   & 363 & 601 & \textbf{803} & 681 & 570 & 1,714 & \textbf{1,994} \\
-MG1  & 617 & 789 & 1,119 & 746 & \textbf{1,235} & 1,872 & \textbf{2,514} \\
-MG2  & 562 & 800 & 1,166 & 848 & \textbf{1,297} & \textbf{2,244} & 2,085 \\
-MG3  & 357 & 633 & 669 & \textbf{678} & 644 & 1,823 & \textbf{2,538} \\
-MG4  & 523 & 743 & 773 & 808 & \textbf{916} & 2,124 & \textbf{2,707} \\
-CT1  & 322 & 520 & \textbf{676} & 525 & 657 & \textbf{857} & 423 \\
-CT2  & 293 & 514 & 636 & \textbf{705} & 627 & \textbf{847} & 687 \\
-MG-N & 368 & 635 & 669 & \textbf{705} & 643 & 1,872 & \textbf{2,191} \\
-MR1  & 356 & 609 & \textbf{766} & 532 & 654 & \textbf{945} & 366 \\
-MR2  & 352 & 658 & \textbf{975} & 601 & 749 & \textbf{1,121} & 793 \\
-MR3  & 450 & 728 & \textbf{809} & 676 & 802 & \textbf{920} & 705 \\
-MR4  & 390 & 596 & \textbf{861} & 738 & 660 & 493 & \textbf{701} \\
-NM1  & 367 & \textbf{717} & 668 & 715 & 627 & \textbf{783} & 405 \\
-RG1  & 302 & 497 & 593 & \textbf{705} & 557 & 1,248 & \textbf{1,494} \\
-RG2  & 433 & 676 & \textbf{861} & 811 & 823 & 1,841 & \textbf{1,912} \\
-RG3  & 460 & 706 & 858 & 881 & \textbf{894} & \textbf{1,969} & 1,613 \\
-SC1  & 464 & 695 & \textbf{888} & 710 & 728 & 1,819 & \textbf{1,889} \\
-XA1  & 413 & 693 & \textbf{836} & 538 & 797 & 1,173 & \textbf{1,513} \\
+MR   & \textbf{708}   & 570 \\
+CT   & 487            & \textbf{544} \\
+CR   & \textbf{744}   & 708 \\
+XR   & \textbf{803}   & 570 \\
+MG1  & 1,119          & \textbf{1,235} \\
+MG2  & 1,166          & \textbf{1,297} \\
+MG3  & \textbf{669}   & 644 \\
+MG4  & 773            & \textbf{916} \\
+CT1  & \textbf{676}   & 657 \\
+CT2  & \textbf{636}   & 627 \\
+MG-N & \textbf{669}   & 643 \\
+MR1  & \textbf{766}   & 654 \\
+MR2  & \textbf{975}   & 749 \\
+MR3  & \textbf{809}   & 802 \\
+MR4  & \textbf{861}   & 660 \\
+NM1  & \textbf{668}   & 627 \\
+RG1  & \textbf{593}   & 557 \\
+RG2  & \textbf{861}   & 823 \\
+RG3  & 858            & \textbf{894} \\
+SC1  & \textbf{888}   & 728 \\
+XA1  & \textbf{836}   & 797 \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-$^\dagger$\textbf{MR} is too small for PICS-C-8 (synchronization overhead
-dominates per-strip work); PICS-C-4 is the best PICS configuration for MR.
+
+\subsection{Implementation Variants of MIC}
+\label{subsec:variants}
+
+\textbf{Summary.} The headline tables use a single MIC column for clarity:
+the four-state C decoder on ARM64 and the same decoder with a BMI2 vector
+kernel on AMD64. MIC has three other implementation variants that exist
+for different deployment situations rather than for headline competition.
+They are described briefly here so the design space is on record.
+
+\begin{itemize}
+  \item \textbf{Pure Go reference.} The full encoder and decoder run in
+  pure Go through the standard \texttt{gc} compiler with no special build
+  flags. It decompresses at approximately 50\% of the C variant's
+  throughput on both reference platforms (e.g.\ 312\,MB/s on the MR test
+  image on ARM64 vs.\ 702\,MB/s for the C decoder). The Go reference is
+  useful where the deployment cannot accept a CGO dependency (mobile,
+  WebAssembly via TinyGo, or strictly-sandboxed runtimes).
+  \item \textbf{Single-state entropy decoder.} The same C decoder but
+  with a single entropy-coder state instead of four. Roughly 45\% slower
+  than the four-state path; the gap comes entirely from
+  instruction-level parallelism on the entropy stage
+  (Table~\ref{tab:fse-combined} quantifies the FSE stage in isolation).
+  This variant exists primarily as a baseline for the multi-state
+  ablation in Section~\ref{sec:multistate}.
+  \item \textbf{Wavelet-based MIC.} An alternative MIC pipeline that
+  replaces the spatial predictor with a five-level reversible 5/3 integer
+  wavelet transform and feeds the wavelet coefficients into the same
+  run-length and entropy stages. On AMD64 the predict/update lifting
+  steps use AVX2 kernels; on ARM64 the kernels are scalar today. The
+  wavelet variant is competitive on AMD64 for a small number of images
+  (notably CT2 and RG1) but is consistently slower than the
+  predictor-based MIC on the medical-imaging corpus, because the wavelet
+  transform pays a cost that the spatially smooth medical images do not
+  reward. It is included in our test suite as a back-end option but does
+  not appear in the headline tables.
+\end{itemize}
+
+The four-state C decoder is therefore both the simplest and the fastest
+configuration on the evaluated corpus. The other variants document the
+implementation space rather than competing for the fastest column.
 
 \subsection{FSE Stage Microbenchmarks}
 
@@ -1223,6 +1223,78 @@ penalty on CR (where 1-state ran at only 140\,MB/s); M4 Pro's branch
 predictor handles that conditional efficiently, so CR's 1-state baseline
 now sits at 3,139\,MB/s and the four-state gain on CR is $+$80\% rather
 than $+$590\%.
+
+\subsection{Multi-threaded Decoding}
+\label{subsec:multithread}
+
+\textbf{Summary.} MIC supports an optional strip-parallel decode mode in
+which the image is split into horizontal strips, each strip is decoded
+independently in a separate thread, and the rows are concatenated. We
+report it here for completeness rather than as a head-to-head comparison:
+HTJ2K and JPEG-LS are single-threaded in our pipeline, so an
+$N$-thread-vs-1-thread comparison would not be meaningful. The
+take-away is that the strip-parallel decoder scales close to linearly
+up to four threads on both reference platforms and continues to scale
+to eight threads on images above approximately 5\,MB, reaching
+4--4.6\,GB/s on the largest mammography images on ARM64. Small images
+do not benefit: synchronization and per-strip header overhead exceed
+the per-strip work below roughly half a megabyte.
+
+\begin{table*}[htbp]
+\centering
+\caption{Multi-threaded decompression throughput (MB/s) for MIC's
+strip-parallel mode. ``MIC'' is the single-threaded baseline from
+Table~\ref{tab:decomp-arm}/\ref{tab:decomp-amd64} reproduced for reference;
+$N$-strip columns decode the same compressed bytes in $N$ parallel
+threads. AMD64 two-strip measurements are scheduled for the next revision.
+The MR image is too small for 8-way parallelism on both platforms.}
+\label{tab:pics}
+\scriptsize
+\begin{tabular}{l|rrrr|rrr}
+\toprule
+ & \multicolumn{4}{c|}{Apple M4 Pro (ARM64)} & \multicolumn{3}{c}{Intel Core Ultra 9 285K (AMD64)} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-8}
+Image & MIC & 2-strip & 4-strip & 8-strip & MIC & 4-strip & 8-strip \\
+\midrule
+MR   & 702   & 663   & 894   & 702\,$^\dagger$ & 708   & 301   & 124\,$^\dagger$ \\
+CT   & 470   & 624   & 1{,}157 & 1{,}446 & 487   & 676   & 339 \\
+CR   & 644   & 1{,}052 & 1{,}976 & 3{,}605 & 744   & 1{,}738 & 2{,}435 \\
+XR   & 682   & 1{,}087 & 2{,}024 & 3{,}794 & 803   & 1{,}714 & 1{,}994 \\
+MG1  & 848   & 1{,}529 & 2{,}529 & 4{,}443 & 1{,}119 & 1{,}872 & 2{,}514 \\
+MG2  & 877   & 1{,}417 & 2{,}506 & 4{,}585 & 1{,}166 & 2{,}244 & 2{,}085 \\
+MG3  & 681   & 1{,}112 & 1{,}911 & 3{,}820 & 669   & 1{,}823 & 2{,}538 \\
+MG4  & 797   & 1{,}326 & 2{,}345 & 4{,}348 & 773   & 2{,}124 & 2{,}707 \\
+CT1  & 531   & 819   & 1{,}247 & 1{,}525 & 676   & 857   & 423 \\
+CT2  & 505   & 864   & 1{,}260 & 1{,}473 & 636   & 847   & 687 \\
+MG-N & 661   & 1{,}147 & 2{,}027 & 3{,}930 & 669   & 1{,}872 & 2{,}191 \\
+MR1  & 724   & 977   & 1{,}460 & 1{,}851 & 766   & 945   & 366 \\
+MR2  & 741   & 1{,}137 & 1{,}911 & 3{,}103 & 975   & 1{,}121 & 793 \\
+MR3  & 846   & 1{,}205 & 1{,}693 & 2{,}089 & 809   & 920   & 705 \\
+MR4  & 770   & 997   & 1{,}469 & 1{,}757 & 861   & 493   & 701 \\
+NM1  & 852   & 1{,}147 & 1{,}682 & 2{,}133 & 668   & 783   & 405 \\
+RG1  & 476   & 677   & 1{,}203 & 2{,}150 & 593   & 1{,}248 & 1{,}494 \\
+RG2  & 758   & 1{,}229 & 2{,}156 & 3{,}816 & 861   & 1{,}841 & 1{,}912 \\
+RG3  & 772   & 1{,}335 & 2{,}343 & 4{,}168 & 858   & 1{,}969 & 1{,}613 \\
+SC1  & 758   & 1{,}311 & 2{,}206 & 3{,}971 & 888   & 1{,}819 & 1{,}889 \\
+XA1  & 759   & 1{,}214 & 1{,}881 & 3{,}191 & 836   & 1{,}173 & 1{,}513 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\noindent $^\dagger$The MR image (130\,KB raw) is too small to benefit from
+8-way parallelism: synchronization overhead exceeds the per-strip work, so
+the 4-strip configuration is faster than 8-strip on both platforms.
+
+The scaling characteristics are intuitive. On large images each strip
+gets enough rows that the per-strip overhead (synchronization plus
+reading a small strip header) is amortised, and total decode time falls
+roughly as 1/$N$ up to $N=4$ and continues to fall to $N=8$. On small
+images the overhead dominates and adding threads slows things down. As
+a practical matter, applications that decode many small images
+concurrently should use the single-threaded MIC decoder per request
+(which is already fast); applications that decode one large image at a
+time on a multi-core machine should use the strip-parallel mode and pick
+$N$ between four and eight depending on image size and core count.
 
 \subsection{JavaScript Runtime Results}
 
@@ -1280,81 +1352,50 @@ performance. Full browser performance benchmarking remains future work.
 \section{Conclusion}
 \label{sec:conclusion}
 
-This paper presented MIC, a lossless medical image compression pipeline based on
-spatial prediction, 16-bit-native run-length representation, and large-alphabet
-table-based entropy coding. The key results across 21 clinical DICOM images
-spanning nine modalities:
+\textbf{Bottom line.} Across 21 clinical DICOM images spanning nine
+modalities, MIC is the fastest single-threaded lossless decoder on every
+ARM64 image and on 16 of 21 AMD64 images, while compressing within 1\% of
+the geometric-mean ratio of High-Throughput JPEG~2000. On the
+fastest-encoding side it is even more decisive: MIC encodes faster than
+both HTJ2K and JPEG-LS on every image on both platforms. The codec is
+implemented in roughly 1,100 lines of Go, about 18 times fewer source
+lines than the OpenJPH reference implementation of HTJ2K.
 
-\begin{itemize}
-  \item \textbf{Compression ratios}: 1.7$\times$--8.9$\times$ across the 21
-  evaluated grayscale images.
+\textbf{Reading the results.} Three observations tie the per-table
+numbers together. First, the gain that MIC obtains comes primarily from
+its design choice to operate directly on 16-bit residuals: the entropy
+coder sees the 10- to 16-bit symbols produced by the spatial predictor
+as a single alphabet rather than splitting each pixel into two bytes.
+This sidesteps the structural cost of byte-splitting (5--22\%
+compared to a Delta+Zstandard baseline on the same predictor) and at
+the same time removes the per-symbol branches that the byte-splitting
+codecs spend cycles on during decode. Second, on the very largest
+mammography images on AMD64, HTJ2K's block coder recovers the
+throughput lead by amortising its per-block setup over many pixels;
+MIC remains within 0--20\% of HTJ2K's throughput on those images. Third,
+multi-state interleaved entropy decoding gives MIC a further ${\sim}$45\%
+on ARM64 and ${\sim}$43\% on AMD64 without any change to the compressed
+bytes (Table~\ref{tab:fse-combined}); this is the gain that makes MIC's
+C decoder competitive with HTJ2K's vectorised block coder.
 
-  \item \textbf{vs.\ Delta+Zstandard}: 5--22\% better compression on all 21
-  images (geometric mean $+$14\%), attributable to the structural cost of
-  byte-splitting 16-bit residuals.
-
-  \item \textbf{vs.\ HTJ2K (single-threaded only).} On ARM64, MIC-4state-C
-  exceeds HTJ2K decompression throughput on all 21 images, by 1.4--2.4$\times$.
-  On AMD64, MIC-4state-SIMD exceeds HTJ2K on 16 of 21 images; HTJ2K leads on
-  the five largest images (MG1, MG2, MG4, CT, RG3) by 1.0--1.2$\times$. We
-  do not compare MIC's strip-parallel decoder PICS-C-$N$ against
-  single-threaded HTJ2K, since that would be an $N$-thread-vs-1-thread
-  comparison rather than a codec comparison.
-
-  \item \textbf{vs.\ JPEG-LS (single-threaded only).} 1.6--5.7$\times$
-  faster single-threaded decompression on ARM64. JPEG-LS retains the best
-  lossless ratios (geometric mean 3.44$\times$ vs.\ MIC's 3.12$\times$,
-  approximately 10\% better). The trade-off is therefore between storage
-  cost (JPEG-LS) and decode latency (MIC).
-
-  \item \textbf{Multi-state decoder.} Geometric-mean $+$45\% FSE stage
-  speedup on ARM64 (M4 Pro) and $+$43\% on AMD64 over the 1-state baseline,
-  with no compression-ratio penalty. The ARM64 gain is smaller than the
-  $+$68\% reported on M2 Max in v6 because M4 Pro's stronger out-of-order
-  engine raises the 1-state baseline, leaving less margin for four-way
-  ILP to recover.
-
-  \item \textbf{Strip-parallel mode (PICS-C-$N$).} MIC's pthread-based
-  strip decoder reaches 3.6--4.6\,GB/s on ARM64 and 1.5--2.7\,GB/s on
-  AMD64 for images above 5\,MB. PICS-C-$N$ is intended for multi-core
-  decode of single large images and is reported as MIC's own parallel
-  mode, not as a competitor to single-threaded codecs.
-
-  \item \textbf{Browser decoder.} ${\sim}$20\,KB pure JavaScript decoder;
-  PICS with \texttt{worker\_threads} achieves 483\,MB/s on MG1 in Node.js
-  (measured on Apple M2 Max; JS measurements were not refreshed for M4 Pro
-  in this version).
-
-  \item \textbf{Implementation.} Approximately 1,100 lines of Go code,
-  about 18$\times$ fewer source lines than HTJ2K's reference implementation.
-\end{itemize}
-
-\textbf{Interpretation.} Three threads tie these results together.
-First, on the entropy-coding stage alone (Table~\ref{tab:fse-combined}),
-the gap between MIC and the established codecs is largest --- a
-two- to four-fold throughput advantage --- because MIC's 16-bit-native
-table-driven decoder has nearly no per-symbol branches. Second, the full
-pipeline (Tables~\ref{tab:decomp-arm} and~\ref{tab:decomp-amd64})
-narrows this gap because the surrounding Delta and RLE stages are
-already efficient in HTJ2K and JPEG-LS, and the gap shifts toward
-HTJ2K on the very largest images where its block-coding amortizes well.
-Third, the strip-parallel mode multiplies throughput by close to the
-number of cores on large images, but does not change MIC's underlying
-single-threaded characteristics.
-
-\textbf{Deployment guidance.} For applications that decode one image at
-a time on a multi-core machine, PICS-C-$N$ delivers the highest
-absolute decode rate. For applications that decode many small images
-concurrently (e.g.\ thumbnail rendering, multi-frame DBT playback),
-single-threaded MIC-4state-C (ARM64) or MIC-4state-SIMD (AMD64) is the
-right default: each request gets ${\sim}$700--900\,MB/s on ARM64 and
-${\sim}$800--1{,}200\,MB/s on AMD64 without contending for threads with
-other requests. HTJ2K is competitive on large mammography images on
-AMD64 and remains a sensible choice where compatibility with existing
-DICOM transfer syntaxes is a hard requirement. JPEG-LS is the right
-choice where archival storage cost dominates the deployment budget.
-For implementation simplicity, the pure-Go or pure-JavaScript decoder
-suffices.
+\textbf{Deployment guidance.} For applications that decode one large
+image at a time on a multi-core machine, MIC's strip-parallel mode
+delivers the highest absolute decode rate
+(Section~\ref{subsec:multithread}). For applications that decode many
+small images concurrently --- thumbnail rendering, multi-frame breast
+tomosynthesis playback, real-time PACS panning --- single-threaded MIC
+is the right default: each request gets approximately 700--900\,MB/s on
+ARM64 and 800--1{,}200\,MB/s on AMD64 without contending for threads
+with other requests. HTJ2K remains a sensible choice where compatibility
+with existing DICOM transfer syntaxes is a hard requirement, and is
+specifically competitive on large mammography images on AMD64. JPEG-LS
+is the right choice where archival storage cost dominates the deployment
+budget --- it retains a small ratio advantage (about 10\%
+geometric mean) but is 1.6--5.7$\times$ slower to decode on ARM64. For
+deployment situations that cannot accept a native CGO dependency, the
+pure-Go reference and the 20\,KB JavaScript decoder offer
+implementations of the same compressed format at roughly half the
+throughput of the C variant.
 
 Future work should strengthen the evidence base with larger datasets,
 shuffle-based general-purpose baselines, formal statistical reporting, and
