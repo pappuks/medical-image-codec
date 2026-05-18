@@ -1262,6 +1262,123 @@ int mic_decompress_four_state_simd(const uint8_t *compressed, size_t compressed_
 }
 
 // ---------------------------------------------------------------------------
+// FSE eight-state decompress — AVX-512 variant.
+//
+// Replaces eight scalar dt[state] loads per inner-loop iteration with a single
+// VPGATHERDQ that issues all eight cache-line accesses in parallel hardware.
+// Bit reading remains serial (the bit reader has a single 64-bit register, so
+// the eight nb_bits-sized reads cannot be vectorized without a redesign).
+// The win is therefore the parallel-gather throughput vs. eight separate
+// scalar loads competing for the load/store ports.
+//
+// Compile-time gated on AVX-512F + DQ + BW (Granite Rapids has all three;
+// Skylake-X has F+DQ+BW too, so this builds on most server Xeons since 2017).
+// AVX-512VL is not required: we use ZMM for the gather, YMM for the index
+// vector, and XMM for the symbol pack.
+// ---------------------------------------------------------------------------
+#if defined(__x86_64__) && defined(__AVX512F__) && defined(__AVX512DQ__) && defined(__AVX512BW__)
+#include <immintrin.h>
+
+static int fse_decompress_eight_state_avx512(const uint8_t *data, size_t data_len,
+                                              uint16_t *out, int count,
+                                              dec_symbol_t *dt, uint8_t table_log,
+                                              int zero_bits) {
+    (void)zero_bits;
+    bit_reader_t br;
+    if (bit_reader_init(&br, data, data_len) != 0) return -1;
+
+    // Read initial states A..H — same prologue as the scalar variant.
+    uint32_t s0 = bit_reader_get_bits_fast(&br, table_log);
+    uint32_t s1 = bit_reader_get_bits_fast(&br, table_log);
+    bit_reader_fill(&br);
+    uint32_t s2 = bit_reader_get_bits_fast(&br, table_log);
+    uint32_t s3 = bit_reader_get_bits_fast(&br, table_log);
+    bit_reader_fill(&br);
+    uint32_t s4 = bit_reader_get_bits_fast(&br, table_log);
+    uint32_t s5 = bit_reader_get_bits_fast(&br, table_log);
+    bit_reader_fill(&br);
+    uint32_t s6 = bit_reader_get_bits_fast(&br, table_log);
+    uint32_t s7 = bit_reader_get_bits_fast(&br, table_log);
+
+    // Pack the eight states into a YMM index vector.
+    __m256i states = _mm256_setr_epi32((int)s0, (int)s1, (int)s2, (int)s3,
+                                       (int)s4, (int)s5, (int)s6, (int)s7);
+
+    int remaining = count;
+    int off = 0;
+
+    // Main loop: 8 symbols per iteration via VPGATHERDQ.
+    while (br.off >= 16 && remaining >= 8) {
+        // Gather eight 64-bit dec_symbol_t entries from dt[state*8].
+        // _mm512_i32gather_epi64 → VPGATHERDQ.
+        __m512i entries = _mm512_i32gather_epi64(states, dt, 8);
+
+        // Extract per-lane fields from the 8x64-bit entries:
+        //   bits  0-31 → new_state (uint32)
+        //   bits 32-47 → symbol    (uint16)
+        //   bits 48-55 → nb_bits   (uint8, low 6 bits actually used)
+        __m256i new_states = _mm512_cvtepi64_epi32(entries);
+
+        // symbols: shift each lane right 32, then narrow to 8 x uint16.
+        __m128i symbols = _mm512_cvtepi64_epi16(_mm512_srli_epi64(entries, 32));
+
+        // nb_bits as 8x32 (we'll convert to scalar uint8 for the bit reader).
+        __m256i nbits_v = _mm512_cvtepi64_epi32(_mm512_srli_epi64(entries, 48));
+        alignas(32) uint32_t nbits_arr[8];
+        _mm256_store_si256((__m256i *)nbits_arr, nbits_v);
+
+        // Serial bit reads. Refill between every pair of decodes to match the
+        // scalar eight-state bit-budget pattern (≤2×14 bits between refills).
+        alignas(32) uint32_t lows_arr[8];
+        bit_reader_fill_fast(&br);
+        lows_arr[0] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[0]);
+        lows_arr[1] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[1]);
+        bit_reader_fill_fast(&br);
+        lows_arr[2] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[2]);
+        lows_arr[3] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[3]);
+        bit_reader_fill_fast(&br);
+        lows_arr[4] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[4]);
+        lows_arr[5] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[5]);
+        bit_reader_fill_fast(&br);
+        lows_arr[6] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[6]);
+        lows_arr[7] = bit_reader_get_bits_nz(&br, (uint8_t)nbits_arr[7]);
+
+        // states = new_state + low_bits (vector add).
+        __m256i lows = _mm256_load_si256((const __m256i *)lows_arr);
+        states = _mm256_add_epi32(new_states, lows);
+
+        // Store 8 symbols (16 bytes) to output.
+        _mm_storeu_si128((__m128i *)(out + off), symbols);
+        off += 8;
+        remaining -= 8;
+    }
+
+    // Save states back to scalar for the tail loop.
+    alignas(32) uint32_t state_arr[8];
+    _mm256_store_si256((__m256i *)state_arr, states);
+    s0 = state_arr[0]; s1 = state_arr[1]; s2 = state_arr[2]; s3 = state_arr[3];
+    s4 = state_arr[4]; s5 = state_arr[5]; s6 = state_arr[6]; s7 = state_arr[7];
+
+    // Scalar tail: drain remaining in A..H order.
+    uint32_t *st[8] = {&s0, &s1, &s2, &s3, &s4, &s5, &s6, &s7};
+    while (remaining > 0) {
+        for (int i = 0; i < 8 && remaining > 0; i++) {
+            bit_reader_fill(&br);
+            dec_symbol_t n = dt[*st[i]];
+            uint32_t low = bit_reader_get_bits(&br, n.nb_bits);
+            *st[i] = n.new_state + low;
+            out[off++] = n.symbol;
+            remaining--;
+        }
+    }
+
+    return 0;
+}
+
+#define MIC_HAVE_AVX512_8STATE 1
+#endif  // __AVX512F__ && __AVX512DQ__ && __AVX512BW__
+
+// ---------------------------------------------------------------------------
 // Eight-state header parser. Magic: [0xFF][0x84][count_u32_le].
 // ---------------------------------------------------------------------------
 static int parse_eight_state_header(const uint8_t *compressed, size_t compressed_len,
@@ -1361,9 +1478,18 @@ int mic_decompress_eight_state_simd(const uint8_t *compressed, size_t compressed
     uint16_t *rle_out = (uint16_t *)malloc(symbol_count * sizeof(uint16_t));
     if (!rle_out) { free(dt); return -5; }
 
+    // Choose the FSE inner loop: VPGATHERDQ-based AVX-512 path when
+    // available, scalar eight-state fallback otherwise. Both produce
+    // identical output for the same compressed input.
+#if defined(MIC_HAVE_AVX512_8STATE)
+    rc = fse_decompress_eight_state_avx512(bitstream, bitstream_len,
+                                           rle_out, (int)symbol_count,
+                                           dt, table_log, zero_bits);
+#else
     rc = fse_decompress_eight_state(bitstream, bitstream_len,
                                     rle_out, (int)symbol_count,
                                     dt, table_log, zero_bits);
+#endif
     free(dt);
     if (rc != 0) { free(rle_out); return -6; }
 
