@@ -31,7 +31,7 @@ OUTDIR=/tmp/mic-bench ./run-paper-benchmarks.sh # custom results dir
 ```
 
 The 10x default is intentional: it matches the run-to-run variance budget
-stated in the paper (§Benchmark Procedure: <2% on Apple M2 Max, <5% on Intel
+stated in the paper (§Benchmark Procedure: <2% on ARM64, <5% on Intel
 AMD64). Lower iteration counts violate that budget.
 
 ---
@@ -126,24 +126,28 @@ corresponding column is treated as final in any future revision.
 
 ## 4. Hardware and Platform
 
-The paper claims numbers on exactly two reference platforms. Numbers from
-other hardware can be reported only as additional/historical results — they
-must not silently replace M2 Max or 285K numbers in the canonical tables.
+The paper claims numbers on three reference machines: two for the C/Go
+ARM64 and AMD64 columns, and a separate ARM64 machine for the JavaScript
+tables. Numbers from any other hardware can be reported only as
+additional/historical results — they must not silently replace these
+references in the canonical tables.
 
 | Paper role | Hardware | Notes |
 |---|---|---|
-| ARM64 reference | Apple M2 Max (12-core: 8P+4E) | macOS, Go gc compiler defaults, CGO C compiled with `-O3` |
-| AMD64 reference | Intel Core Ultra 9 285K (mixed P-core/E-core) | Always describe as "mixed P-core/E-core topology"; never as "24 P-core" |
+| ARM64 reference (C and Go) | Apple M4 Pro (14-core: 10P+4E) | macOS, Go gc compiler defaults, CGO C compiled with `-O3` |
+| AMD64 reference (C and Go) | AWS EC2 `c8i.4xlarge` (Intel Xeon 6 / Granite Rapids, 16 vCPU) | Ubuntu Linux 24.04. Bootstrapped via [`scripts/aws/c8i-userdata.sh`](../scripts/aws/c8i-userdata.sh). C components built with `-O3 -march=native` |
+| ARM64 reference (JavaScript) | Apple M2 Max (12-core: 8P+4E) | macOS, Node.js v24.8. Used only for `tab:js-perf` / `tab:pics-js` until those tables are re-measured on M4 Pro |
 
 Forbidden mistakes:
 
-- Quoting numbers measured on M4 Pro, M1, M3, or any other Apple chip as if
-  they were M2 Max numbers. If you re-run on a different chip, explicitly
-  label the new column.
-- Calling the 285K "24-core" or "P-core only" — it has mixed P/E cores and
-  that affects benchmark variance.
-- Mixing chip generations within a single table. If Table 4 has 21 rows from
-  M2 Max, all 21 must be M2 Max — never patch a missing row from a different
+- Quoting numbers measured on M2 Max, M1, M3, or any other Apple chip as
+  ARM64 C/Go numbers. The C/Go ARM64 column is M4 Pro only; the JS tables
+  remain M2 Max until re-measured.
+- Quoting numbers from a non-c8i AMD64 machine (older 285K data, a
+  laptop, a different EC2 family) as AMD64 numbers. If you re-run on a
+  different machine, label the column with the new platform.
+- Mixing platforms within a single table. If Table 5 has 21 rows from
+  c8i, all 21 must be c8i — never patch a missing row from a different
   machine.
 
 System hygiene before a paper-quality run:

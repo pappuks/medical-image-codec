@@ -206,12 +206,27 @@ Avoid unexplained table abbreviations: "Gen." → "General-purpose", "Part." →
 
 ## 6. CPU / Platform Descriptions
 
-- ARM64 platform: "Apple M2 Max (12-core ARM64)"
-- AMD64 platform: "Intel Core Ultra 9 285K (x86-64/AMD64, mixed P-core/E-core
-  topology)" — NOT "24 P-core AMD64" (the 285K has both P-cores and E-cores)
-- The XA1 outlier on AMD64 is due to small-image effects and mixed P/E-core
-  scheduling — do NOT call it "within measurement noise" unless repeated
-  measurements confirm variance that large
+**Rule.** From v8-tmi onward the paper uses only the generic architecture
+labels **ARM64** and **AMD64** in tables, captions, and prose. All
+specific CPU/instance names live in a single subsection — Benchmark
+Procedure (`\subsection{Benchmark Procedure}`) — and nowhere else. The
+authoritative reference platforms are listed in
+[`.claude/benchmark-rules.md`](benchmark-rules.md).
+
+Concretely, when editing the paper:
+- Captions: "Decompression throughput (MB/s) on ARM64." — never name the
+  CPU.
+- Prose: "On AMD64, MIC decodes…" — never "On Intel Xeon 6…" or
+  "On the c8i instance…".
+- The single Benchmark Procedure subsection introduces the reference
+  hardware once, in a bulleted list, and labels itself
+  `\label{subsec:bench-procedure}` so JS captions can cross-reference it.
+
+Other guidance:
+- The XA1 outlier on AMD64 is due to small-image effects and the
+  scheduling of the reference machine — do NOT call it "within
+  measurement noise" unless repeated measurements confirm variance that
+  large.
 
 ---
 
@@ -274,11 +289,10 @@ history must be removed before the file is sent for review.
 
 ### Keep:
 
-- A single clean platform identification per measurement section, e.g.
-  "Apple M4 Pro (14-core ARM64)" for the C/Go benchmarks and "Apple
-  M2 Max (12-core ARM64), Node.js v24.8" for the JavaScript section. If
-  different sub-sections used different hardware, list each as a fact
-  in its own section without flagging the inconsistency.
+- A single clean platform identification block in the Benchmark
+  Procedure subsection. All specific CPU/instance names live there and
+  nowhere else (see §6). Every other table, caption, and paragraph uses
+  only "ARM64" / "AMD64".
 - "Prior work" references to the published literature — that is the
   standard academic meaning and is not a self-version reference.
 - Future Work bullets that describe extensions (e.g., "extend the
@@ -290,5 +304,6 @@ history must be removed before the file is sent for review.
 1. `grep -n "v[0-9]" mic-paper-*.tex` — any hit other than `\$x\_L\$`
    style math or platform-version (e.g. `Node.js v24.8`) is suspect.
 2. `grep -in "previous\|earlier\|refresh\|next revision\|in v6\|in v7\|in v8"` — should return nothing in prose.
-3. `grep -n "M2 Max\|M4 Pro"` — every hit should be a clean platform
-   disclosure, never a contrast between the two.
+3. `grep -in "M2 Max\|M4 Pro\|285K\|Core Ultra\|c8i\|Xeon\|Granite Rapids\|Apple M"` —
+   every hit must be inside the single Benchmark Procedure subsection.
+   Any hit elsewhere in the paper is a violation of §6.
