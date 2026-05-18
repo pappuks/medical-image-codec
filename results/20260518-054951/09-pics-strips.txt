@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: mic
+cpu: Intel(R) Xeon(R) 6975P-C
+BenchmarkParallelStripsCompress/strips1-16         	      10	  35702432 ns/op	 210.99 MB/s	34841468 B/op	   52420 allocs/op
+BenchmarkParallelStripsCompress/strips2-16         	      10	  19091800 ns/op	 394.56 MB/s	35996576 B/op	   52412 allocs/op
+BenchmarkParallelStripsCompress/strips4-16         	      10	  11982857 ns/op	 628.63 MB/s	38232987 B/op	   52407 allocs/op
+BenchmarkParallelStripsCompress/strips8-16         	      10	   9160984 ns/op	 822.27 MB/s	42787099 B/op	   52480 allocs/op
+BenchmarkParallelStripsDecompress/strips1-16       	      10	  34281103 ns/op	 219.74 MB/s	46748980 B/op	      19 allocs/op
+BenchmarkParallelStripsDecompress/strips2-16       	      10	  19898534 ns/op	 378.56 MB/s	47581830 B/op	      34 allocs/op
+BenchmarkParallelStripsDecompress/strips4-16       	      10	  12468816 ns/op	 604.13 MB/s	49484716 B/op	      65 allocs/op
+BenchmarkParallelStripsDecompress/strips8-16       	      10	   8392060 ns/op	 897.61 MB/s	49581760 B/op	     121 allocs/op
+BenchmarkParallelStripsAdaptive/strips1-16         	      10	   2579686 ns/op	  50.81 MB/s	 3911862 B/op	     758 allocs/op
+BenchmarkParallelStripsAdaptive/strips2-16         	      10	   2149711 ns/op	  60.97 MB/s	 6108992 B/op	     769 allocs/op
+BenchmarkParallelStripsAdaptive/strips4-16         	      10	   2779351 ns/op	  47.16 MB/s	10505732 B/op	     805 allocs/op
+BenchmarkParallelStripsAdaptive/strips8-16         	      10	   3231096 ns/op	  40.57 MB/s	19097662 B/op	     903 allocs/op
+PASS
+ok  	mic	1.916s

@@ -1,0 +1,139 @@
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+mic_decompress_c.c:22:44: warning: excess elements in array initializer
+   22 |     0x3FFFFFFFu, 0x7FFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+      |                                            ^~~~~~~~~~~
+mic_decompress_c.c:22:44: note: (near initialization for ‘nbits_mask32’)
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+goos: linux
+goarch: amd64
+pkg: mic/ojph
+cpu: Intel(R) Xeon(R) 6975P-C
+BenchmarkJPEGLSDecomp/MR/MIC-16         	      10	    727349 ns/op	 180.21 MB/s	 1231427 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR/MIC-4state-16  	      10	    634882 ns/op	 206.45 MB/s	 1230867 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR/MIC-4state-C-16         	      10	    368246 ns/op	 355.94 MB/s	  131072 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR/MIC-4state-SIMD-16      	      10	    272586 ns/op	 480.85 MB/s	  131072 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR/JPEGLS-16               	      10	   1451939 ns/op	  90.27 MB/s	  131072 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-16                  	      10	   3071979 ns/op	 170.67 MB/s	 3629056 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-4state-16           	      10	   2940375 ns/op	 178.31 MB/s	 3629067 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-4state-C-16         	      10	   1760247 ns/op	 297.85 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT/MIC-4state-SIMD-16      	      10	   1715781 ns/op	 305.57 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT/JPEGLS-16               	      10	   4724571 ns/op	 110.97 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-16                  	      10	  31440652 ns/op	 239.59 MB/s	39212032 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-4state-16           	      10	  31995351 ns/op	 235.43 MB/s	39212032 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-4state-C-16         	      10	  17791115 ns/op	 423.40 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CR/MIC-4state-SIMD-16      	      10	  14730184 ns/op	 511.39 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CR/JPEGLS-16               	      10	  61121647 ns/op	 123.24 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-16                  	      10	  40693320 ns/op	 259.39 MB/s	46346249 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-4state-16           	      10	  37231101 ns/op	 283.51 MB/s	46346240 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-4state-C-16         	      10	  24299226 ns/op	 434.39 MB/s	10559488 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XR/MIC-4state-SIMD-16      	      10	  18616376 ns/op	 566.99 MB/s	10559488 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XR/JPEGLS-16               	      10	 120860759 ns/op	  87.34 MB/s	10559488 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-16                 	      10	  23118363 ns/op	 424.27 MB/s	23221248 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-4state-16          	      10	  21933631 ns/op	 447.18 MB/s	23221248 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-4state-C-16        	      10	  16274872 ns/op	 602.67 MB/s	 9814027 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG1/MIC-4state-SIMD-16     	      10	  10846721 ns/op	 904.27 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG1/JPEGLS-16              	      10	  28715279 ns/op	 341.57 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-16                 	      10	  23601094 ns/op	 415.59 MB/s	23221248 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-4state-16          	      10	  22029587 ns/op	 445.24 MB/s	23221248 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-4state-C-16        	      10	  15894998 ns/op	 617.07 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG2/MIC-4state-SIMD-16     	      10	  11133956 ns/op	 880.94 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG2/JPEGLS-16              	      10	  29084125 ns/op	 337.24 MB/s	 9814016 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-16                 	      10	 103424004 ns/op	 282.87 MB/s	134926336 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-4state-16          	      10	 107897777 ns/op	 271.14 MB/s	134959104 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-4state-C-16        	      10	  62500093 ns/op	 468.08 MB/s	29261824 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG3/MIC-4state-SIMD-16     	      10	  53754282 ns/op	 544.24 MB/s	29261824 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG3/JPEGLS-16              	      10	 241625227 ns/op	 121.08 MB/s	29261824 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-16                 	      10	  73164328 ns/op	 372.63 MB/s	73297920 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-4state-16          	      10	  69839187 ns/op	 390.37 MB/s	73297929 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-4state-C-16        	      10	  46994299 ns/op	 580.13 MB/s	27262976 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG4/MIC-4state-SIMD-16     	      10	  40466429 ns/op	 673.72 MB/s	27262976 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG4/JPEGLS-16              	      10	 172402353 ns/op	 158.14 MB/s	27262976 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-16                 	      10	   2287516 ns/op	 229.20 MB/s	 2727936 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-4state-16          	      10	   2318356 ns/op	 226.15 MB/s	 2727936 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-4state-C-16        	      10	   1324680 ns/op	 395.78 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT1/MIC-4state-SIMD-16     	      10	   1069900 ns/op	 490.03 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT1/JPEGLS-16              	      10	   3660938 ns/op	 143.21 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-16                 	      10	   2669669 ns/op	 196.39 MB/s	 2711580 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-4state-16          	      10	   2419892 ns/op	 216.66 MB/s	 2711553 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-4state-C-16        	      10	   1337530 ns/op	 391.98 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT2/MIC-4state-SIMD-16     	      10	   1142163 ns/op	 459.03 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/CT2/JPEGLS-16              	      10	   3957475 ns/op	 132.48 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-16                	      10	 105147005 ns/op	 271.82 MB/s	134197248 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-4state-16         	      10	 107525613 ns/op	 265.81 MB/s	134197248 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-4state-C-16       	      10	  61475641 ns/op	 464.92 MB/s	28581888 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/MIC-4state-SIMD-16    	      10	  53241238 ns/op	 536.82 MB/s	28581888 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MG-N/JPEGLS-16             	      10	 241975840 ns/op	 118.12 MB/s	28581888 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-16                 	      10	   2356341 ns/op	 222.50 MB/s	 2879488 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-4state-16          	      10	   2343008 ns/op	 223.77 MB/s	 2879488 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-4state-C-16        	      10	   1237003 ns/op	 423.84 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR1/MIC-4state-SIMD-16     	      10	    987755 ns/op	 530.79 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR1/JPEGLS-16              	      10	   5767240 ns/op	  90.91 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-16                 	      10	   7783111 ns/op	 269.45 MB/s	10105865 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-4state-16          	      10	   7829719 ns/op	 267.85 MB/s	10105875 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-4state-C-16        	      10	   4441812 ns/op	 472.14 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR2/MIC-4state-SIMD-16     	      10	   3357807 ns/op	 624.56 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR2/JPEGLS-16              	      10	  15766239 ns/op	 133.02 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-16                 	      10	   1832406 ns/op	 286.12 MB/s	 2017280 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-4state-16          	      10	   1713790 ns/op	 305.92 MB/s	 2017280 B/op	       9 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-4state-C-16        	      10	   1022971 ns/op	 512.52 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR3/MIC-4state-SIMD-16     	      10	    709585 ns/op	 738.87 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR3/JPEGLS-16              	      10	   2730095 ns/op	 192.04 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-16                 	      10	   2149475 ns/op	 243.91 MB/s	 2314240 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-4state-16          	      10	   2068353 ns/op	 253.48 MB/s	 2314240 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-4state-C-16        	      10	   1125367 ns/op	 465.88 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR4/MIC-4state-SIMD-16     	      10	    880881 ns/op	 595.19 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/MR4/JPEGLS-16              	      10	   3390616 ns/op	 154.63 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-16                 	      10	   1924506 ns/op	 272.43 MB/s	 2238976 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-4state-16          	      10	   1906149 ns/op	 275.05 MB/s	 2238976 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-4state-C-16        	      10	   1024788 ns/op	 511.61 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/NM1/MIC-4state-SIMD-16     	      10	    883804 ns/op	 593.22 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/NM1/JPEGLS-16              	      10	   3020679 ns/op	 173.57 MB/s	  524288 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-16                 	      10	  31657678 ns/op	 227.38 MB/s	33013760 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-4state-16          	      10	  29322823 ns/op	 245.48 MB/s	33013760 B/op	      10 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-4state-C-16        	      10	  19146382 ns/op	 375.96 MB/s	 7200768 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG1/MIC-4state-SIMD-16     	      10	  15188863 ns/op	 473.92 MB/s	 7200768 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG1/JPEGLS-16              	      10	  90822291 ns/op	  79.26 MB/s	 7200768 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-16                 	      10	  23511652 ns/op	 320.39 MB/s	28423168 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-4state-16          	      10	  22802314 ns/op	 330.35 MB/s	28423168 B/op	      12 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-4state-C-16        	      10	  14827161 ns/op	 508.04 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG2/MIC-4state-SIMD-16     	      10	  11252821 ns/op	 669.41 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG2/JPEGLS-16              	      10	  49174623 ns/op	 153.18 MB/s	 7536640 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-16                 	      10	  18927429 ns/op	 327.31 MB/s	22500352 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-4state-16          	      10	  17848269 ns/op	 347.10 MB/s	22500352 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-4state-C-16        	      10	  11957282 ns/op	 518.11 MB/s	 6201344 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG3/MIC-4state-SIMD-16     	      10	   9049845 ns/op	 684.56 MB/s	 6201344 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/RG3/JPEGLS-16              	      10	  31772769 ns/op	 194.98 MB/s	 6201344 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-16                 	      10	  31223522 ns/op	 326.25 MB/s	33517568 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-4state-16          	      10	  30960499 ns/op	 329.02 MB/s	33574912 B/op	      11 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-4state-C-16        	      10	  18987672 ns/op	 536.49 MB/s	10190848 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/SC1/MIC-4state-SIMD-16     	      10	  14985839 ns/op	 679.76 MB/s	10190848 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/SC1/JPEGLS-16              	      10	  56154940 ns/op	 181.40 MB/s	10190848 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-16                 	      10	   8220383 ns/op	 255.12 MB/s	10717696 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-4state-16          	      10	   8037610 ns/op	 260.92 MB/s	10717705 B/op	      13 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-4state-C-16        	      10	   4172698 ns/op	 502.59 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XA1/MIC-4state-SIMD-16     	      10	   3162849 ns/op	 663.06 MB/s	 2097152 B/op	       1 allocs/op
+BenchmarkJPEGLSDecomp/XA1/JPEGLS-16              	      10	  12565353 ns/op	 166.90 MB/s	 2097152 B/op	       1 allocs/op
+PASS
+ok  	mic/ojph	35.749s

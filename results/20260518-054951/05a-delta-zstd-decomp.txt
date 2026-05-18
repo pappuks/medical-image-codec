@@ -1,0 +1,85 @@
+# mic/zstd
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/zstd
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/zstd
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+mic_decompress_c.c:22:44: warning: excess elements in array initializer
+   22 |     0x3FFFFFFFu, 0x7FFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+      |                                            ^~~~~~~~~~~
+mic_decompress_c.c:22:44: note: (near initialization for ‘nbits_mask32’)
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+goos: linux
+goarch: amd64
+pkg: mic/ojph
+cpu: Intel(R) Xeon(R) 6975P-C
+BenchmarkMICCDeltaZstdDecomp/MR/MIC-4state-C-16         	      10	    331160 ns/op	 395.80 MB/s	         2.353 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR/Zstd-19-16              	      10	    366658 ns/op	 357.48 MB/s	         1.946 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT/MIC-4state-C-16         	      10	   1563076 ns/op	 335.42 MB/s	         2.237 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT/Zstd-19-16              	      10	   1365730 ns/op	 383.89 MB/s	         2.049 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CR/MIC-4state-C-16         	      10	  17215923 ns/op	 437.55 MB/s	         3.693 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CR/Zstd-19-16              	      10	  15871699 ns/op	 474.61 MB/s	         3.241 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XR/MIC-4state-C-16         	      10	  24165985 ns/op	 436.79 MB/s	         1.738 ratio	10559488 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XR/Zstd-19-16              	      10	  20784997 ns/op	 507.84 MB/s	         1.434 ratio	10559491 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG1/MIC-4state-C-16        	      10	  16319608 ns/op	 601.02 MB/s	         8.785 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG1/Zstd-19-16             	      10	  16378307 ns/op	 598.86 MB/s	         7.200 ratio	 9814017 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG2/MIC-4state-C-16        	      10	  16606070 ns/op	 590.65 MB/s	         8.773 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG2/Zstd-19-16             	      10	  16370031 ns/op	 599.16 MB/s	         7.206 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG3/MIC-4state-C-16        	      10	  63325864 ns/op	 461.98 MB/s	         2.289 ratio	29261824 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG3/Zstd-19-16             	      10	  81730780 ns/op	 357.94 MB/s	         2.090 ratio	29261824 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG4/MIC-4state-C-16        	      10	  50056474 ns/op	 544.64 MB/s	         3.473 ratio	27262976 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG4/Zstd-19-16             	      10	  58562293 ns/op	 465.54 MB/s	         3.104 ratio	27262976 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT1/MIC-4state-C-16        	      10	   1373105 ns/op	 381.83 MB/s	         2.789 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT1/Zstd-19-16             	      10	   1234870 ns/op	 424.57 MB/s	         2.466 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT2/MIC-4state-C-16        	      10	   1379151 ns/op	 380.15 MB/s	         3.485 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT2/Zstd-19-16             	      10	   1150940 ns/op	 455.53 MB/s	         3.244 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG-N/MIC-4state-C-16       	      10	  61739349 ns/op	 462.93 MB/s	         2.238 ratio	28581888 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG-N/Zstd-19-16            	      10	  80432209 ns/op	 355.34 MB/s	         2.042 ratio	28581888 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR1/MIC-4state-C-16        	      10	   1283743 ns/op	 408.41 MB/s	         2.087 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR1/Zstd-19-16             	      10	   1364799 ns/op	 384.15 MB/s	         1.790 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR2/MIC-4state-C-16        	      10	   4600271 ns/op	 455.88 MB/s	         3.282 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR2/Zstd-19-16             	      10	   4519868 ns/op	 463.99 MB/s	         2.766 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR3/MIC-4state-C-16        	      10	   1079902 ns/op	 485.50 MB/s	         3.925 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR3/Zstd-19-16             	      10	   1081685 ns/op	 484.70 MB/s	         3.473 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR4/MIC-4state-C-16        	      10	   1206627 ns/op	 434.51 MB/s	         4.124 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR4/Zstd-19-16             	      10	   1092605 ns/op	 479.85 MB/s	         3.579 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/NM1/MIC-4state-C-16        	      10	   1079557 ns/op	 485.65 MB/s	         5.149 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/NM1/Zstd-19-16             	      10	   1078489 ns/op	 486.13 MB/s	         4.878 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG1/MIC-4state-C-16        	      10	  19013792 ns/op	 378.58 MB/s	         1.698 ratio	 7200768 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG1/Zstd-19-16             	      10	  20732992 ns/op	 347.19 MB/s	         1.447 ratio	 7200768 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG2/MIC-4state-C-16        	      10	  15134296 ns/op	 497.73 MB/s	         4.230 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG2/Zstd-19-16             	      10	  15165417 ns/op	 496.71 MB/s	         3.685 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG3/MIC-4state-C-16        	      10	  11979544 ns/op	 517.15 MB/s	         6.079 ratio	 6201344 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG3/Zstd-19-16             	      10	  11226636 ns/op	 551.83 MB/s	         5.457 ratio	 6201344 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/SC1/MIC-4state-C-16        	      10	  19496912 ns/op	 522.48 MB/s	         3.710 ratio	10190848 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/SC1/Zstd-19-16             	      10	  21066863 ns/op	 483.54 MB/s	         3.464 ratio	10190848 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XA1/MIC-4state-C-16        	      10	   4276295 ns/op	 490.41 MB/s	         5.009 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XA1/Zstd-19-16             	      10	   3929924 ns/op	 533.64 MB/s	         4.366 ratio	 2097152 B/op	       1 allocs/op
+PASS
+ok  	mic/ojph	64.515s
