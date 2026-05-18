@@ -72,15 +72,14 @@ RATIO = {
     "JPEG-LS":   [2.52,2.68,3.96,1.76,8.91,8.90,2.38,3.71,3.19,4.54,2.38,2.30,3.52,4.51,4.49,6.28,1.72,4.51,7.31,4.73,5.39],
 }
 
-# ARM64 decompression throughput (MB/s) — Table X of the paper
+# ARM64 decompression throughput (MB/s) — Table tab:decomp-arm of v8 paper
+# (eight-state C decoder for MIC; OpenJPH for HTJ2K; CharLS for JPEG-LS;
+# Zstd-19 in-process via CGO for Δ+Zstd-19)
 DECOMP = {
-    "MIC-Go":       [144,191,296,308,482,479,308,417,239,238,316,278,333,375,316,327,235,367,374,375,331],
-    "MIC-4s-C":     [348,356,524,533,683,686,531,625,436,439,536,521,563,639,571,632,406,590,604,587,576],
-    "Wavelet+SIMD": [248,316,567,627,678,697,422,516,425,481,468,435,498,507,479,575,584,644,656,388,459],
-    "HTJ2K":        [265,307,367,334,810,790,338,548,362,375,340,325,388,441,406,410,332,443,562,401,419],
-    "JPEG-LS":      [102,137,153,108,409,416,153,184,182,175,153,116,172,236,197,210,104,193,246,229,204],
-    "PICS-C-4":     [710,955,1635,1666,2112,2120,1673,2004,1013,1041,1711,1207,1552,1430,1341,1400,1128,1803,1944,1861,1583],
-    "PICS-C-8":     [482,1092,2661,3025,3656,3773,3117,3689,1183,1189,3175,1402,2466,1614,1558,1679,2017,3194,3302,3279,2493],
+    "MIC":       [564,466,692,655,829,873,678,815,571,648,657,681,747,859,775,866,561,755,740,696,759],
+    "Δ+Zstd-19": [331,472,564,572,691,684,473,581,502,575,469,437,505,507,523,595,413,574,655,587,611],
+    "HTJ2K":     [301,356,367,366,681,686,362,533,373,372,360,354,390,453,304,404,354,408,469,384,388],
+    "JPEG-LS":   [146,187,206,150,547,557,201,259,238,222,201,154,224,329,230,277,126,255,320,280,278],
 }
 
 # Isolated FSE benchmark (pure Go, ARM64) — BenchmarkFSEDecompress4State
@@ -290,13 +289,10 @@ def fig3_multistate():
 # ── Figure 4: Pareto plot ────────────────────────────────────────────────────
 def fig4_pareto():
     codecs = {
-        "MIC-Go":       (RATIO["MIC"],   DECOMP["MIC-Go"],       GREY,   "o",  "MIC-Go (pure Go)"),
-        "MIC-4s-C":     (RATIO["MIC"],   DECOMP["MIC-4s-C"],     BLUE,   "s",  "MIC-4state-C"),
-        "Wavelet+SIMD": (RATIO["Wavelet"],DECOMP["Wavelet+SIMD"],TEAL,  "D",  "Wavelet V2 SIMD"),
-        "HTJ2K":        (RATIO["HTJ2K"], DECOMP["HTJ2K"],         ORANGE, "^",  "HTJ2K (OpenJPH)"),
-        "JPEG-LS":      (RATIO["JPEG-LS"],DECOMP["JPEG-LS"],      RED,    "v",  "JPEG-LS (CharLS)"),
-        "PICS-C-4":     (RATIO["MIC"],   DECOMP["PICS-C-4"],      GREEN,  "P",  "PICS-C-4 (4 threads)"),
-        "PICS-C-8":     (RATIO["MIC"],   DECOMP["PICS-C-8"],      PURPLE, "*",  "PICS-C-8 (8 threads)"),
+        "MIC":       (RATIO["MIC"],       DECOMP["MIC"],       BLUE,   "s", "MIC (8-state C)"),
+        "Δ+Zstd-19": (RATIO["Δ+Zstd-19"], DECOMP["Δ+Zstd-19"], GREEN,  "D", "Δ+Zstd-19"),
+        "HTJ2K":     (RATIO["HTJ2K"],     DECOMP["HTJ2K"],     ORANGE, "^", "HTJ2K (OpenJPH)"),
+        "JPEG-LS":   (RATIO["JPEG-LS"],   DECOMP["JPEG-LS"],   RED,    "v", "JPEG-LS (CharLS)"),
     }
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -316,7 +312,7 @@ def fig4_pareto():
     ax.set_xscale("log")
     ax.set_xlabel("Decompression throughput (MB/s, log scale)", fontsize=9)
     ax.set_ylabel("Compression ratio (×)", fontsize=9)
-    ax.set_title("Compression Ratio vs. Decompression Throughput — ARM64 Apple M2 Max\n"
+    ax.set_title("Compression Ratio vs. Decompression Throughput — ARM64\n"
                  "(large marker = geomean; small dots = individual images)",
                  fontsize=9, fontweight="bold")
     ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{int(v):,}"))

@@ -907,7 +907,7 @@ JPEG-LS's throughput, and 35--240$\times$ $\Delta$+Zstd-19's throughput.
 On AMD64, MIC leads on 18 of 21 images at roughly 1.0--1.6$\times$
 HTJ2K and 3--6$\times$ JPEG-LS; HTJ2K narrowly wins on the two largest
 mammography slabs (MG1, MG2) and on RG3. The detailed per-image numbers
-are in Tables~\ref{tab:enc-arm64-full} and~\ref{tab:enc-amd64}.
+are in Table~\ref{tab:enc}.
 
 The throughput advantage is primarily structural: MIC's encoder is a
 single pass over the pixels (a spatial predictor, a run-length pass, and
@@ -924,76 +924,39 @@ pipeline is smaller.
 
 \begin{table*}[htbp]
 \centering
-\caption{Encoding throughput (MB/s) on ARM64.
-``MIC'' is MIC's eight-state C encoder; ``$\Delta$+Zstd'' is delta encoding
-followed by Zstandard-19 (libzstd 1.5, in-process via CGO); ``HTJ2K'' is
-OpenJPH; ``JPEG-LS'' is CharLS. All encoders are single-threaded. Bold
-marks the fastest codec per row.}
-\label{tab:enc-arm64-full}
+\caption{\scriptsize Single-threaded encoding throughput (MB/s). Codec
+baselines as defined in Section~\ref{sec:methodology}; MIC is the
+eight-state C encoder. Bold marks the fastest codec per row on each
+platform.}
+\label{tab:enc}
 \scriptsize
-\begin{tabular}{lrrrr}
+\begin{tabular}{l|rrrr|rrrr}
 \toprule
-Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
+ & \multicolumn{4}{c|}{ARM64} & \multicolumn{4}{c}{AMD64} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
 \midrule
-MR   & \textbf{504}   &  8 & 273 &  97 \\
-CT   & \textbf{529}   &  8 & 200 & 139 \\
-CR   & \textbf{569}   &  3 & 204 & 115 \\
-XR   & \textbf{690}   &  3 & 248 & 125 \\
-MG1  & \textbf{1,168} & 14 & 456 & 315 \\
-MG2  & \textbf{1,172} & 14 & 454 & 315 \\
-MG3  & \textbf{706}   &  3 & 234 & 143 \\
-MG4  & \textbf{993}   &  7 & 373 & 215 \\
-CT1  & \textbf{576}   & 11 & 238 & 178 \\
-CT2  & \textbf{561}   &  8 & 207 & 172 \\
-MG-N & \textbf{718}   &  2 & 235 & 143 \\
-MR1  & \textbf{677}   & 11 & 215 & 120 \\
-MR2  & \textbf{737}   &  9 & 231 & 131 \\
-MR3  & \textbf{901}   & 22 & 299 & 187 \\
-MR4  & \textbf{711}   &  8 & 228 & 175 \\
-NM1  & \textbf{663}   &  7 & 247 & 170 \\
-RG1  & \textbf{659}   &  5 & 246 &  95 \\
-RG2  & \textbf{811}   &  6 & 271 & 151 \\
-RG3  & \textbf{762}   &  6 & 285 & 189 \\
-SC1  & \textbf{765}   &  6 & 256 & 223 \\
-XA1  & \textbf{693}   &  7 & 232 & 152 \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\begin{table*}[htbp]
-\centering
-\caption{Encoding throughput (MB/s) on AMD64.
-``MIC'' is MIC's eight-state C encoder; ``$\Delta$+Zstd'' is delta encoding
-followed by Zstandard-19 (libzstd 1.5, in-process via CGO); ``HTJ2K'' is
-OpenJPH; ``JPEG-LS'' is CharLS. All encoders are single-threaded. Bold
-marks the fastest codec per row.}
-\label{tab:enc-amd64}
-\scriptsize
-\begin{tabular}{lrrrr}
-\toprule
-Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
-\midrule
-MR   & \textbf{338} &  5 & 229          &  62 \\
-CT   & \textbf{292} &  5 & 206          &  97 \\
-CR   & \textbf{322} &  2 & 284          &  75 \\
-XR   & \textbf{405} &  3 & 250          &  84 \\
-MG1  & 546          &  8 & \textbf{647} & 209 \\
-MG2  & 541          &  8 & \textbf{646} & 209 \\
-MG3  & \textbf{332} &  2 & 251          & 104 \\
-MG4  & \textbf{431} &  6 & 415          & 150 \\
-CT1  & \textbf{329} &  7 & 277          & 125 \\
-CT2  & \textbf{286} &  5 & 266          & 125 \\
-MG-N & \textbf{339} &  2 & 243          & 104 \\
-MR1  & \textbf{344} &  6 & 244          &  86 \\
-MR2  & \textbf{397} &  4 & 300          &  84 \\
-MR3  & \textbf{428} & 12 & 353          & 123 \\
-MR4  & \textbf{358} &  6 & 318          & 141 \\
-NM1  & \textbf{336} &  5 & 312          & 116 \\
-RG1  & \textbf{392} &  4 & 250          &  65 \\
-RG2  & \textbf{416} &  3 & 356          &  99 \\
-RG3  & 397          &  4 & \textbf{407} & 126 \\
-SC1  & \textbf{407} &  4 & 309          & 168 \\
-XA1  & \textbf{358} &  4 & 310          &  97 \\
+MR   & \textbf{504}   &  8 & 273 &  97 & \textbf{338} &  5 & 229          &  62 \\
+CT   & \textbf{529}   &  8 & 200 & 139 & \textbf{292} &  5 & 206          &  97 \\
+CR   & \textbf{569}   &  3 & 204 & 115 & \textbf{322} &  2 & 284          &  75 \\
+XR   & \textbf{690}   &  3 & 248 & 125 & \textbf{405} &  3 & 250          &  84 \\
+MG1  & \textbf{1{,}168} & 14 & 456 & 315 & 546          &  8 & \textbf{647} & 209 \\
+MG2  & \textbf{1{,}172} & 14 & 454 & 315 & 541          &  8 & \textbf{646} & 209 \\
+MG3  & \textbf{706}   &  3 & 234 & 143 & \textbf{332} &  2 & 251          & 104 \\
+MG4  & \textbf{993}   &  7 & 373 & 215 & \textbf{431} &  6 & 415          & 150 \\
+CT1  & \textbf{576}   & 11 & 238 & 178 & \textbf{329} &  7 & 277          & 125 \\
+CT2  & \textbf{561}   &  8 & 207 & 172 & \textbf{286} &  5 & 266          & 125 \\
+MG-N & \textbf{718}   &  2 & 235 & 143 & \textbf{339} &  2 & 243          & 104 \\
+MR1  & \textbf{677}   & 11 & 215 & 120 & \textbf{344} &  6 & 244          &  86 \\
+MR2  & \textbf{737}   &  9 & 231 & 131 & \textbf{397} &  4 & 300          &  84 \\
+MR3  & \textbf{901}   & 22 & 299 & 187 & \textbf{428} & 12 & 353          & 123 \\
+MR4  & \textbf{711}   &  8 & 228 & 175 & \textbf{358} &  6 & 318          & 141 \\
+NM1  & \textbf{663}   &  7 & 247 & 170 & \textbf{336} &  5 & 312          & 116 \\
+RG1  & \textbf{659}   &  5 & 246 &  95 & \textbf{392} &  4 & 250          &  65 \\
+RG2  & \textbf{811}   &  6 & 271 & 151 & \textbf{416} &  3 & 356          &  99 \\
+RG3  & \textbf{762}   &  6 & 285 & 189 & 397          &  4 & \textbf{407} & 126 \\
+SC1  & \textbf{765}   &  6 & 256 & 223 & \textbf{407} &  4 & 309          & 168 \\
+XA1  & \textbf{693}   &  7 & 232 & 152 & \textbf{358} &  4 & 310          &  97 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1006,7 +969,7 @@ leads only on CT (472 vs.\ 466\,MB/s, +1.3\%). MIC decodes roughly
 1.5--2.6$\times$ faster than HTJ2K, 1.1--1.7$\times$ faster than
 $\Delta$+Zstd-19, and 2.0--4.5$\times$ faster than JPEG-LS, with the
 largest margins on the smaller-image modalities. The per-image numbers
-are in Table~\ref{tab:decomp-arm}.
+are in Table~\ref{tab:decomp}.
 
 The advantage is again structural. MIC's decoder is dominated by a
 table-driven entropy stage: one table lookup, one bit read, and one
@@ -1024,40 +987,42 @@ design. JPEG-LS retains slightly better compression ratios (around 10\%
 better on average), so the trade-off when choosing between MIC and
 JPEG-LS is between decode latency and archival storage cost.
 
-\begin{table*}[t]
+\begin{table*}[htbp]
 \centering
-\caption{Decompression throughput (MB/s) on ARM64.
-``MIC'' is MIC's eight-state C decoder; ``$\Delta$+Zstd'' is delta encoding
-followed by Zstandard-19 (libzstd 1.5, in-process via CGO); ``HTJ2K'' is
-OpenJPH; ``JPEG-LS'' is CharLS. All decoders are single-threaded. Bold
-marks the fastest codec per row.}
-\label{tab:decomp-arm}
+\caption{\scriptsize Single-threaded decompression throughput (MB/s).
+Codec baselines as defined in Section~\ref{sec:methodology}; MIC is
+the eight-state C decoder (AVX-512 acceleration of the RLE and delta
+inverse stages on AMD64). Bold marks the fastest codec per row on
+each platform.}
+\label{tab:decomp}
 \scriptsize
-\begin{tabular}{lrrrr}
+\begin{tabular}{l|rrrr|rrrr}
 \toprule
-Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
+ & \multicolumn{4}{c|}{ARM64} & \multicolumn{4}{c}{AMD64} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
 \midrule
-MR   & \textbf{564} & 331          & 301 & 146 \\
-CT   & 466          & \textbf{472} & 356 & 187 \\
-CR   & \textbf{692} & 564          & 367 & 206 \\
-XR   & \textbf{655} & 572          & 366 & 150 \\
-MG1  & \textbf{829} & 691          & 681 & 547 \\
-MG2  & \textbf{873} & 684          & 686 & 557 \\
-MG3  & \textbf{678} & 473          & 362 & 201 \\
-MG4  & \textbf{815} & 581          & 533 & 259 \\
-CT1  & \textbf{571} & 502          & 373 & 238 \\
-CT2  & \textbf{648} & 575          & 372 & 222 \\
-MG-N & \textbf{657} & 469          & 360 & 201 \\
-MR1  & \textbf{681} & 437          & 354 & 154 \\
-MR2  & \textbf{747} & 505          & 390 & 224 \\
-MR3  & \textbf{859} & 507          & 453 & 329 \\
-MR4  & \textbf{775} & 523          & 304 & 230 \\
-NM1  & \textbf{866} & 595          & 404 & 277 \\
-RG1  & \textbf{561} & 413          & 354 & 126 \\
-RG2  & \textbf{755} & 574          & 408 & 255 \\
-RG3  & \textbf{740} & 655          & 469 & 320 \\
-SC1  & \textbf{696} & 587          & 384 & 280 \\
-XA1  & \textbf{759} & 611          & 388 & 278 \\
+MR   & \textbf{564} & 331          & 301 & 146 & \textbf{552} & 357 & 439 &  91 \\
+CT   & 466          & \textbf{472} & 356 & 187 & \textbf{453} & 384 & 329 & 111 \\
+CR   & \textbf{692} & 564          & 367 & 206 & \textbf{566} & 475 & 439 & 123 \\
+XR   & \textbf{655} & 572          & 366 & 150 & \textbf{617} & 508 & 386 &  88 \\
+MG1  & \textbf{829} & 691          & 681 & 547 & \textbf{913} & 599 & 907 & 332 \\
+MG2  & \textbf{873} & 684          & 686 & 557 & \textbf{920} & 599 & 896 & 333 \\
+MG3  & \textbf{678} & 473          & 362 & 201 & \textbf{556} & 358 & 390 & 117 \\
+MG4  & \textbf{815} & 581          & 533 & 259 & \textbf{676} & 466 & 611 & 157 \\
+CT1  & \textbf{571} & 502          & 373 & 238 & \textbf{525} & 425 & 390 & 143 \\
+CT2  & \textbf{648} & 575          & 372 & 222 & \textbf{512} & 456 & 383 & 133 \\
+MG-N & \textbf{657} & 469          & 360 & 201 & \textbf{545} & 355 & 391 & 117 \\
+MR1  & \textbf{681} & 437          & 354 & 154 & \textbf{603} & 384 & 397 &  94 \\
+MR2  & \textbf{747} & 505          & 390 & 224 & \textbf{644} & 464 & 491 & 132 \\
+MR3  & \textbf{859} & 507          & 453 & 329 & \textbf{773} & 485 & 543 & 192 \\
+MR4  & \textbf{775} & 523          & 304 & 230 & \textbf{632} & 480 & 446 & 153 \\
+NM1  & \textbf{866} & 595          & 404 & 277 & \textbf{598} & 486 & 467 & 172 \\
+RG1  & \textbf{561} & 413          & 354 & 126 & \textbf{550} & 347 & 363 &  80 \\
+RG2  & \textbf{755} & 574          & 408 & 255 & \textbf{730} & 497 & 535 & 154 \\
+RG3  & \textbf{740} & 655          & 469 & 320 & \textbf{723} & 552 & 628 & 196 \\
+SC1  & \textbf{696} & 587          & 384 & 280 & \textbf{690} & 484 & 456 & 183 \\
+XA1  & \textbf{759} & 611          & 388 & 278 & \textbf{688} & 534 & 477 & 165 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1070,7 +1035,7 @@ runner-up ranges from 1.01$\times$ on MG1 (the closest contest, 913
 vs.\ 907\,MB/s) to 1.62$\times$ on XR. MIC decodes roughly
 1.0--1.6$\times$ HTJ2K, 1.1--1.6$\times$ $\Delta$+Zstd-19, and
 3.9--6.9$\times$ JPEG-LS. The per-image numbers are in
-Table~\ref{tab:decomp-amd64}.
+Table~\ref{tab:decomp}.
 
 This is a stronger result than the four-state SIMD variant produced on
 this platform: switching the AMD64 ``MIC'' column from four-state to
@@ -1084,48 +1049,8 @@ delta-inverse passes (32 \texttt{uint16}s per store, eight times wider
 than scalar) shifts a meaningful fraction of post-FSE time from
 load--store-bound serial code to vector throughput. The same code path
 runs on ARM64 and exhibits the same qualitative improvement
-(Table~\ref{tab:decomp-arm}); the larger AMD64 absolute gain reflects
+(Table~\ref{tab:decomp}, ARM64 columns); the larger AMD64 absolute gain reflects
 the AVX-512 lane width relative to ARM64 NEON.
-
-\begin{table*}[t]
-\centering
-\caption{Decompression throughput (MB/s) on AMD64. ``MIC'' is MIC's
-eight-state C decoder with AVX-512 acceleration of the RLE and delta
-inverse stages; ``$\Delta$+Zstd'' is delta encoding followed by
-Zstandard-19 (libzstd 1.5, in-process via CGO); ``HTJ2K'' is OpenJPH;
-``JPEG-LS'' is CharLS. All decoders are single-threaded. Bold marks the
-fastest codec per row.}
-\label{tab:decomp-amd64}
-\scriptsize
-\begin{tabular}{lrrrr}
-\toprule
-Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
-\midrule
-MR   & \textbf{552} & 357 & 439 &  91 \\
-CT   & \textbf{453} & 384 & 329 & 111 \\
-CR   & \textbf{566} & 475 & 439 & 123 \\
-XR   & \textbf{617} & 508 & 386 &  88 \\
-MG1  & \textbf{913} & 599 & 907 & 332 \\
-MG2  & \textbf{920} & 599 & 896 & 333 \\
-MG3  & \textbf{556} & 358 & 390 & 117 \\
-MG4  & \textbf{676} & 466 & 611 & 157 \\
-CT1  & \textbf{525} & 425 & 390 & 143 \\
-CT2  & \textbf{512} & 456 & 383 & 133 \\
-MG-N & \textbf{545} & 355 & 391 & 117 \\
-MR1  & \textbf{603} & 384 & 397 &  94 \\
-MR2  & \textbf{644} & 464 & 491 & 132 \\
-MR3  & \textbf{773} & 485 & 543 & 192 \\
-MR4  & \textbf{632} & 480 & 446 & 153 \\
-NM1  & \textbf{598} & 486 & 467 & 172 \\
-RG1  & \textbf{550} & 347 & 363 &  80 \\
-RG2  & \textbf{730} & 497 & 535 & 154 \\
-RG3  & \textbf{723} & 552 & 628 & 196 \\
-SC1  & \textbf{690} & 484 & 456 & 183 \\
-XA1  & \textbf{688} & 534 & 477 & 165 \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
 
 \subsection{Implementation Variants of MIC}
 \label{subsec:variants}
@@ -1218,8 +1143,8 @@ out-of-order parallelism. The AMD64 trajectory flattens earlier; the
 Granite Rapids core already extracts substantial ILP from the 1-state
 path through speculative scheduling, so the additional chains help
 less. Note that the FSE microbench isolates the entropy stage from RLE
-and delta overheads --- in the full pipeline (Tables~\ref{tab:decomp-arm}
-and~\ref{tab:decomp-amd64}), AMD64 still gains $+$9--10\% from 4-state
+and delta overheads --- in the full pipeline
+(Table~\ref{tab:decomp}), AMD64 still gains $+$9--10\% from 4-state
 to 8-state because the 8-state SIMD variant additionally widens the
 RLE-expand and delta-inverse passes to AVX-512.
 
@@ -1243,7 +1168,7 @@ the per-strip work below roughly half a megabyte.
 \centering
 \caption{Multi-threaded decompression throughput (MB/s) for MIC's
 strip-parallel mode. ``MIC'' is the single-threaded baseline from
-Table~\ref{tab:decomp-arm}/\ref{tab:decomp-amd64} reproduced for reference;
+Table~\ref{tab:decomp} reproduced for reference;
 $N$-strip columns decode the same compressed bytes in $N$ parallel
 threads. The MR image is too small for 8-way parallelism on both
 platforms.}
@@ -1394,11 +1319,136 @@ pure-Go reference and the 20\,KB JavaScript decoder offer
 implementations of the same compressed format at roughly half the
 throughput of the C variant.
 
+\subsection{Codec Selection Framework}
+\label{subsec:selection-framework}
+
+The deployment guidance above is qualitative. We close with a more
+structured comparison that combines the quantitative metrics of
+Section~\ref{sec:results} with the platform-availability dimensions a
+deployment team weighs in practice. The three scenarios used below
+(low-latency viewing, archival storage, and browser delivery) follow
+the deployment taxonomy laid out for DICOM compression by
+Clunie~\cite{clunie_miit2009} and reviewed for current medical-imaging
+practice by Liu \textit{et al.}~\cite{liu2017}. The criterion set ---
+compression ratio, encode and decode throughput, AMD64 and ARM64
+native availability, browser compatibility, and deployment ease ---
+generalises the four classical evaluation axes of
+Sayood~\cite{sayood} (ratio, complexity, memory, speed) to include the
+platform-coverage dimensions that medical-imaging products contend with
+in practice. Source-line counts and the choice of implementation
+language are deliberately excluded from the criterion set so that the
+matrix captures what an integrator sees externally, not how the codec
+happens to be built internally. Two complementary tools are used:
+(i)~a~\textit{Pareto-frontier} view, the dominant method for lossless
+codec comparison in the wider compression literature~\cite{geldreich_pareto,
+jpegxl_pareto, fcbench}, which surfaces the two-axis ratio--throughput
+trade-off without committing to fixed weights; and (ii)~a~\textit{weighted
+decision matrix} that extends the analysis to the platform and
+deployment criteria above, following the multi-criteria scoring approach
+common in software- and codec-selection studies~\cite{lossless_unified_score,
+saaty_ahp}.
+
+\textbf{Pareto frontier.}
+Fig.~\ref{fig:pareto} plots compression ratio against single-threaded
+ARM64 decompression throughput for the four codecs benchmarked in
+Table~\ref{tab:decomp}. Each codec contributes 21 small points
+(per-image) and one large marker (geometric mean). A codec is
+Pareto-optimal when no other codec achieves both higher ratio
+\textit{and} higher throughput. Two codecs sit on the frontier: MIC,
+which delivers the highest geometric-mean decode throughput
+(700\,MB/s) at a ratio within 1\% of HTJ2K's, and JPEG-LS at the
+opposite end with the highest ratio (3.82$\times$) but the lowest
+throughput (238\,MB/s). HTJ2K and $\Delta$+Zstd-19 are dominated by
+MIC on both axes --- strictly inside the frontier --- so they are
+preferable only when criteria not captured in the two-axis view
+(DICOM transfer-syntax compatibility for HTJ2K, general-purpose
+ubiquity for Zstd) outweigh raw ratio and throughput.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig4_pareto.png}
+\caption{Ratio vs.\ decompression throughput on ARM64. Small dots are
+per-image; large markers are geometric means. MIC and JPEG-LS occupy
+the Pareto frontier; HTJ2K and $\Delta$+Zstd-19 are dominated on both
+axes.}
+\label{fig:pareto}
+\end{figure}
+
+\textbf{Use-case decision matrix.}
+Pareto analysis is limited to two quantitative axes. Real deployment
+choices also depend on which CPU architectures and runtime environments
+a codec covers, and on the friction of integrating it into a product
+build. Table~\ref{tab:decision-matrix} normalises seven criteria so
+that the best codec on each row scores~1.0; weighted sums for three
+representative scenarios are reported in the final three rows. The
+quantitative rows are derived from the geometric means in
+Tables~\ref{tab:ratios}, \ref{tab:enc}, and
+\ref{tab:decomp}; the platform and deployment rows use the rubric
+in the table caption.
+
+\begin{table}[t]
+\centering
+\caption{Codec selection matrix. Each criterion is normalised so the
+best codec on that row scores~1.00. Quantitative rows are geometric
+means across the 21-image set. AMD64 / ARM64 native rows score~1.00
+when a production-grade native binary is available for that platform.
+Browser compatibility: shipped purpose-built JS or WASM decoder used in
+production~=~1.00; WASM port of the native library available and used in
+clinical viewers (OpenJPH-JS, charls-js via Cornerstone)~=~0.85;
+no browser path~=~0.0. Deployment ease: zero external runtime
+dependencies~=~1.00; ubiquitous system dependency (e.g.\ libzstd)~=~0.90;
+C/C++ library requiring CMake build and link integration~=~0.70.
+Weight columns $w_P$, $w_A$, $w_B$ reflect typical priorities for
+(P)~PACS viewer / low-latency decode, (A)~archival storage,
+(B)~browser delivery.}
+\label{tab:decision-matrix}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+Criterion & $w_P$ & $w_A$ & $w_B$ & MIC & HTJ2K & JPEG-LS \\
+\midrule
+Compression ratio                & 0.20 & 0.50 & 0.10 & 0.91 & 0.90 & \textbf{1.00} \\
+Decompression throughput (ARM64) & 0.30 & 0.10 & 0.15 & \textbf{1.00} & 0.58 & 0.34 \\
+Encoding throughput (ARM64)      & 0.05 & 0.10 & 0.05 & \textbf{1.00} & 0.36 & 0.22 \\
+AMD64 native                     & 0.10 & 0.05 & 0.05 & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} \\
+ARM64 native                     & 0.10 & 0.05 & 0.05 & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} \\
+Browser compatibility            & 0.05 & 0.00 & 0.40 & \textbf{1.00} & 0.85 & 0.85 \\
+Deployment ease                  & 0.20 & 0.20 & 0.20 & \textbf{1.00} & 0.70 & 0.70 \\
+\midrule
+\textbf{Weighted score (P) viewer}   & --- & --- & --- & \textbf{0.98} & 0.75 & 0.70 \\
+\textbf{Weighted score (A) archival} & --- & --- & --- & \textbf{0.96} & 0.78 & 0.80 \\
+\textbf{Weighted score (B) browser}  & --- & --- & --- & \textbf{0.99} & 0.78 & 0.74 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretation.}
+All three codecs reach parity on native AMD64 and ARM64 availability;
+those rows confirm the baseline but do not differentiate the codecs.
+Differentiation comes from the four quantitative rows plus browser
+support and deployment friction. MIC achieves the highest weighted
+score in all three scenarios under these neutral weights: 0.98 versus
+0.75/0.70 for the viewer, 0.96 versus 0.78/0.80 for archival, and 0.99
+versus 0.78/0.74 for browser delivery. The gap narrows on archival,
+where the ratio weight rises to 0.50 and JPEG-LS edges past HTJ2K
+(0.80~vs.\ 0.78) on the strength of its top compression ratio; JPEG-LS
+still does not overtake MIC because its decode throughput remains
+roughly $3\times$ slower even when ratio is the dominant criterion.
+HTJ2K is never the highest-scoring choice under these weights, but
+remains the default whenever DICOM transfer-syntax compatibility is a
+hard constraint not modelled in the matrix; in such cases the matrix
+serves to quantify the cost of that compatibility requirement rather
+than to recommend a different codec. Practitioners with different
+priorities can re-evaluate Table~\ref{tab:decision-matrix} by adjusting
+$w_P$, $w_A$, or $w_B$; the per-row normalised scores remain valid
+across any weighting scheme.
+
 Future work should strengthen the evidence base with larger datasets,
 shuffle-based general-purpose baselines, formal statistical reporting, and
 direct browser benchmarking. Several specific items: (i) measure JPEG-LS,
 $\Delta$+Zstd-19, and PICS-C-2 throughput on AMD64 so the AMD64 encoding
-(Table~\ref{tab:enc-amd64}) and decoding (Table~\ref{tab:decomp-amd64})
+(Table~\ref{tab:enc}) and decoding (Table~\ref{tab:decomp})
 tables are column-for-column comparable to the ARM64 tables; (ii) add a
 NEON predict/update kernel for the wavelet variant on ARM64; and (iii)
 extend the JavaScript decoder evaluation to the AMD64 platform.
@@ -1593,6 +1643,36 @@ National Electrical Manufacturers Association,
 D.\,A.\,Clunie,
 ``Breast Tomosynthesis Case~1,'' DICOM sample images,
 \url{http://www.dclunie.com/pixelmedimagecases/tomo/case1/}, 2009.
+
+\bibitem{geldreich_pareto}
+R.\,Geldreich, ``Quick survey of the lossless decompression Pareto frontier,''
+2015, \url{http://richg42.blogspot.com/2015/11/the-lossless-decompression-pareto.html}.
+
+\bibitem{jpegxl_pareto}
+J.\,Sneyers, ``JPEG XL and the Pareto front,'' Cloudinary Blog, 2022,
+\url{https://cloudinary.com/blog/jpeg-xl-and-the-pareto-front}.
+
+\bibitem{fcbench}
+J.\,Tao \textit{et al.}, ``FCBench: Cross-domain benchmarking of lossless
+compression,'' \textit{Proc.\ VLDB Endowment}, vol.\,17, no.\,7,
+pp.\,1418--1431, 2024.
+
+\bibitem{lossless_unified_score}
+A.\,Anonymous, ``Challenges and solutions in selecting optimal lossless data
+compression algorithms,'' arXiv:2509.25219, 2025.
+
+\bibitem{saaty_ahp}
+T.\,L.\,Saaty, \textit{The Analytic Hierarchy Process: Planning, Priority
+Setting, Resource Allocation}. New York, NY, USA: McGraw-Hill, 1980.
+
+\bibitem{clunie_miit2009}
+D.\,A.\,Clunie, ``DICOM support for compression: More than JPEG,''
+\textit{Medical Imaging Informatics and Teleradiology (MIIT)}, 2009,
+\url{https://www.dclunie.com/papers/MIIT_2009_DicomCompression_Clunie.pdf}.
+
+\bibitem{sayood}
+K.\,Sayood, \textit{Introduction to Data Compression}, 5th ed.
+Burlington, MA, USA: Morgan Kaufmann, 2017.
 
 \end{thebibliography}
 

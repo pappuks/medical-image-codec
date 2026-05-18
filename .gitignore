@@ -4,3 +4,4 @@ testdata/Series*/
 testdata/0acbebb*/
 *.so
 *.o
+.venv-fig/
