@@ -559,6 +559,51 @@ go test -run TestDumpHistogramCSV -v        # export residual histogram data
 
 ---
 
+## Performance Experiments — Recorded Findings
+
+Small log of ideas we measured and the outcomes — useful for anyone considering the same path.
+
+### AVX-512 `VPGATHERDQ`-based 8-state FSE decoder (AMD64) — *negative result*
+
+**Hypothesis.** The 8-state FSE inner loop does eight `dt[state]` lookups per
+iteration, one per independent state lane. Replacing those eight scalar loads
+with a single `_mm512_i32gather_epi64` (`VPGATHERDQ`, scale 8 for the 8-byte
+`decSymbolU16` entries) should let the hardware issue all eight cache-line
+accesses in parallel and shrink the gather-bound part of the critical path.
+
+**Measurement.** Implemented in [`ojph/mic_decompress_c.c`](./ojph/mic_decompress_c.c)
+as `fse_decompress_eight_state_avx512`, compile-time gated on
+`__AVX512F__ && __AVX512DQ__ && __AVX512BW__`, and routed from
+`mic_decompress_eight_state_simd` on AMD64. Benchmarked on AWS EC2
+`c8i.4xlarge` (Intel Xeon 6 / Granite Rapids).
+
+**Result.** Materially *slower* than the scalar 8-state path on every image:
+the `MIC-8state-SIMD` column dropped ≈20–36 % across the 21-image dataset
+(geomean ≈ −27 %) versus the previous scalar-8-state-FSE + AVX-512-RLE/delta
+configuration. Two large mammography images (MG1, MG2) showed a small ≈+20 %
+gain; everything else regressed.
+
+**Why.** Granite Rapids has three load ports. Eight independent scalar loads
+with eight distinct, predictable addresses (exactly our access pattern) issue
+in ≈3–4 cycles in steady state. `VPGATHERDQ` is ~12 µops with ≈8-cycle
+throughput, so the hardware gather is *fundamentally slower* than the parallel
+scalar loads the out-of-order engine was already overlapping. Secondary
+costs: a stack-array round-trip for `nb_bits[8]` (vector store → 8 scalar
+loads), and `VPMOVQD` / `VPMOVQW` extraction latency added to the dependency
+chain. Crucially, the bit reader stays serial — the gather can't shorten the
+critical path past the eight back-to-back `bit_reader_get_bits_nz` calls.
+
+**Action.** Reverted. The canonical AMD64 SIMD path is now (again) scalar
+8-state FSE + AVX-512 RLE-expand + AVX-512 delta-inverse. The scalar-8-state
+FSE inner loop saturates the load ports without help from `VPGATHERDQ`.
+
+**Takeaway for similar work.** x86 gather instructions help when the compiler
+*cannot* see addresses as independent or when scatter / load resources are
+already exhausted. For a loop with $k$ statically-independent loads on a CPU
+with $\geq \lceil k/2 \rceil$ load ports, parallel scalar loads usually win.
+
+---
+
 ## Roadmap
 
 - [x] Native amd64 + arm64 optimizations — two-state FSE (pure Go, all platforms), interleaved histogram assembly, CPUID/NEON dispatch — see [docs/native-optimizations.md](./docs/native-optimizations.md)
