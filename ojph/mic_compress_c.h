@@ -31,6 +31,12 @@ int mic_compress_four_state(const uint16_t *pixels, int width, int height,
 int mic_compress_two_state(const uint16_t *pixels, int width, int height,
                             uint8_t *out, size_t out_cap, size_t *out_len);
 
+// mic_compress_eight_state is the same pipeline using eight-state FSE.
+// Output magic byte is 0x84. Compatible with mic_decompress_eight_state
+// and the Go FSEDecompressU16EightState decoder.
+int mic_compress_eight_state(const uint16_t *pixels, int width, int height,
+                              uint8_t *out, size_t out_cap, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

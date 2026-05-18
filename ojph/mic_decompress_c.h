@@ -38,6 +38,17 @@ int mic_decompress_four_state(const uint8_t *compressed, size_t compressed_len,
 int mic_decompress_four_state_simd(const uint8_t *compressed, size_t compressed_len,
                                    uint16_t *pixels_out, int width, int height);
 
+// mic_decompress_eight_state decompresses a MIC eight-state FSE compressed
+// stream. Input format: [0xFF][0x84][count_u32_le][FSE header][bitstream]
+int mic_decompress_eight_state(const uint8_t *compressed, size_t compressed_len,
+                               uint16_t *pixels_out, int width, int height);
+
+// SIMD-optimized eight-state version. FSE is scalar (8 OoO lanes already);
+// RLE expand and delta inverse run through the same SIMD paths used by the
+// 4-state SIMD variant (SSE2/AVX2/AVX-512 on x86, scalar on other targets).
+int mic_decompress_eight_state_simd(const uint8_t *compressed, size_t compressed_len,
+                                    uint16_t *pixels_out, int width, int height);
+
 #ifdef __cplusplus
 }
 #endif

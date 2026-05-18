@@ -563,6 +563,113 @@ static int compress4state(const uint16_t *src, int src_len,
 }
 
 // ---------------------------------------------------------------------------
+// FSE eight-state compression loop. Matches Go's compress8State().
+// Encodes src backwards using eight interleaved states (A..H).
+// Bit-budget: 8*tlog (<=112) bits per main-loop iteration; flushing every two
+// encodes keeps the 64-bit buffer fed for all tlog<=14.
+// ---------------------------------------------------------------------------
+static int compress8state(const uint16_t *src, int src_len,
+                            const sym_tt_t *tt, const uint32_t *st_table,
+                            uint8_t tlog, int zero_bits, bw_t *bw) {
+    (void)zero_bits;  // bit-budget already conservative
+    uint32_t init_st = 1u << tlog;
+    uint32_t sA = init_st, sB = init_st, sC = init_st, sD = init_st;
+    uint32_t sE = init_st, sF = init_st, sG = init_st, sH = init_st;
+    int ip = src_len;
+
+    // Align ip to a multiple of 8 by encoding the tail symbols first.
+    switch (ip & 7) {
+    case 1:
+        enc_sym(&sA, &tt[src[ip-1]], st_table, bw);
+        ip -= 1;
+        break;
+    case 2:
+        enc_sym(&sB, &tt[src[ip-1]], st_table, bw);
+        enc_sym(&sA, &tt[src[ip-2]], st_table, bw);
+        ip -= 2;
+        break;
+    case 3:
+        enc_sym(&sC, &tt[src[ip-1]], st_table, bw);
+        enc_sym(&sB, &tt[src[ip-2]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sA, &tt[src[ip-3]], st_table, bw);
+        ip -= 3;
+        break;
+    case 4:
+        enc_sym(&sD, &tt[src[ip-1]], st_table, bw);
+        enc_sym(&sC, &tt[src[ip-2]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sB, &tt[src[ip-3]], st_table, bw);
+        enc_sym(&sA, &tt[src[ip-4]], st_table, bw);
+        ip -= 4;
+        break;
+    case 5:
+        enc_sym(&sE, &tt[src[ip-1]], st_table, bw);
+        enc_sym(&sD, &tt[src[ip-2]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sC, &tt[src[ip-3]], st_table, bw);
+        enc_sym(&sB, &tt[src[ip-4]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sA, &tt[src[ip-5]], st_table, bw);
+        ip -= 5;
+        break;
+    case 6:
+        enc_sym(&sF, &tt[src[ip-1]], st_table, bw);
+        enc_sym(&sE, &tt[src[ip-2]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sD, &tt[src[ip-3]], st_table, bw);
+        enc_sym(&sC, &tt[src[ip-4]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sB, &tt[src[ip-5]], st_table, bw);
+        enc_sym(&sA, &tt[src[ip-6]], st_table, bw);
+        ip -= 6;
+        break;
+    case 7:
+        enc_sym(&sG, &tt[src[ip-1]], st_table, bw);
+        enc_sym(&sF, &tt[src[ip-2]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sE, &tt[src[ip-3]], st_table, bw);
+        enc_sym(&sD, &tt[src[ip-4]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sC, &tt[src[ip-5]], st_table, bw);
+        enc_sym(&sB, &tt[src[ip-6]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sA, &tt[src[ip-7]], st_table, bw);
+        ip -= 7;
+        break;
+    }
+
+    // Main loop: 8 symbols per iteration, flush every 2 encodes.
+    // With ip%8==0: ip-1→H, ip-2→G, …, ip-8→A.
+    for (; ip >= 8; ip -= 8) {
+        bw_flush32(bw);
+        enc_sym(&sH, &tt[src[ip-1]], st_table, bw);
+        enc_sym(&sG, &tt[src[ip-2]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sF, &tt[src[ip-3]], st_table, bw);
+        enc_sym(&sE, &tt[src[ip-4]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sD, &tt[src[ip-5]], st_table, bw);
+        enc_sym(&sC, &tt[src[ip-6]], st_table, bw);
+        bw_flush32(bw);
+        enc_sym(&sB, &tt[src[ip-7]], st_table, bw);
+        enc_sym(&sA, &tt[src[ip-8]], st_table, bw);
+    }
+
+    // Flush final states H→G→…→A. Decoder reads A first.
+    bw_flush32(bw); bw_add32(bw, sH, tlog);
+    bw_flush32(bw); bw_add32(bw, sG, tlog);
+    bw_flush32(bw); bw_add32(bw, sF, tlog);
+    bw_flush32(bw); bw_add32(bw, sE, tlog);
+    bw_flush32(bw); bw_add32(bw, sD, tlog);
+    bw_flush32(bw); bw_add32(bw, sC, tlog);
+    bw_flush32(bw); bw_add32(bw, sB, tlog);
+    bw_flush32(bw); bw_add32(bw, sA, tlog);
+    bw_close(bw);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // RLE encoder state. Matches Go's RleCompressU16.
 // ---------------------------------------------------------------------------
 typedef struct {
@@ -785,6 +892,8 @@ static int fse_compress_core(const uint16_t *rle_buf, int rle_len, uint8_t magic
     int rc;
     if (magic1 == 0x02)
         rc = compress2state(rle_buf, rle_len, sym_tt, st_tab, tlog, zero_bits, &bw);
+    else if (magic1 == 0x84)
+        rc = compress8state(rle_buf, rle_len, sym_tt, st_tab, tlog, zero_bits, &bw);
     else
         rc = compress4state(rle_buf, rle_len, sym_tt, st_tab, tlog, zero_bits, &bw);
 
@@ -827,6 +936,20 @@ int mic_compress_two_state(const uint16_t *pixels, int width, int height,
     if (delta_rle_encode(pixels, width, height, &rle_buf, &rle_len) != 0) return -2;
 
     int rc = fse_compress_core(rle_buf, rle_len, 0x02, out, out_cap, out_len);
+    free(rle_buf);
+    return rc;
+}
+
+int mic_compress_eight_state(const uint16_t *pixels, int width, int height,
+                              uint8_t *out, size_t out_cap, size_t *out_len) {
+    if (!pixels || !out || !out_len || width <= 0 || height <= 0) return -1;
+    if (out_cap < (size_t)(width * height * 2 + 4096)) return -1;
+
+    uint16_t *rle_buf = NULL;
+    int rle_len = 0;
+    if (delta_rle_encode(pixels, width, height, &rle_buf, &rle_len) != 0) return -2;
+
+    int rc = fse_compress_core(rle_buf, rle_len, 0x84, out, out_cap, out_len);
     free(rle_buf);
     return rc;
 }

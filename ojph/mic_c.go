@@ -86,6 +86,42 @@ func MICDecompressFourStateSIMD(compressed []byte, width, height int) ([]uint16,
 	return pixels, nil
 }
 
+// MICDecompressEightStateC decompresses a MIC eight-state FSE stream using the
+// scalar C implementation. Compatible with FSECompressU16EightState (Go) and
+// MICCompressEightStateC.
+func MICDecompressEightStateC(compressed []byte, width, height int) ([]uint16, error) {
+	pixels := make([]uint16, width*height)
+
+	rc := C.mic_decompress_eight_state(
+		(*C.uint8_t)(unsafe.Pointer(&compressed[0])),
+		C.size_t(len(compressed)),
+		(*C.uint16_t)(unsafe.Pointer(&pixels[0])),
+		C.int(width), C.int(height),
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("mic_decompress_eight_state failed: rc=%d", rc)
+	}
+	return pixels, nil
+}
+
+// MICDecompressEightStateSIMD decompresses using the SIMD-optimized C
+// eight-state implementation. SIMD applies to the RLE expand and delta inverse
+// passes; the FSE inner loop is scalar (eight independent OoO lanes).
+func MICDecompressEightStateSIMD(compressed []byte, width, height int) ([]uint16, error) {
+	pixels := make([]uint16, width*height)
+
+	rc := C.mic_decompress_eight_state_simd(
+		(*C.uint8_t)(unsafe.Pointer(&compressed[0])),
+		C.size_t(len(compressed)),
+		(*C.uint16_t)(unsafe.Pointer(&pixels[0])),
+		C.int(width), C.int(height),
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("mic_decompress_eight_state_simd failed: rc=%d", rc)
+	}
+	return pixels, nil
+}
+
 // MICDecompressParallelC decompresses a PICS blob (produced by
 // mic.CompressParallelStrips) using C pthreads.  Each horizontal strip is
 // decompressed concurrently by mic_decompress_four_state_simd (AMD64) or
@@ -164,6 +200,28 @@ func MICCompressTwoStateC(pixels []uint16, width, height int) ([]byte, error) {
 	)
 	if rc != 0 {
 		return nil, fmt.Errorf("mic_compress_two_state failed: rc=%d", rc)
+	}
+	return out[:outLen], nil
+}
+
+// MICCompressEightStateC compresses 16-bit pixels using the C eight-state
+// pipeline (Delta → RLE → FSE-8). Output is compatible with
+// MICDecompressEightStateC, MICDecompressEightStateSIMD, and the pure-Go
+// FSEDecompressU16EightState.
+func MICCompressEightStateC(pixels []uint16, width, height int) ([]byte, error) {
+	outCap := len(pixels)*2*2 + 4096
+	out := make([]byte, outCap)
+	var outLen C.size_t
+
+	rc := C.mic_compress_eight_state(
+		(*C.uint16_t)(unsafe.Pointer(&pixels[0])),
+		C.int(width), C.int(height),
+		(*C.uint8_t)(unsafe.Pointer(&out[0])),
+		C.size_t(outCap),
+		&outLen,
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("mic_compress_eight_state failed: rc=%d", rc)
 	}
 	return out[:outLen], nil
 }

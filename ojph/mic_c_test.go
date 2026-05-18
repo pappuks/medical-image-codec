@@ -215,6 +215,80 @@ func TestMICCorrectnessFourStateC(t *testing.T) {
 	}
 }
 
+// TestMICCorrectnessEightStateC verifies the C eight-state decoder (scalar and
+// SIMD variants) reproduce the source pixels exactly, and that the C encoder
+// and the Go encoder produce bitstream-interchangeable streams.
+func TestMICCorrectnessEightStateC(t *testing.T) {
+	for _, ti := range testImages {
+		t.Run(ti.name, func(t *testing.T) {
+			_, shortData, maxShort, cols, rows := loadTestImage(ti)
+			if len(shortData) == 0 {
+				t.Skip("could not load image")
+			}
+
+			// Path 1: Go encoder → C decoders.
+			var drc mic.DeltaRleCompressU16
+			deltaComp, err := drc.Compress(shortData, cols, rows, maxShort)
+			if err != nil {
+				t.Fatalf("delta+RLE: %v", err)
+			}
+			var s mic.ScratchU16
+			fse8Comp, err := mic.FSECompressU16EightState(deltaComp, &s)
+			if err != nil {
+				t.Fatalf("Go FSE8 compress: %v", err)
+			}
+
+			cPixels, err := MICDecompressEightStateC(fse8Comp, cols, rows)
+			if err != nil {
+				t.Fatalf("C 8-state decompress: %v", err)
+			}
+			simdPixels, err := MICDecompressEightStateSIMD(fse8Comp, cols, rows)
+			if err != nil {
+				t.Fatalf("C 8-state SIMD decompress: %v", err)
+			}
+			for i := range shortData {
+				if cPixels[i] != shortData[i] {
+					t.Fatalf("C scalar pixel %d: got %d, want %d", i, cPixels[i], shortData[i])
+				}
+				if simdPixels[i] != shortData[i] {
+					t.Fatalf("C SIMD pixel %d: got %d, want %d", i, simdPixels[i], shortData[i])
+				}
+			}
+
+			// Path 2: C encoder → Go decoder (cross-implementation roundtrip).
+			fse8CComp, err := MICCompressEightStateC(shortData, cols, rows)
+			if err != nil {
+				t.Fatalf("C 8-state compress: %v", err)
+			}
+			var sd mic.ScratchU16
+			rleSyms, err := mic.FSEDecompressU16EightState(fse8CComp, &sd)
+			if err != nil {
+				t.Fatalf("Go decode of C-encoded stream: %v", err)
+			}
+			var ddr mic.DeltaRleDecompressU16
+			ddr.Decompress(rleSyms, cols, rows)
+			for i := range shortData {
+				if ddr.Out[i] != shortData[i] {
+					t.Fatalf("Go-decoded C-encoded pixel %d: got %d, want %d", i, ddr.Out[i], shortData[i])
+				}
+			}
+
+			// Path 3: C encoder → C decoder.
+			cFromCPixels, err := MICDecompressEightStateC(fse8CComp, cols, rows)
+			if err != nil {
+				t.Fatalf("C 8-state decompress (C-encoded): %v", err)
+			}
+			for i := range shortData {
+				if cFromCPixels[i] != shortData[i] {
+					t.Fatalf("C↔C pixel %d: got %d, want %d", i, cFromCPixels[i], shortData[i])
+				}
+			}
+
+			t.Logf("OK: %s (%dx%d) — Go↔C, C↔Go, C↔C all match for %d pixels", ti.name, cols, rows, len(shortData))
+		})
+	}
+}
+
 // TestFourWayComparison prints a side-by-side comparison table: MIC-Go vs MIC-C vs MIC-SIMD vs HTJ2K.
 func TestFourWayComparison(t *testing.T) {
 	const decompRuns = 10
@@ -386,6 +460,8 @@ func BenchmarkAllCodecs(b *testing.B) {
 		fseComp, _ := mic.FSECompressU16TwoState(deltaComp, &s)
 		var s4 mic.ScratchU16
 		fse4Comp, _ := mic.FSECompressU16FourState(deltaComp, &s4)
+		var s8 mic.ScratchU16
+		fse8Comp, fse8Err := mic.FSECompressU16EightState(deltaComp, &s8)
 
 		htj2kComp, err := CompressU16(shortData, cols, rows, bitDepth)
 		if err != nil {
@@ -399,6 +475,10 @@ func BenchmarkAllCodecs(b *testing.B) {
 
 		micRatio := float64(origBytes) / float64(len(fseComp))
 		mic4Ratio := float64(origBytes) / float64(len(fse4Comp))
+		var mic8Ratio float64
+		if fse8Err == nil {
+			mic8Ratio = float64(origBytes) / float64(len(fse8Comp))
+		}
 		htj2kRatio := float64(origBytes) / float64(len(htj2kComp))
 		jplsRatio := float64(origBytes) / float64(len(jplsComp))
 
@@ -426,6 +506,20 @@ func BenchmarkAllCodecs(b *testing.B) {
 			b.ReportMetric(mic4Ratio, "ratio")
 		})
 
+		if fse8Err == nil {
+			b.Run("MIC-8state/"+ti.name, func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					var sd mic.ScratchU16
+					rleData, _ := mic.FSEDecompressU16EightState(fse8Comp, &sd)
+					var drd mic.DeltaRleDecompressU16
+					drd.Decompress(rleData, cols, rows)
+				}
+				b.ReportMetric(mic8Ratio, "ratio")
+			})
+		}
+
 		b.Run("MIC-4state-C/"+ti.name, func(b *testing.B) {
 			b.SetBytes(int64(origBytes))
 			b.ResetTimer()
@@ -443,6 +537,26 @@ func BenchmarkAllCodecs(b *testing.B) {
 			}
 			b.ReportMetric(mic4Ratio, "ratio")
 		})
+
+		if fse8Err == nil {
+			b.Run("MIC-8state-C/"+ti.name, func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					MICDecompressEightStateC(fse8Comp, cols, rows)
+				}
+				b.ReportMetric(mic8Ratio, "ratio")
+			})
+
+			b.Run("MIC-8state-SIMD/"+ti.name, func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					MICDecompressEightStateSIMD(fse8Comp, cols, rows)
+				}
+				b.ReportMetric(mic8Ratio, "ratio")
+			})
+		}
 
 		b.Run("MIC-C/"+ti.name, func(b *testing.B) {
 			b.SetBytes(int64(origBytes))
@@ -544,6 +658,8 @@ func BenchmarkAllCodecsEncode(b *testing.B) {
 		fse2Comp, _ := mic.FSECompressU16TwoState(deltaComp, &s2)
 		var s4 mic.ScratchU16
 		fse4Comp, _ := mic.FSECompressU16FourState(deltaComp, &s4)
+		var s8 mic.ScratchU16
+		fse8Comp, fse8Err := mic.FSECompressU16EightState(deltaComp, &s8)
 		fse4CComp, _ := MICCompressFourStateC(shortData, cols, rows)
 		fse2CComp, _ := MICCompressTwoStateC(shortData, cols, rows)
 		htj2kComp, err := CompressU16(shortData, cols, rows, bitDepth)
@@ -578,6 +694,20 @@ func BenchmarkAllCodecsEncode(b *testing.B) {
 			b.ReportMetric(float64(origBytes)/float64(len(fse4Comp)), "ratio")
 		})
 
+		if fse8Err == nil {
+			b.Run("MIC-8state/"+ti.name, func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					var drc mic.DeltaRleCompressU16
+					dc, _ := drc.Compress(shortData, cols, rows, maxShort)
+					var s mic.ScratchU16
+					mic.FSECompressU16EightState(dc, &s)
+				}
+				b.ReportMetric(float64(origBytes)/float64(len(fse8Comp)), "ratio")
+			})
+		}
+
 		b.Run("MIC-4state-C/"+ti.name, func(b *testing.B) {
 			b.SetBytes(int64(origBytes))
 			b.ResetTimer()
@@ -586,6 +716,18 @@ func BenchmarkAllCodecsEncode(b *testing.B) {
 			}
 			b.ReportMetric(float64(origBytes)/float64(len(fse4CComp)), "ratio")
 		})
+
+		fse8CComp, fse8CErr := MICCompressEightStateC(shortData, cols, rows)
+		if fse8CErr == nil {
+			b.Run("MIC-8state-C/"+ti.name, func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					MICCompressEightStateC(shortData, cols, rows)
+				}
+				b.ReportMetric(float64(origBytes)/float64(len(fse8CComp)), "ratio")
+			})
+		}
 
 		b.Run("MIC-C/"+ti.name, func(b *testing.B) {
 			b.SetBytes(int64(origBytes))
