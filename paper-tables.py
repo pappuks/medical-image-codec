@@ -13,6 +13,7 @@ run-paper-benchmarks.sh:
     04-fse-4state.txt              -> Table 6 (FSE 4-state)
     05-delta-zstd.txt              -> Table 1 Δ+Zstd-19 column
     06-wavelet-simd.txt            -> Wavelet column in Tables 1/4/5
+    10-fse-8state.txt              -> Table 6 (FSE 8-state)
 
 Tables are written both to stdout (aligned ASCII for terminal review) and to
 <results-dir>/paper-tables.txt.
@@ -75,7 +76,7 @@ def parse_results(results_dir: Path):
                 if len(parts) != 2:
                     continue
                 variant, image = parts
-            elif bench in ("FSEDecompress", "FSEDecompress4State"):
+            elif bench in ("FSEDecompress", "FSEDecompress4State", "FSEDecompress8State"):
                 # <image>/<state>
                 if len(parts) != 2:
                     continue
@@ -173,10 +174,12 @@ def _throughput_table(title, src, variants, header_labels, wavelet_data=None):
 def table_encode(data):
     """Tables 2/3 — Encoding throughput."""
     src = data.get("AllCodecsEncode", {})
-    variants = ["MIC-Go", "MIC-4state", "MIC-4state-C", "MIC-C",
+    variants = ["MIC-Go", "MIC-4state", "MIC-8state",
+                "MIC-4state-C", "MIC-8state-C", "MIC-C",
                 "Wavelet+SIMD", "HTJ2K", "JPEGLS",
                 "PICS-2", "PICS-4", "PICS-8"]
-    labels = ["MIC-Go", "MIC-4s", "MIC-4s-C", "MIC-C",
+    labels = ["MIC-Go", "MIC-4s", "MIC-8s",
+              "MIC-4s-C", "MIC-8s-C", "MIC-C",
               "Wav+SIMD", "HTJ2K", "JPEG-LS",
               "PICS-2", "PICS-4", "PICS-8"]
     return _throughput_table(
@@ -188,10 +191,14 @@ def table_decompress(data):
     """Tables 4/5 — Decompression throughput."""
     src = data.get("AllCodecs", {})
     wav = data.get("WaveletV2SIMDRLEFSECompress", {}).get("_", {})
-    variants = ["MIC-Go", "MIC-4state", "MIC-4state-C", "MIC-4state-SIMD",
+    variants = ["MIC-Go", "MIC-4state", "MIC-8state",
+                "MIC-4state-C", "MIC-8state-C",
+                "MIC-4state-SIMD", "MIC-8state-SIMD",
                 "__wavelet__", "HTJ2K", "JPEGLS",
                 "PICS-C-2", "PICS-C-4", "PICS-C-8"]
-    labels = ["MIC-Go", "MIC-4s", "MIC-4s-C", "MIC-4s-SIMD",
+    labels = ["MIC-Go", "MIC-4s", "MIC-8s",
+              "MIC-4s-C", "MIC-8s-C",
+              "MIC-4s-SIMD", "MIC-8s-SIMD",
               "Wav+SIMD", "HTJ2K", "JPEG-LS",
               "PICS-C-2", "PICS-C-4", "PICS-C-8"]
     return _throughput_table(
@@ -200,28 +207,44 @@ def table_decompress(data):
 
 
 def table_fse(data):
-    """Table 6 — FSE 1-state vs 4-state microbench."""
+    """Table 6 — FSE 1-state vs 4-state vs 8-state microbench."""
     one = data.get("FSEDecompress", {}).get("1state", {})
     four = data.get("FSEDecompress4State", {}).get("4state", {})
+    # The 8-state benchmark also emits a 4-state row on the same compressed
+    # input, but we keep the canonical 4-state from FSEDecompress4State and
+    # only consume the 8-state row from here.
+    eight = data.get("FSEDecompress8State", {}).get("8state", {})
 
-    headers = ["Image", "1-state MB/s", "4-state MB/s", "gain"]
+    headers = ["Image", "1-state MB/s", "4-state MB/s", "8-state MB/s",
+               "gain 4/1", "gain 8/4"]
     rows = []
-    one_vals, four_vals = [], []
+    one_vals, four_vals, eight_vals = [], [], []
     for img in IMAGE_ORDER:
         b = one.get(img, (None, None))[0]
         f = four.get(img, (None, None))[0]
-        rows.append([img, fmt_mbs(b), fmt_mbs(f), fmt_gain(b, f)])
+        e = eight.get(img, (None, None))[0]
+        rows.append([
+            img, fmt_mbs(b), fmt_mbs(f), fmt_mbs(e),
+            fmt_gain(b, f), fmt_gain(f, e),
+        ])
         if b is not None and f is not None and b > 0:
             one_vals.append(b)
             four_vals.append(f)
+        if e is not None:
+            eight_vals.append(e)
 
-    # Geometric mean across images that have both numbers (matches the paper's
-    # "Geomean (21)" row).
-    if one_vals and four_vals:
-        from math import exp, log
-        gm = lambda xs: exp(sum(log(x) for x in xs) / len(xs))
-        gm1, gm4 = gm(one_vals), gm(four_vals)
-        rows.append(["Geomean", fmt_mbs(gm1), fmt_mbs(gm4), fmt_gain(gm1, gm4)])
+    # Geometric mean across images that have all three numbers (matches the
+    # paper's "Geomean (21)" row).
+    from math import exp, log
+    gm = lambda xs: exp(sum(log(x) for x in xs) / len(xs)) if xs else None
+    gm1 = gm(one_vals)
+    gm4 = gm(four_vals)
+    gm8 = gm(eight_vals)
+    if gm1 is not None and gm4 is not None:
+        rows.append([
+            "Geomean", fmt_mbs(gm1), fmt_mbs(gm4), fmt_mbs(gm8),
+            fmt_gain(gm1, gm4), fmt_gain(gm4, gm8),
+        ])
     return render_table(
         "Table 6 — FSE decompression microbench (paper tab:fse-combined)",
         headers, rows)

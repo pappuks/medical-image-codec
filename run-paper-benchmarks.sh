@@ -23,9 +23,10 @@
 #                                      BenchmarkMICCDeltaZstdDecomp    (Delta+Zstd-19 decoding column)
 #                                      BenchmarkWaveletV2SIMDRLEFSECompress  (Wavelet+SIMD column)
 #
-#   Table 6  (tab:fse-combined)      FSE microbench, 1-state vs 4-state
+#   Table 6  (tab:fse-combined)      FSE microbench, 1/4/8-state
 #                                      BenchmarkFSEDecompress          (1-state)
 #                                      BenchmarkFSEDecompress4State    (4-state)
+#                                      BenchmarkFSEDecompress8State    (8-state: 4-state baseline + 8-state)
 #
 # The Delta+Zstd-19 row is produced by BenchmarkMICCDeltaZstdDecomp /
 # BenchmarkMICCDeltaZstdEnc in ojph/delta_zstd_micc_test.go (build tags
@@ -121,6 +122,12 @@ run_bench "FSE 4-state microbench              (Table 6:      BenchmarkFSEDecomp
   "04-fse-4state.txt" \
   -benchmem -run=^$ -benchtime="${BENCHTIME}" \
   -bench '^BenchmarkFSEDecompress4State$' .
+
+# -------- Table 6 (extended): FSE 8-state vs 4-state microbench --------
+run_bench "FSE 8-state microbench              (Table 6:      BenchmarkFSEDecompress8State)" \
+  "10-fse-8state.txt" \
+  -benchmem -run=^$ -benchtime="${BENCHTIME}" \
+  -bench '^BenchmarkFSEDecompress8State$' .
 
 # -------- Tables 1, 4, 5: Delta+Zstd-19 decoding column (in-process libzstd) --------
 run_bench "Delta+Zstd-19 decoding              (Tables 1/4/5 column)" \
