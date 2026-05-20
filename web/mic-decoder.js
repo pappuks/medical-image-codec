@@ -203,11 +203,15 @@ class FSEDecompressor {
 
   /**
    * Decompress FSE-encoded bytes into uint16 symbols.
-   * Automatically detects 1-state vs 2-state vs 4-state format via magic bytes.
+   * Auto-detects 1-state / 2-state / 4-state / 8-state format via magic bytes.
    * @param {Uint8Array} input - FSE compressed data
    * @returns {Uint16Array} decompressed uint16 symbols
    */
   decompress(input) {
+    // 8-state magic: [0xFF][0x84] followed by 4-byte LE count
+    if (input.length >= 2 && input[0] === 0xFF && input[1] === 0x84) {
+      return this._decompress8State(input);
+    }
     // 4-state magic: [0xFF][0x04] followed by 4-byte LE count
     if (input.length >= 2 && input[0] === 0xFF && input[1] === 0x04) {
       return this._decompress4State(input);
@@ -220,6 +224,20 @@ class FSEDecompressor {
     this._readNCount();
     this._buildDtable();
     return this._decompressStream();
+  }
+
+  /**
+   * Dispatch for 8-state FSE streams (magic [0xFF][0x84]).
+   * @param {Uint8Array} input - full 8-state compressed buffer (including 6-byte header)
+   * @returns {Uint16Array}
+   */
+  _decompress8State(input) {
+    if (input.length < 6) throw new Error('fse8state: input too small');
+    const count = (input[2] | (input[3] << 8) | (input[4] << 16) | ((input[5] << 24) >>> 0)) >>> 0;
+    this.byteReader.init(input.subarray(6));
+    this._readNCount();
+    this._buildDtable();
+    return this._decompressStream8State(count);
   }
 
   /**
@@ -461,6 +479,147 @@ class FSEDecompressor {
       stateD = nD.newState + br.getBits(nD.nbBits);
       out[outPos++] = nD.symbol;
       remaining--;
+    }
+
+    br.close();
+    return out;
+  }
+
+  /**
+   * Decode an 8-state FSE bitstream into exactly `count` symbols.
+   * Eight independent state machines (A..H) handle symbols at positions
+   * mod 8 == 0..7 respectively, mirroring the Go compress8State /
+   * decompress8State implementation in fse8state.go.
+   * @param {number} count - exact number of symbols to produce
+   * @returns {Uint16Array}
+   */
+  _decompressStream8State(count) {
+    const br = this.bitReader;
+    br.init(this.byteReader.unread());
+
+    const dt = this.decTable;
+    const tableLog = this.actualTableLog;
+
+    // Read initial states A..H in order. Encoder wrote H..A last, so decoder
+    // reads A first (top of reversed stream). Refills mirror the Go encoder
+    // pattern: a fill between every pair of state reads.
+    let stateA = br.getBits(tableLog);
+    let stateB = br.getBits(tableLog);
+    br.fill();
+    let stateC = br.getBits(tableLog);
+    let stateD = br.getBits(tableLog);
+    br.fill();
+    let stateE = br.getBits(tableLog);
+    let stateF = br.getBits(tableLog);
+    br.fill();
+    let stateG = br.getBits(tableLog);
+    let stateH = br.getBits(tableLog);
+
+    const out = new Uint16Array(count);
+    let outPos = 0;
+    let remaining = count;
+
+    if (!this.zeroBits) {
+      while (br.off >= 16 && remaining >= 8) {
+        br.fillFast();
+        const nA = dt[stateA];
+        const nB = dt[stateB];
+        const lowA = br.getBitsFast(nA.nbBits);
+        const lowB = br.getBitsFast(nB.nbBits);
+        stateA = nA.newState + lowA;
+        stateB = nB.newState + lowB;
+
+        br.fillFast();
+        const nC = dt[stateC];
+        const nD = dt[stateD];
+        const lowC = br.getBitsFast(nC.nbBits);
+        const lowD = br.getBitsFast(nD.nbBits);
+        stateC = nC.newState + lowC;
+        stateD = nD.newState + lowD;
+
+        br.fillFast();
+        const nE = dt[stateE];
+        const nF = dt[stateF];
+        const lowE = br.getBitsFast(nE.nbBits);
+        const lowF = br.getBitsFast(nF.nbBits);
+        stateE = nE.newState + lowE;
+        stateF = nF.newState + lowF;
+
+        br.fillFast();
+        const nG = dt[stateG];
+        const nH = dt[stateH];
+        const lowG = br.getBitsFast(nG.nbBits);
+        const lowH = br.getBitsFast(nH.nbBits);
+        stateG = nG.newState + lowG;
+        stateH = nH.newState + lowH;
+
+        out[outPos++] = nA.symbol;
+        out[outPos++] = nB.symbol;
+        out[outPos++] = nC.symbol;
+        out[outPos++] = nD.symbol;
+        out[outPos++] = nE.symbol;
+        out[outPos++] = nF.symbol;
+        out[outPos++] = nG.symbol;
+        out[outPos++] = nH.symbol;
+        remaining -= 8;
+      }
+    } else {
+      while (br.off >= 16 && remaining >= 8) {
+        br.fillFast();
+        const nA = dt[stateA];
+        const nB = dt[stateB];
+        const lowA = br.getBits(nA.nbBits);
+        const lowB = br.getBits(nB.nbBits);
+        stateA = nA.newState + lowA;
+        stateB = nB.newState + lowB;
+
+        br.fillFast();
+        const nC = dt[stateC];
+        const nD = dt[stateD];
+        const lowC = br.getBits(nC.nbBits);
+        const lowD = br.getBits(nD.nbBits);
+        stateC = nC.newState + lowC;
+        stateD = nD.newState + lowD;
+
+        br.fillFast();
+        const nE = dt[stateE];
+        const nF = dt[stateF];
+        const lowE = br.getBits(nE.nbBits);
+        const lowF = br.getBits(nF.nbBits);
+        stateE = nE.newState + lowE;
+        stateF = nF.newState + lowF;
+
+        br.fillFast();
+        const nG = dt[stateG];
+        const nH = dt[stateH];
+        const lowG = br.getBits(nG.nbBits);
+        const lowH = br.getBits(nH.nbBits);
+        stateG = nG.newState + lowG;
+        stateH = nH.newState + lowH;
+
+        out[outPos++] = nA.symbol;
+        out[outPos++] = nB.symbol;
+        out[outPos++] = nC.symbol;
+        out[outPos++] = nD.symbol;
+        out[outPos++] = nE.symbol;
+        out[outPos++] = nF.symbol;
+        out[outPos++] = nG.symbol;
+        out[outPos++] = nH.symbol;
+        remaining -= 8;
+      }
+    }
+
+    // Tail: drain remaining symbols in A..H order.
+    const states = [stateA, stateB, stateC, stateD, stateE, stateF, stateG, stateH];
+    while (remaining > 0) {
+      for (let i = 0; i < 8; i++) {
+        if (remaining === 0) break;
+        br.fill();
+        const n = dt[states[i]];
+        states[i] = n.newState + br.getBits(n.nbBits);
+        out[outPos++] = n.symbol;
+        remaining--;
+      }
     }
 
     br.close();

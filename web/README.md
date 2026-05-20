@@ -27,7 +27,7 @@ Provides two decoder implementations — a pure JavaScript ES module and a Go We
 go run ./cmd/mic-compress/ -testdata
 ```
 
-This compresses the test images (MR, CT, CR, MG1-3) into single-frame `.mic` files and multi-frame DICOM images (MG_TOMO) into MIC2 `.mic` files under `web/testdata/`.
+This compresses the test images (MR, CT, CR, MG1-3) into single-frame `.mic` files and multi-frame DICOM images (MG_TOMO) into MIC2 `.mic` files under `web/testdata/`. Each grayscale image is emitted three times — 1-state (default), 4-state (`_4s.mic`), and 8-state (`_8s.mic`) FSE — plus PICS parallel-strip variants (`_pics4.mic`, `_pics8.mic`, `_pics4_8s.mic`, `_pics8_8s.mic`) so the JS decoder and benchmark can be exercised against every entropy-coder variant.
 
 ### 2. Build the WASM decoder (optional)
 
@@ -83,7 +83,7 @@ A pure ES module with zero dependencies. Works in any modern browser or Node.js 
 
 | Property | Value |
 |----------|-------|
-| Bundle size | ~49 KB source, ~17 KB minified (`mic-decoder.min.js`) |
+| Bundle size | ~54 KB source, ~19 KB minified (`mic-decoder.min.js`) |
 | Dependencies | None |
 | Build step | None required |
 | Browser requirement | `BigInt` support (all major browsers since 2020) |
@@ -368,10 +368,10 @@ sed -i 's|./mic-decoder.js|./mic-decoder.min.js|g' mic-worker.min.js
 
 | File | Source | Minified |
 |------|--------|----------|
-| `mic-decoder.js` | ~49 KB | ~17 KB |
+| `mic-decoder.js` | ~54 KB | ~19 KB |
 | `mic-decoder-parallel.js` | ~9.5 KB | ~3.3 KB |
 | `mic-worker.js` | ~4 KB | ~1 KB |
-| **Total** | **~62 KB** | **~22 KB** |
+| **Total** | **~68 KB** | **~24 KB** |
 
 > The `sed` step is required because terser does not rewrite string literals — the `import … from './mic-decoder.js'` and `new URL('./mic-worker.js', …)` references inside the source files must be updated to point to the `.min.js` counterparts.
 
@@ -532,6 +532,17 @@ Original 16-bit pixels (Uint16Array)
 
 FSE is an asymmetric numeral system (ANS) — a modern entropy coder that achieves near-optimal compression like arithmetic coding but with table-based O(1) encode/decode per symbol.
 
+**Stream-format auto-detection.** `MICDecoder.decompress` looks at the first two bytes of the FSE payload and dispatches to the matching decode loop:
+
+| Magic prefix | Decoder | Notes |
+|--------------|---------|-------|
+| `[0xFF, 0x84]` | 8-state (`_decompressStream8State`) | Eight independent state chains A..H, default for C/Go encoder. |
+| `[0xFF, 0x04]` | 4-state (`_decompressStream4State`) | Four chains A..D, practical JS sweet spot on V8 (see [Benchmarks](#benchmark)). |
+| `[0xFF, 0x02]` | 2-state (`_decompressStream2State`) | Two chains A, B. |
+| (no magic)     | 1-state (`_decompressStream`)       | Single chain — legacy / fallback. |
+
+All four variants share the same `readNCount` + `buildDtable` front-end; only the inner state-machine count differs. Each variant produces bit-identical output for the same compressed bytes — they are alternative *encoders*, not alternative *formats*.
+
 **Header parsing (`readNCount`):** The first bytes of the compressed stream contain a variable-length encoded frequency table:
 - Bits 0-3: `tableLog - 5` (table size = 2^tableLog states)
 - Remaining bits: Normalized symbol probabilities encoded with a Huffman-like variable-length scheme
@@ -546,8 +557,8 @@ FSE is an asymmetric numeral system (ANS) — a modern entropy coder that achiev
 **Bitstream decoding:** The FSE bitstream is read **in reverse** (from the last byte towards the first). This is fundamental to how ANS works — the encoder writes bits backwards so the decoder can read them forwards through a state machine:
 1. Initialize the 64-bit bit buffer from the last 8 bytes of input
 2. The alignment marker (highest set bit of the final byte) synchronizes the reader
-3. Read `tableLog` bits for the initial state
-4. Main loop: look up `decTable[state]` → emit symbol, read `nbBits` bits, compute next state as `newState + lowBits`
+3. Read `tableLog` bits for *each* initial state (1, 2, 4, or 8 of them depending on the variant), with `br.fill()` calls between groups so the 64-bit buffer never empties
+4. Main loop: look up `decTable[state_k]` → emit symbol, read `nbBits` bits, compute next state as `newState + lowBits`; the multi-state variants interleave 2/4/8 such lookups per iteration so a wide out-of-order engine can run them in parallel
 5. Two code paths: fast (no symbol has probability > 50%) and safe (some symbols emit 0 bits, requiring bounds checks)
 
 ### Stage 2: RLE (Run-Length Encoding) Decompression
@@ -611,59 +622,37 @@ All images verified pixel-perfect against the Go implementation:
 
 Times measured in Node.js v22 (V8). Browser performance varies by engine and device. Mammography images (MG1/MG2) achieve the best compression ratios because large areas of the detector are unexposed (uniform background), which delta encoding + RLE compress extremely well.
 
-### Benchmark — Apple M2 Max (Node.js v24.8, 20 iterations)
+### Benchmark — Apple M4 Pro (Node.js v22.16, 20 iterations + 3 warm-up)
 
-Run with `node bench-decoder.mjs`. Reports median decode time, throughput (decompressed MB/s), and megapixels/s.
+Run with `node bench-decoder.mjs`. Reports median decode time, throughput (decompressed MB/s), and megapixels/s. Numbers below are from the 14-core M4 Pro (10 P-cores + 4 E-cores) — the same reference platform the [IEEE paper](../paper/mic-paper-v8-ieee-tmi.pdf) uses for the C and Go benchmarks.
 
-#### Single-threaded (pure JS decoder)
+#### Single-threaded (pure JS decoder) — 4-state vs 8-state FSE
 
-| Image | Dimensions | Comp KB | Out MB | Ratio | Median ms | MB/s | MP/s |
-|-------|-----------|---------|--------|-------|-----------|------|------|
-| MR (1-state) | 256×256 | 54 | 0.13 | 2.35 | 3.6 | 35 | 18.3 |
-| CT (1-state) | 512×512 | 229 | 0.50 | 2.24 | 13.8 | 36 | 19.0 |
-| CR (1-state) | 1760×2140 | 1992 | 7.18 | 3.69 | 161.9 | 44 | 23.3 |
-| MG1 (1-state) | 1996×2457 | 1090 | 9.35 | 8.79 | 84.0 | 111 | 58.4 |
-| MG2 (1-state) | 1996×2457 | 1092 | 9.35 | 8.77 | 83.5 | 112 | 58.7 |
-| MG3 (1-state) | 3064×4774 | 12480 | 27.90 | 2.29 | 631.0 | 44 | 23.2 |
-| MR (4-state) | 256×256 | 54 | 0.13 | 2.35 | 3.0 | 42 | 21.8 |
-| CT (4-state) | 512×512 | 229 | 0.50 | 2.24 | 13.5 | 37 | 19.5 |
-| CR (4-state) | 1760×2140 | 1992 | 7.18 | 3.69 | 161.2 | 45 | 23.4 |
-| MG1 (4-state) | 1996×2457 | 1090 | 9.35 | 8.78 | 81.9 | 114 | 59.9 |
-| MG2 (4-state) | 1996×2457 | 1092 | 9.35 | 8.77 | 80.9 | 116 | 60.6 |
-| MG3 (4-state) | 3064×4774 | 12480 | 27.90 | 2.29 | 638.4 | 44 | 22.9 |
-| MR (PICS-4 seq) | 256×256 | 56 | 0.13 | 2.28 | 3.4 | 37 | 19.4 |
-| CT (PICS-4 seq) | 512×512 | 239 | 0.50 | 2.14 | 14.0 | 36 | 18.7 |
-| CR (PICS-8 seq) | 1760×2140 | 1981 | 7.18 | 3.71 | 167.0 | 43 | 22.6 |
-| MG1 (PICS-8 seq) | 1996×2457 | 1080 | 9.35 | 8.87 | 84.2 | 111 | 58.3 |
+The JS decoder auto-detects the FSE state count from the 2-byte magic prefix and dispatches to the matching loop (see [Stage 1](#stage-1-fse-finite-state-entropy--tans-decompression)). All four variants produce bit-identical output.
 
-Peak single-threaded throughput by modality: MR 42 MB/s · CT 37 MB/s · CR 45 MB/s · MG 116 MB/s.
+| Image | Dimensions | Ratio | 1-state ms / MB/s | 4-state ms / MB/s | 8-state ms / MB/s |
+|-------|------------|-------|-------------------|-------------------|-------------------|
+| MR  | 256×256   | 2.35× | 3.1 / 41  | **2.5 / 50**  | 3.3 / 38  |
+| CT  | 512×512   | 2.24× | 11.0 / 46 | **11.9 / 42** | 14.1 / 36 |
+| CR  | 1760×2140 | 3.69× | 133.6 / 54 | **136.4 / 53** | 151.4 / 47 |
+| MG1 | 1996×2457 | 8.79× | 65.7 / 142 | **68.1 / 137** | 78.3 / 120 |
+| MG2 | 1996×2457 | 8.77× | 65.4 / 143 | **66.9 / 140** | 74.3 / 126 |
+| MG3 | 3064×4774 | 2.29× | 501.5 / 56 | **514.5 / 54** | 563.7 / 49 |
 
-#### Parallel worker_threads (PICS strips, SharedArrayBuffer, 12 CPU cores)
+**Why 4-state wins in JS.** In the C/Go decoder, 8 independent state chains expose enough instruction-level parallelism for a wide out-of-order engine (or AVX-512 gather) to retire ~8 lookups per cycle. V8's single-thread scheduler saturates around 4 chains, so the extra 4 chains in the 8-state variant add per-symbol bookkeeping (state initialisation, tail handling) without shortening the critical path. The 8-state path is still useful — it lets the JS decoder read C-encoded streams without transcoding — but 4-state remains the practical JS sweet spot.
 
-PICS files encode an image as independent strips, enabling parallel decoding across `worker_threads`. The table shows median decode time and throughput for 1–12 workers, with speedup relative to 1 worker.
+#### Parallel worker_threads (PICS strips, SharedArrayBuffer, M4 Pro 14 cores)
 
-| Image | strips | workers | Median ms | MB/s | Speedup |
-|-------|--------|---------|-----------|------|---------|
-| MR 256×256 | 4 | 1 | 3.4 | 37 | 1.00× |
-| | | 2 | 2.0 | 62 | 1.69× |
-| | | 4 | 1.6 | 76 | 2.08× |
-| | | 8 | **1.3** | **94** | **2.57×** |
-| CT 512×512 | 4 | 1 | 14.6 | 34 | 1.00× |
-| | | 2 | 9.4 | 53 | 1.55× |
-| | | 4 | 6.1 | 82 | 2.38× |
-| | | 8 | **5.0** | **101** | **2.95×** |
-| CR 1760×2140 | 8 | 1 | 175.4 | 41 | 1.00× |
-| | | 2 | 88.8 | 81 | 1.98× |
-| | | 4 | 50.0 | 144 | 3.51× |
-| | | 8 | 34.6 | 208 | 5.07× |
-| | | 12 | **31.7** | **227** | **5.53×** |
-| MG1 1996×2457 | 8 | 1 | 84.4 | 111 | 1.00× |
-| | | 2 | 46.9 | 200 | 1.80× |
-| | | 4 | 31.8 | 294 | 2.65× |
-| | | 8 | 20.2 | 464 | 4.19× |
-| | | 12 | **19.4** | **483** | **4.36×** |
+PICS files encode an image as independent strips, enabling parallel decoding across `worker_threads`. The bench sweeps worker counts {1, 2, 4, 8, 14}; the table below reports the best wall-time for each variant.
 
-Workers beyond the strip count (e.g., 8 workers for a 4-strip file) are capped to the strip count. For large images (CR, MG1) with 8 strips, scaling to 8–12 workers yields 4–5.5× speedup and pushes throughput to **227–483 MB/s** — well into real-time territory for diagnostic workloads.
+| Image | strips | 4-state strips ms / MB/s | 8-state strips ms / MB/s |
+|-------|--------|--------------------------|--------------------------|
+| MR  256×256   | 4 | **1.1 / 111** (8 workers)  | 1.3 / 97  (8/14 workers) |
+| CT  512×512   | 4 | **4.2 / 120** (4 workers)  | 4.7 / 108 (8 workers)    |
+| CR  1760×2140 | 8 | 33.4 / 215 (14 workers)    | **31.8 / 226** (14 workers) |
+| MG1 1996×2457 | 8 | **19.8 / 473** (14 workers) | 20.5 / 457 (8/14 workers) |
+
+Workers beyond the strip count are capped to the strip count by the pool. For large images (CR, MG1) the 8-strip layout scales to ~5× speedup and pushes throughput to **215–473 MB/s** — well into real-time territory for diagnostic workloads. The 8-state variant catches up on CR (longer strips → V8 has time to amortise the wider state-init cost over more symbols) but is otherwise within ~5% of the 4-state variant.
 
 ## Troubleshooting
 
@@ -700,7 +689,7 @@ Run `go run ./cmd/mic-compress/ -testdata` from the repository root to generate 
 ```
 web/
 ├── mic-decoder.js             # Pure JS decoder — source (~49 KB)
-├── mic-decoder.min.js         # Pure JS decoder — minified (~17 KB, used by index.html)
+├── mic-decoder.min.js         # Pure JS decoder — minified (~19 KB, used by index.html)
 ├── mic-decoder-parallel.js    # Parallel PICS/RGB decoder — source (~9.5 KB)
 ├── mic-decoder-parallel.min.js# Parallel PICS/RGB decoder — minified (~3.3 KB, used by index.html)
 ├── mic-worker.js              # Web Worker for parallel decoding — source (~4 KB)

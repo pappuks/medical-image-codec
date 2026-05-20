@@ -90,11 +90,23 @@ const tests = [
   { mic: 'testdata/MG1_4s.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 4-state (1996x2457)' },
   { mic: 'testdata/MG2_4s.mic', raw: '../testdata/MG_Image_2_frame.bin', name: 'MG2 4-state (1996x2457)' },
   { mic: 'testdata/MG3_4s.mic', raw: '../testdata/MG1.RAW', name: 'MG3 4-state (3064x4774)' },
+  // 8-state FSE variants
+  { mic: 'testdata/MR_8s.mic', raw: '../testdata/MR_256_256_image.bin', name: 'MR 8-state (256x256)' },
+  { mic: 'testdata/CT_8s.mic', raw: '../testdata/CT_512_512_image.bin', name: 'CT 8-state (512x512)' },
+  { mic: 'testdata/CR_8s.mic', raw: '../testdata/CR_1760_2140_image.bin', name: 'CR 8-state (1760x2140)' },
+  { mic: 'testdata/MG1_8s.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 8-state (1996x2457)' },
+  { mic: 'testdata/MG2_8s.mic', raw: '../testdata/MG_Image_2_frame.bin', name: 'MG2 8-state (1996x2457)' },
+  { mic: 'testdata/MG3_8s.mic', raw: '../testdata/MG1.RAW', name: 'MG3 8-state (3064x4774)' },
   // PICS parallel strip variants (4-state FSE per strip, decoded sequentially in JS)
   { mic: 'testdata/MR_pics4.mic', raw: '../testdata/MR_256_256_image.bin', name: 'MR PICS-4 (256x256)' },
   { mic: 'testdata/CT_pics4.mic', raw: '../testdata/CT_512_512_image.bin', name: 'CT PICS-4 (512x512)' },
   { mic: 'testdata/CR_pics8.mic', raw: '../testdata/CR_1760_2140_image.bin', name: 'CR PICS-8 (1760x2140)' },
   { mic: 'testdata/MG1_pics8.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 PICS-8 (1996x2457)' },
+  // PICS parallel strip variants (8-state FSE per strip)
+  { mic: 'testdata/MR_pics4_8s.mic', raw: '../testdata/MR_256_256_image.bin', name: 'MR PICS-4 8s (256x256)' },
+  { mic: 'testdata/CT_pics4_8s.mic', raw: '../testdata/CT_512_512_image.bin', name: 'CT PICS-4 8s (512x512)' },
+  { mic: 'testdata/CR_pics8_8s.mic', raw: '../testdata/CR_1760_2140_image.bin', name: 'CR PICS-8 8s (1760x2140)' },
+  { mic: 'testdata/MG1_pics8_8s.mic', raw: '../testdata/MG_image_bin2.bin', name: 'MG1 PICS-8 8s (1996x2457)' },
 ];
 
 let passed = 0;

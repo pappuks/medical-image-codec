@@ -81,7 +81,7 @@ self.onmessage = function (e) {
       blob = new Uint8Array(msg.blobBuffer);
     }
 
-    // Decode: FSE + RLE + Delta pipeline (auto-detects 2-state vs 4-state)
+    // Decode: FSE + RLE + Delta pipeline (auto-detects 1/2/4/8-state)
     const pixels = MICDecoder.decode(blob, width, stripHeight);
 
     if (msg.outBuffer) {

@@ -98,6 +98,10 @@ func compressImage4State(shortData []uint16, width, height int, maxValue uint16)
 	return mic.CompressSingleFrame4State(shortData, width, height, maxValue)
 }
 
+func compressImage8State(shortData []uint16, width, height int, maxValue uint16) ([]byte, error) {
+	return mic.CompressSingleFrame8State(shortData, width, height, maxValue)
+}
+
 // readDicomMultiFrame reads all frames from a multiframe DICOM file.
 func readDicomMultiFrame(fileName string) ([][]uint16, int, int, uint16, error) {
 	dataset, err := dicom.ParseFile(fileName, nil)
@@ -490,6 +494,43 @@ func main() {
 				img.name, len(byteData), len(compressed), ratio, outPath)
 		}
 
+		// Compress single-frame test images with 8-state FSE (MIC1, suffix _8s)
+		for _, img := range testImages {
+			fmt.Printf("Compressing %s 8-state (%dx%d)...\n", img.name, img.cols, img.rows)
+
+			byteData, err := os.ReadFile(img.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  skip %s: %v\n", img.name, err)
+				continue
+			}
+
+			shortData := make([]uint16, img.cols*img.rows)
+			var maxValue uint16
+			for i := 0; i < len(byteData); i += 2 {
+				v := uint16(byteData[i]) | (uint16(byteData[i+1]) << 8)
+				shortData[i/2] = v
+				if v > maxValue {
+					maxValue = v
+				}
+			}
+
+			compressed, err := compressImage8State(shortData, img.cols, img.rows, maxValue)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s: %v\n", img.name, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, img.name+"_8s.mic")
+			if err := writeMicFile(outPath, img.cols, img.rows, compressed); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			ratio := float64(len(byteData)) / float64(len(compressed))
+			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				img.name, len(byteData), len(compressed), ratio, outPath)
+		}
+
 		// Compress PICS parallel-strip test images (4-state FSE per strip)
 		srcMap := make(map[string]testImage)
 		for _, img := range testImages {
@@ -532,6 +573,49 @@ func main() {
 
 			ratio := float64(len(byteData)) / float64(len(compressed))
 			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
+				p.outName, len(byteData), len(compressed), ratio, outPath)
+		}
+
+		// Compress PICS parallel-strip test images (8-state FSE per strip)
+		// Output suffix: <name>_pics<N>_8s.mic so the JS bench can pick either
+		// 4-state or 8-state strip variants of the same PICS image.
+		for _, p := range picsTestImages {
+			img, ok := srcMap[p.srcName]
+			if !ok {
+				continue
+			}
+			fmt.Printf("Compressing PICS %s (%d strips, 8-state)...\n", p.outName, p.numStrips)
+
+			byteData, err := os.ReadFile(img.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  skip %s_8s: %v\n", p.outName, err)
+				continue
+			}
+
+			shortData := make([]uint16, img.cols*img.rows)
+			var maxValue uint16
+			for i := 0; i < len(byteData); i += 2 {
+				v := uint16(byteData[i]) | (uint16(byteData[i+1]) << 8)
+				shortData[i/2] = v
+				if v > maxValue {
+					maxValue = v
+				}
+			}
+
+			compressed, err := mic.CompressParallelStrips8State(shortData, img.cols, img.rows, maxValue, p.numStrips)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error compressing %s_8s: %v\n", p.outName, err)
+				continue
+			}
+
+			outPath := filepath.Join(outDir, p.outName+"_8s.mic")
+			if err := os.WriteFile(outPath, compressed, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", outPath, err)
+				continue
+			}
+
+			ratio := float64(len(byteData)) / float64(len(compressed))
+			fmt.Printf("  %s_8s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
 				p.outName, len(byteData), len(compressed), ratio, outPath)
 		}
 

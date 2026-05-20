@@ -782,9 +782,13 @@ categories.
   \texttt{c8i.4xlarge} (Intel Xeon~6 / Granite Rapids, 16~vCPU), Ubuntu
   Linux 24.04. Go compiler (gc) with default optimization; C components
   compiled with \texttt{-O3 -march=native}.
-  \item \textbf{ARM64 JavaScript reference} (Tables~\ref{tab:js-perf}
-  and~\ref{tab:pics-js} only): Apple M2 Max (12-core ARM64) workstation,
-  macOS, Node.js v24.8.
+  \item \textbf{JavaScript runtime} (Tables~\ref{tab:js-perf}
+  and~\ref{tab:pics-js} only): the same ARM64 reference machine listed
+  above, running Node.js v22.16. We report two FSE state widths --- the
+  four-state encoder used in earlier drafts of this work and the
+  eight-state encoder that the C/Go references use as default
+  (Section~\ref{sec:multistate}) --- so the JS table is directly
+  comparable to the C/Go tables.
 \end{itemize}
 
 \textbf{Codecs evaluated.} The headline single-threaded tables in
@@ -825,9 +829,16 @@ reported separately in Section~\ref{subsec:multithread} for completeness.
 A pure JavaScript decoder (${\sim}$20\,KB ES module, zero Node Package Manager
 (npm) dependencies) and a Go WebAssembly build (${\sim}$2.5\,MB) were
 implemented. JavaScript performance measurements reported in
-Section~\ref{sec:results} were obtained on the ARM64 JavaScript reference
-platform listed in Section~\ref{subsec:bench-procedure}; the C and Go
-benchmarks use the ARM64 and AMD64 references in the same section.
+Section~\ref{sec:results} were obtained on the same ARM64 reference
+platform used for the C and Go benchmarks (Apple M4 Pro), running
+Node.js v22.16. The JS decoder auto-detects 1-/2-/4-/8-state FSE
+streams from a 2-byte magic prefix, and the tables in
+Section~\ref{sec:results} report both the four-state and eight-state
+variants. The eight-state variant matches the format used by the C/Go
+references; the four-state variant is retained because, in V8's
+single-thread scheduler, the per-state dependency chain saturates
+before eight independent chains can pay off
+(Section~\ref{subsec:js-state-effect}).
 
 % ============================================================
 \section{Results}
@@ -924,7 +935,7 @@ pipeline is smaller.
 
 \begin{table*}[htbp]
 \centering
-\caption{\scriptsize Single-threaded encoding throughput (MB/s). Codec
+\caption{Single-threaded encoding throughput (MB/s). Codec
 baselines as defined in Section~\ref{sec:methodology}; MIC is the
 eight-state C encoder. Bold marks the fastest codec per row on each
 platform.}
@@ -989,7 +1000,7 @@ JPEG-LS is between decode latency and archival storage cost.
 
 \begin{table*}[htbp]
 \centering
-\caption{\scriptsize Single-threaded decompression throughput (MB/s).
+\caption{Single-threaded decompression throughput (MB/s).
 Codec baselines as defined in Section~\ref{sec:methodology}; MIC is
 the eight-state C decoder (AVX-512 acceleration of the RLE and delta
 inverse stages on AMD64). Bold marks the fastest codec per row on
@@ -1221,50 +1232,69 @@ time on a multi-core machine should use the strip-parallel mode and pick
 $N$ between four and eight depending on image size and core count.
 
 \subsection{JavaScript Runtime Results}
+\label{subsec:js-state-effect}
 
-Table~\ref{tab:js-perf} reports Node.js single-threaded performance;
+Table~\ref{tab:js-perf} reports Node.js single-threaded performance for
+both the four-state and eight-state FSE variants;
 Table~\ref{tab:pics-js} reports parallel PICS decoding via
-\texttt{worker\_threads}.
+\texttt{worker\_threads} for the same two variants.
 
 \begin{table}[htbp]
 \centering
-\caption{JavaScript decoder throughput (4-state) on the ARM64 JavaScript
-reference (Section~\ref{subsec:bench-procedure}). Median over 20 iterations.}
+\caption{JavaScript decoder throughput on the ARM64 reference (Apple
+M4~Pro, Node.js v22.16), for the four-state and eight-state FSE
+variants. Median over 20 iterations after three warm-up runs.}
 \label{tab:js-perf}
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Image & Dimensions & Ratio & ms & MB/s \\
+ & & & \multicolumn{2}{c}{4-state} & \multicolumn{2}{c}{8-state} \\
+\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Image & Dimensions & Ratio & ms & MB/s & ms & MB/s \\
 \midrule
-MR  & $256{\times}256$ & 2.35$\times$ & 3.0 & 42 \\
-CT  & $512{\times}512$ & 2.24$\times$ & 13.5 & 37 \\
-CR  & $2140{\times}1760$ & 3.69$\times$ & 161.2 & 45 \\
-MG1 & $2457{\times}1996$ & 8.79$\times$ & 80.9 & 116 \\
-MG3 & $4774{\times}3064$ & 2.29$\times$ & 638.4 & 44 \\
+MR  & $256{\times}256$   & 2.35$\times$ &   2.5 &  50 &   3.3 &  38 \\
+CT  & $512{\times}512$   & 2.24$\times$ &  11.9 &  42 &  14.1 &  36 \\
+CR  & $2140{\times}1760$ & 3.69$\times$ & 136.4 &  53 & 151.4 &  47 \\
+MG1 & $2457{\times}1996$ & 8.79$\times$ &  68.1 & 137 &  78.3 & 120 \\
+MG3 & $4774{\times}3064$ & 2.29$\times$ & 514.5 &  54 & 563.7 &  49 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[htbp]
 \centering
-\caption{PICS parallel JavaScript decoder (\texttt{worker\_threads}) on the
-ARM64 JavaScript reference. Speedup relative to 1 worker.}
+\caption{PICS parallel JavaScript decoder (\texttt{worker\_threads}) on
+the ARM64 reference, with four-state and eight-state FSE per strip.
+Worker count was swept over $\{1,2,4,8,14\}$; the best wall-time for
+each variant is reported.}
 \label{tab:pics-js}
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrrrr}
 \toprule
-Image & Strips & ms & MB/s & Speedup \\
+ & & \multicolumn{2}{c}{4-state strips} & \multicolumn{2}{c}{8-state strips} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Image & Strips &   ms & MB/s &   ms & MB/s \\
 \midrule
-MR  & 4 & 1.3 & 94 & 2.57$\times$ \\
-CT  & 4 & 5.0 & 101 & 2.95$\times$ \\
-CR  & 8 & 31.7 & 227 & 5.53$\times$ \\
-MG1 & 8 & 19.4 & 483 & 4.36$\times$ \\
+MR  & 4 &   1.1 & 111 &   1.3 &  97 \\
+CT  & 4 &   4.2 & 120 &   4.7 & 108 \\
+CR  & 8 &  33.4 & 215 &  31.8 & 226 \\
+MG1 & 8 &  19.8 & 473 &  20.5 & 457 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-MG1 (9.35\,MB) decompresses in 19.4\,ms at 483\,MB/s using 12 workers.
-A web-based DICOM viewer can fetch a \texttt{.mic} file directly from
-object storage and decode it client-side without server-side compute or
-transcoding latency.
+The eight-state variant is consistently 7--13\% slower than the
+four-state variant in the JS decoder, despite running on the same M4~Pro
+that benefits from eight states in the C decoder. The reason is
+architectural rather than algorithmic: V8's single-thread scheduler
+provides enough instruction-level parallelism to saturate four
+independent FSE state chains but not eight, so the extra state machines
+add per-symbol bookkeeping (state initialisation, tail handling) without
+shortening the critical path. The eight-state path is still useful in
+JavaScript --- it lets a single decoder binary accept C-encoded streams
+without transcoding --- but the four-state variant remains the practical
+JS sweet spot. MG1 (9.35\,MB) decompresses in 19.8\,ms at 473\,MB/s
+using eight workers and four-state strips. A web-based DICOM viewer can
+therefore fetch a \texttt{.mic} file directly from object storage and
+decode it client-side without server-side compute or transcoding latency.
 
 \textbf{Limitation.} These measurements were obtained in Node.js
 \texttt{worker\_threads}, which does not fully replicate browser Web Worker

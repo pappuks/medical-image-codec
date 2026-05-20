@@ -50,19 +50,37 @@ const FILES = [
   { mic: 'testdata/MG1_4s.mic', name: 'MG1 1996×2457 (4-state)' },
   { mic: 'testdata/MG2_4s.mic', name: 'MG2 1996×2457 (4-state)' },
   { mic: 'testdata/MG3_4s.mic', name: 'MG3 3064×4774 (4-state)' },
-  // PICS parallel strips (decoded sequentially here for baseline)
-  { mic: 'testdata/MR_pics4.mic',  name: 'MR  256×256   (PICS-4 seq)' },
-  { mic: 'testdata/CT_pics4.mic',  name: 'CT  512×512   (PICS-4 seq)' },
-  { mic: 'testdata/CR_pics8.mic',  name: 'CR  1760×2140 (PICS-8 seq)' },
-  { mic: 'testdata/MG1_pics8.mic', name: 'MG1 1996×2457 (PICS-8 seq)' },
+  // 8-state FSE
+  { mic: 'testdata/MR_8s.mic',  name: 'MR  256×256   (8-state)' },
+  { mic: 'testdata/CT_8s.mic',  name: 'CT  512×512   (8-state)' },
+  { mic: 'testdata/CR_8s.mic',  name: 'CR  1760×2140 (8-state)' },
+  { mic: 'testdata/MG1_8s.mic', name: 'MG1 1996×2457 (8-state)' },
+  { mic: 'testdata/MG2_8s.mic', name: 'MG2 1996×2457 (8-state)' },
+  { mic: 'testdata/MG3_8s.mic', name: 'MG3 3064×4774 (8-state)' },
+  // PICS parallel strips, 4-state per strip (decoded sequentially here for baseline)
+  { mic: 'testdata/MR_pics4.mic',  name: 'MR  256×256   (PICS-4 4s seq)' },
+  { mic: 'testdata/CT_pics4.mic',  name: 'CT  512×512   (PICS-4 4s seq)' },
+  { mic: 'testdata/CR_pics8.mic',  name: 'CR  1760×2140 (PICS-8 4s seq)' },
+  { mic: 'testdata/MG1_pics8.mic', name: 'MG1 1996×2457 (PICS-8 4s seq)' },
+  // PICS parallel strips, 8-state per strip (decoded sequentially here for baseline)
+  { mic: 'testdata/MR_pics4_8s.mic',  name: 'MR  256×256   (PICS-4 8s seq)' },
+  { mic: 'testdata/CT_pics4_8s.mic',  name: 'CT  512×512   (PICS-4 8s seq)' },
+  { mic: 'testdata/CR_pics8_8s.mic',  name: 'CR  1760×2140 (PICS-8 8s seq)' },
+  { mic: 'testdata/MG1_pics8_8s.mic', name: 'MG1 1996×2457 (PICS-8 8s seq)' },
 ];
 
-// PICS files used for the parallel worker sweep
+// PICS files used for the parallel worker sweep.  Both 4-state and 8-state
+// strip variants are benchmarked so the paper can quote like-for-like numbers
+// once 8-state is the default JS path.
 const PICS_FILES = [
-  { mic: 'testdata/MR_pics4.mic',  name: 'MR  256×256',   strips: 4 },
-  { mic: 'testdata/CT_pics4.mic',  name: 'CT  512×512',   strips: 4 },
-  { mic: 'testdata/CR_pics8.mic',  name: 'CR  1760×2140', strips: 8 },
-  { mic: 'testdata/MG1_pics8.mic', name: 'MG1 1996×2457', strips: 8 },
+  { mic: 'testdata/MR_pics4.mic',     name: 'MR  256×256   (4s strips)', strips: 4 },
+  { mic: 'testdata/CT_pics4.mic',     name: 'CT  512×512   (4s strips)', strips: 4 },
+  { mic: 'testdata/CR_pics8.mic',     name: 'CR  1760×2140 (4s strips)', strips: 8 },
+  { mic: 'testdata/MG1_pics8.mic',    name: 'MG1 1996×2457 (4s strips)', strips: 8 },
+  { mic: 'testdata/MR_pics4_8s.mic',  name: 'MR  256×256   (8s strips)', strips: 4 },
+  { mic: 'testdata/CT_pics4_8s.mic',  name: 'CT  512×512   (8s strips)', strips: 4 },
+  { mic: 'testdata/CR_pics8_8s.mic',  name: 'CR  1760×2140 (8s strips)', strips: 8 },
+  { mic: 'testdata/MG1_pics8_8s.mic', name: 'MG1 1996×2457 (8s strips)', strips: 8 },
 ];
 
 // ---------------------------------------------------------------------------
