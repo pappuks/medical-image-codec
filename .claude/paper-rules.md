@@ -307,3 +307,83 @@ history must be removed before the file is sent for review.
 3. `grep -in "M2 Max\|M4 Pro\|285K\|Core Ultra\|c8i\|Xeon\|Granite Rapids\|Apple M"` —
    every hit must be inside the single Benchmark Procedure subsection.
    Any hit elsewhere in the paper is a violation of §6.
+
+---
+
+## 11. Tone and Readability
+
+Apply these rules to all versions, and especially to the plain-language
+("simplified") edition (`mic-paper-simplified-ieee.tex`). The simplified
+edition must stay **accessible and easy to read, but the register is measured
+and formal** — explain things simply without sounding casual, dramatic, or
+promotional. Accessible is not the same as casual.
+
+### No contractions
+Expand all contractions in prose, captions, and bullets: `it's` → `it is`,
+`isn't`/`aren't` → `is not`/`are not`, `don't`/`doesn't` → `do not`/`does not`,
+`can't` → `cannot`, `won't` → `will not`, `that's` → `that is`, `there's` →
+`there is`, `we've` → `we have`, `we're`/`you're` → `we are`/`you are`,
+`wouldn't`/`couldn't` → `would not`/`could not`. Possessive `'s` is fine.
+
+Check with:
+`grep -nE "\b(it's|isn't|aren't|don't|doesn't|won't|can't|that's|there's|we've|we're|you're|wouldn't|couldn't)\b" mic-paper-*.tex`
+
+### No second person or rhetorical questions
+Do not address the reader as "you" or pose rhetorical questions in body text.
+Rewrite in the third person or imperative.
+
+- Not: "when you run several streams at once" → "when several streams are
+  decoded at once".
+- Not: "Decode many small images? Use single-threaded MIC." → "To decode many
+  small images, use single-threaded MIC."
+
+### Replace colloquial and dramatic wording
+Prefer neutral, precise verbs and adjectives over informal or promotional ones:
+
+| Avoid | Prefer |
+|-------|--------|
+| stumble, choke | perform poorly, struggle |
+| chopping / chop up | splitting |
+| throws away | discards |
+| the catch / the gotcha | the limitation |
+| dethrone, crush, beat (as a headline) | outperform, surpass |
+| a hair ahead, a touch faster | marginally ahead |
+| sweet spot | best configuration / optimal point |
+| rule of thumb | practical guidance |
+| bad options | poor options |
+| big (jumps, alphabet, box, image) | large |
+| edges it out / wins (in prose) | is faster / is fastest |
+| squeeze out | remove |
+| love / hate (anthropomorphizing code) | exploit well / handle poorly |
+| just how X works | inherent to how X works |
+| the signature of X | which reflects X |
+| runs well, runs great | performs well |
+| ends up being | is |
+| a lot of / lots of data | a great deal of / a large volume of data |
+| tops 2 GB | exceeds 2 GB |
+| sitting idle | remaining idle |
+| the fix | the approach / the solution |
+
+Use verbs like "wins" only inside results prose where the comparison is
+explicit and quantified; prefer "is fastest" / "is the fastest codec" in
+headline sentences. Keep the measured-claims discipline from §10: do not call
+results "strongest", "remarkable", or "dramatic" — state the number and let it
+speak.
+
+### Neutral section and subsection headers
+Headers state the topic, not a slogan. Avoid "… in One Page", "Going Faster:",
+"The fix", "How much it helps", "How We Measured It", "Which codec to pick".
+Use topical equivalents: "Related Work", "Faster Decoding: …", "The approach",
+"Measured speedup", "Evaluation Methodology", "Choosing a codec".
+
+### Keep
+- Plain-language explanations, numeric examples, and the "FSE in one paragraph"
+  style sentences required by §1 — these stay; only the colloquial register is
+  removed.
+- Bold lead-in phrases that introduce a paragraph's topic
+  (e.g. `\textbf{Why 16-bit RLE matters.}`).
+
+### Scope of a tone pass
+A tone pass is prose-only: do not alter numbers, table data, references,
+labels, or `\cite`/`\ref` keys. The em-dash reductions in §3 are part of the
+same readability discipline; apply them together.
