@@ -307,3 +307,62 @@ history must be removed before the file is sent for review.
 3. `grep -in "M2 Max\|M4 Pro\|285K\|Core Ultra\|c8i\|Xeon\|Granite Rapids\|Apple M"` —
    every hit must be inside the single Benchmark Procedure subsection.
    Any hit elsewhere in the paper is a violation of §6.
+
+---
+
+## 11. Tone and Readability
+
+These rules apply to all versions, and especially to the plain-language
+(`mic-paper-simplified-*.tex`) edition: keep the prose accessible, but the
+register must stay measured and formal — accessible is not the same as casual.
+
+### No contractions in body text
+Expand all contractions in prose, captions, and headings: `it's` → `it is`,
+`isn't` → `is not`, `doesn't` → `does not`, `can't` → `cannot`, `won't` →
+`will not`, `there's` → `there is`, `that's` → `that is`, `we've` → `we have`,
+`aren't` → `are not`, `don't` → `do not`. Check with
+`grep -nE "\b(it's|isn't|aren't|don't|doesn't|won't|can't|that's|there's|we've|wouldn't|couldn't)\b" mic-paper-*.tex`.
+
+### No second person or rhetorical questions
+Do not address the reader as "you" ("when you run…", "decode many small
+images? Use…"). Rewrite in the third person or imperative ("when several
+streams are decoded…", "to decode many small images, use…").
+
+### Replace colloquial and dramatic wording
+Prefer neutral, precise verbs and adjectives over informal or promotional ones:
+
+| Avoid | Prefer |
+|-------|--------|
+| stumble, choke | perform poorly, struggle |
+| chopping / chop up | splitting |
+| the catch / the gotcha | the limitation |
+| dethrone, crush, beat (as a headline) | outperform, surpass |
+| sweet spot | best configuration / optimum |
+| rule of thumb | practical guidance |
+| a hair ahead, a touch faster | marginally ahead |
+| bad options | poor options |
+| big (jumps, alphabet, box, image) | large |
+| tops 2 GB | exceeds 2 GB |
+| a lot of data | a great deal of / a large volume of data |
+| runs well, runs great | performs well |
+| the signature of X | which reflects X |
+| love / hate (of an algorithm) | exploit well / handle poorly |
+| just how X works | inherent to how X works |
+
+Use verbs like "wins" only inside results prose where the comparison is
+explicit and quantified; prefer "is fastest" / "is the fastest codec" in
+headline sentences.
+
+### Neutral section and subsection headers
+Headers state the topic, not a slogan. Avoid "… in One Page", "Going Faster:",
+"The fix", "How much it helps", "How We Measured It", "Which codec to pick".
+Use topical equivalents: "Related Work", "Faster Decoding: …", "The approach",
+"Measured speedup", "Evaluation Methodology", "Choosing a codec".
+
+### Keep
+- Plain-language explanations, numeric examples, and the "FSE in one
+  paragraph" style sentences required by §1 — these stay; only the
+  colloquial register is removed.
+- Bold lead-in phrases that introduce a paragraph's topic
+  (e.g. `\textbf{Why 16-bit RLE matters.}`).
+
