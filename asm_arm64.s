@@ -437,14 +437,19 @@ fse4_done:
 //
 // 8-state rANS decode kernel for ARM64.
 //
-// ABI0 stack layout ($16 frame, so args are at frame+8, frame+16, ...):
-//   (frame=16)
-//   24(RSP) = dt      — *decSymbolU16
-//   32(RSP) = br      — *bitReader
-//   40(RSP) = states  — *[8]uint32
-//   48(RSP) = out     — *uint16
-//   56(RSP) = count   int
-//   64(RSP) = ret     int (return value slot)
+// ABI0 arguments are accessed via the FP pseudo-register (frame-size
+// independent, validated by `go vet`). Do NOT hardcode RSP offsets for args:
+// with a non-zero local frame ($16 here) the Go ARM64 prologue also saves
+// LR/FP, so the real RSP-relative arg offset is not simply frame+8 — using FP
+// avoids that miscalculation entirely.
+//   dt+0(FP)      — *decSymbolU16
+//   br+8(FP)      — *bitReader
+//   states+16(FP) — *[8]uint32
+//   out+24(FP)    — *uint16
+//   count+32(FP)  — int
+//   ret+40(FP)    — int (return value slot)
+// The $16 local frame holds the two callee-saved registers (R19, R20) at
+// 0(RSP) and 8(RSP).
 //
 // Register allocation:
 //   R0  = decTable base
@@ -470,12 +475,12 @@ TEXT ·rans8StateDecompNEON(SB),NOSPLIT,$16-48
     MOVD R19, 0(RSP)
     MOVD R20, 8(RSP)
 
-    // Load args (base offset = frame_size + 8 = 16 + 8 = 24).
-    MOVD 24(RSP), R0   // dt
-    MOVD 32(RSP), R1   // br (temp)
-    MOVD 40(RSP), R2   // states (temp — will reload later)
-    MOVD 48(RSP), R9   // out
-    MOVD 56(RSP), R10  // count
+    // Load args via FP pseudo-register (frame-size independent).
+    MOVD dt+0(FP),      R0   // dt
+    MOVD br+8(FP),      R1   // br (temp)
+    MOVD states+16(FP), R2   // states (temp — will reload later)
+    MOVD out+24(FP),    R9   // out
+    MOVD count+32(FP),  R10  // count
 
     // Load bitReader fields.
     MOVD  0(R1),  R15   // br.in.ptr
@@ -484,7 +489,7 @@ TEXT ·rans8StateDecompNEON(SB),NOSPLIT,$16-48
     MOVBU 40(R1), R4    // br.bitsRead
 
     // Load all 8 states.
-    MOVD  40(RSP), R1   // reload states ptr
+    MOVD  states+16(FP), R1   // reload states ptr
     MOVWU 0(R1),   R5   // sA
     MOVWU 4(R1),   R6   // sB
     MOVWU 8(R1),   R7   // sC
@@ -665,14 +670,14 @@ rnf4:
 
 rans8_done:
     // Write back bitReader fields.
-    MOVD  32(RSP), R1   // reload br ptr
+    MOVD  br+8(FP), R1   // reload br ptr
     MOVD  R15, 0(R1)    // br.in.ptr
     MOVD  R2,  24(R1)   // br.off
     MOVD  R3,  32(R1)   // br.value
     MOVB  R4,  40(R1)   // br.bitsRead
 
     // Write back all 8 states.
-    MOVD 40(RSP), R1
+    MOVD states+16(FP), R1
     MOVW R5,  0(R1)
     MOVW R6,  4(R1)
     MOVW R7,  8(R1)
@@ -683,7 +688,7 @@ rans8_done:
     MOVW R20, 28(R1)
 
     // Return produced count.
-    MOVD R11, 64(RSP)
+    MOVD R11, ret+40(FP)
 
     // Restore callee-saved registers.
     MOVD 0(RSP), R19

@@ -232,9 +232,16 @@ Byte offset   Field
               └─ per strip: data_offset (uint32 LE) + data_length (uint32 LE)
                  offset is relative to the start of the data block
                  (i.e., add headerSize = 20 + NumStrips × 8 to get file offset)
+                 High bit of data_length (picsRawFlag = 1<<31) marks a RAW
+                 strip; mask it off (& 0x7fffffff) to get the real byte length.
 ────────────  ─────────────────────────────────────────
-…             Concatenated compressed strip blobs
-              Each blob is a valid CompressSingleFrame output
+…             Concatenated strip blobs.
+              Normal strip: a valid CompressSingleFrame output (Delta+RLE+FSE).
+              Raw strip (picsRawFlag set): StripHeight × Width little-endian
+              uint16 pixels, copied verbatim — the fallback for a genuinely
+              incompressible strip (e.g. a sparse, high-entropy region of a
+              noisy 16-bit image) where the FSE normalizer cannot build a table.
+              Both the Go and C (mic_parallel.c) decoders honor the flag.
               (auto-detected as 1-state, 2-state, or 4-state FSE)
 ```
 

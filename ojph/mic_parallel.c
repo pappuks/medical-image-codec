@@ -66,6 +66,7 @@ typedef struct {
     int            width;
     int            strip_height; // rows in this strip (last strip may differ)
     decomp_fn_t    decomp;       // which inner decoder to call
+    int            is_raw;       // 1 = strip stored as raw LE uint16 pixels
 
     // Output
     int            error;        // 0 = success, non-zero = decomp returned error
@@ -76,8 +77,20 @@ typedef struct {
 // ---------------------------------------------------------------------------
 static void *strip_worker(void *arg) {
     strip_job_t *j = (strip_job_t *)arg;
-    j->error = j->decomp(j->strip_data, j->strip_len,
-                         j->row_out, j->width, j->strip_height);
+    if (j->is_raw) {
+        // Raw strip: little-endian uint16 pixels copied verbatim. ARM64/AMD64
+        // (the only targets) are little-endian, so a memcpy reproduces them.
+        size_t want = (size_t)j->strip_height * (size_t)j->width * 2;
+        if (j->strip_len != want) {
+            j->error = -100;
+        } else {
+            memcpy(j->row_out, j->strip_data, want);
+            j->error = 0;
+        }
+    } else {
+        j->error = j->decomp(j->strip_data, j->strip_len,
+                             j->row_out, j->width, j->strip_height);
+    }
     return NULL;
 }
 
@@ -111,6 +124,11 @@ static int decompress_parallel_impl(const uint8_t *compressed, size_t compressed
         uint32_t offset = read_u32le(tbl);
         uint32_t len    = read_u32le(tbl + 4);
 
+        // High bit of the length marks a raw (uncompressed) strip; mask it off
+        // to recover the real byte length. (Matches picsRawFlag in parallelstrips.go.)
+        int is_raw = (len & 0x80000000u) != 0;
+        len &= 0x7fffffffu;
+
         size_t start = header_size + offset;
         size_t end   = start + len;
         if (end > compressed_len) { free(jobs); return -7; }
@@ -125,6 +143,7 @@ static int decompress_parallel_impl(const uint8_t *compressed, size_t compressed
         jobs[s].width        = width;
         jobs[s].strip_height = (int)(y1 - y0);
         jobs[s].decomp       = decomp_fn;
+        jobs[s].is_raw       = is_raw;
         jobs[s].error        = 0;
     }
 

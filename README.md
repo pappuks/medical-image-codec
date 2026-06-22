@@ -539,6 +539,114 @@ go test -run TestDumpHistogramCSV -v        # export residual histogram data
 
 ---
 
+## Test Dataset
+
+The codec is benchmarked on a corpus of **39 real, de-identified DICOM images
+across 11 modalities** (CT, MR, CR, X-ray, mammography, tomosynthesis, DX,
+PET, nuclear medicine, fluoroscopy, secondary capture). All are single-frame,
+grayscale (MONOCHROME2), 8–16-bit — predominantly 12–16-bit, where the codec is
+best tuned (the core single-frame MIC format; no MIC2/MIC3). The images are drawn
+from three public sources: the NEMA WG-04 conformance sample sets (plus a public
+breast-tomosynthesis study), the [GDCM](https://gdcm.sourceforge.net/) sample
+data set, and [The Cancer Imaging Archive (TCIA)](https://www.cancerimagingarchive.net/).
+All ratios below are Δ+RLE+FSE on Apple M2 Max.
+
+The NEMA-derived images (MR, CT, CR, XR, MG, tomo, NM, RG, SC, XA) appear in the
+[Compression Results](#compression-results) and [Performance](#performance)
+tables above. The grayscale images sourced from GDCM and TCIA are detailed below.
+
+**[GDCM](https://gdcm.sourceforge.net/) sample data set**
+([`gdcmData.tar.gz`](https://sourceforge.net/projects/gdcm/files/gdcmData/gdcmData/)) —
+classic public-domain DICOM samples:
+
+| Image | Modality | Dim. | Bits | Raw (MB) | Ratio (Δ+RLE+FSE) | Source file |
+|-------|----------|------|------|----------|-------------------|-------------|
+| CT_BRAIN  | CT (brain)  | 512×512   | 16 | 0.52 | 3.06× | `CT-MONO2-16-brain` |
+| CT_ANKLE  | CT (ankle)  | 512×512   | 16 | 0.52 | **9.49×** | `CT-MONO2-16-ankle` |
+| CT_ORT    | CT (ortho)  | 512×512   | 16 | 0.52 | 2.68× | `CT-MONO2-16-ort` |
+| CT_CHEST  | CT (chest)  | 512×400   | 16 | 0.41 | 2.82× | `CT-MONO2-16-chest` |
+| MR_HEAD   | MR (head)   | 256×256   | 16 | 0.13 | 2.61× | `MR-MONO2-16-head` |
+| MR_INTERA | MR (body)   | 1024×1024 | 12 | 2.10 | 3.68× | `PHILIPS_Intera-16-MONO2-Uncompress` |
+| DX_HAND   | DX (X-ray)  | 1410×1480 | 14 | 4.17 | 2.24× | `DX_GE_FALCON_SNOWY-VOI` |
+| DX_CHEST  | DX (chest)  | 1420×1416 | 16 | 3.83 | 1.66× | `DX_J2K_0Padding` |
+| CR_THORAX | CR (thorax) | 1876×2076 | 15 | 7.79 | 1.82× | `gdcm-JPEG-LossLessThoravision` |
+
+**[TCIA](https://www.cancerimagingarchive.net/) `ACRIN-NSCLC-FDG-PET`**
+(public collection, de-identified) — **PET** modality:
+
+| Image | Modality | Dim. | Bits | Raw (MB) | Ratio (Δ+RLE+FSE) | Source |
+|-------|----------|------|------|----------|-------------------|--------|
+| PET1 | PT (FDG-PET) | 256×256 | 16 | 0.13 | 2.74× | TCIA ACRIN-NSCLC-FDG-PET |
+| PET2 | PT (FDG-PET) | 256×256 | 16 | 0.13 | 3.39× | TCIA ACRIN-NSCLC-FDG-PET |
+
+**[TCIA](https://www.cancerimagingarchive.net/) diagnostic slices**
+(public collections, de-identified) — the middle slice of a representative series,
+pulled per image via the NBIA REST single-image endpoint:
+
+| Image | Modality | Dim. | Bits | Raw (MB) | Ratio (Δ+RLE+FSE) | Collection |
+|-------|----------|------|------|----------|-------------------|------------|
+| CT_LUNG     | CT (lung)     | 512×512 | 16 | 0.52 | 2.73× | LIDC-IDRI |
+| CT_PANCREAS | CT (abdomen)  | 512×512 | 16 | 0.52 | 2.36× | Pancreas-CT |
+| MR_BRAIN    | MR (brain tumor) | 256×320 | 16 | 0.16 | **7.27×** | UPENN-GBM |
+| MR_BREAST   | MR (breast)   | 256×256 | 12 | 0.13 | 4.01× | ACRIN-Contralateral-Breast-MR |
+| MR_PROSTATE | MR (prostate) | 320×320 | 12 | 0.20 | 2.30× | PROSTATE-DIAGNOSIS |
+| PET_PSMA    | PT (PSMA-PET) | 200×200 | 16 | 0.08 | **10.13×** | PSMA-PET-CT-Lesions |
+| PET_LUNG    | PT (FDG-PET)  | 200×200 | 16 | 0.08 | 2.97× | Lung-PET-CT-Dx |
+
+PET_PSMA (10.13×) has the highest ratio in the corpus — PSMA-PET is mostly empty
+background around focal uptake, giving very long near-zero delta runs; CT_ANKLE
+(9.49×) and MR_BRAIN (7.27×) follow, all ahead of mammography (8.79×).
+
+#### Multi-codec decode throughput (GDCM + TCIA images)
+
+Decompression throughput (MB/s) on **Apple M2 Max**, in-process via
+`BenchmarkAllCodecs` (`-tags "cgo_ojph cgo_zstd"`, `-benchtime=10x`, C variants
+`-O3`). **MIC-4state-C is the fastest decoder on every one of these
+images** — 1.0–1.6× HTJ2K and 1.3–4.0× JPEG-LS. PICS-C-8 (parallel, C pthreads)
+reaches 1–2.5 GB/s on the larger images.
+
+| Image | MIC-Go | MIC-4state-C | HTJ2K | JPEG-LS | PICS-C-8 |
+|-------|-------:|-------------:|------:|--------:|---------:|
+| CT_BRAIN    | 184 | **369** | 338 | 151 | 1068 |
+| CT_ANKLE    | 396 | **660** | 461 | 309 | 1839 |
+| CT_ORT      | 240 | **434** | 369 | 158 | 1261 |
+| CT_CHEST    | 209 | **382** | 334 | 148 | 1073 |
+| CT_LUNG     | 241 | **428** | 362 | 156 | 1277 |
+| CT_PANCREAS | 197 | **370** | 323 | 143 | 1240 |
+| MR_HEAD     | 246 | **506** | 340 | 130 | 750 |
+| MR_INTERA   | 293 | **534** | 348 | 157 | 2450 |
+| MR_BRAIN    | 331 | **633** | 528 | 284 | 955 |
+| MR_BREAST   | 279 | **558** | 390 | 194 | 753 |
+| MR_PROSTATE | 260 | **499** | 332 | 129 | 1036 |
+| DX_HAND     | 247 | **403** | 335 | 127 | 1996 |
+| DX_CHEST    | 238 | **409** | 330 | 106 | 1960 |
+| CR_THORAX   | 251 | **415** | 321 | 109 | 1848 |
+| PET1        | 249 | **525** | 324 | 152 | 749 |
+| PET2        | 266 | **530** | 386 | 173 | 749 |
+| PET_PSMA    | 317 | **656** | 547 | 443 | 590 |
+| PET_LUNG    | 171 | **376** | 361 | 208 | 447 |
+
+Encoding (M2 Max, `BenchmarkAllCodecsEncode`) shows the same ordering: MIC-4state-C
+encodes faster than HTJ2K and JPEG-LS on every one of them (e.g. CR_THORAX 497 vs
+205 vs 74 MB/s). The two sparse PET images compress through PICS via a raw-strip
+fallback (`picsRawFlag`): an incompressible strip is stored as little-endian
+`uint16` pixels rather than failing, decoded by both the Go and C PICS decoders.
+
+The `.bin` files are raw little-endian `uint16` pixel dumps in
+[`testdata/expanded/`](./testdata/expanded/), wired into the benchmark table in
+[fseu16_test.go](fseu16_test.go). To regenerate: for GDCM, download
+`gdcmData.tar.gz`; for TCIA, fetch from the NBIA REST API
+(`/v1/getImage?SeriesInstanceUID=…` for a whole series, or
+`/v1/getSingleImage?SeriesInstanceUID=…&SOPInstanceUID=…` for one mid-slice).
+Then extract each `PixelData` to a raw
+16-bit LE buffer (preserving the stored bit pattern for signed CT/PET) with
+`pydicom` + `numpy` + `python-gdcm` (the latter decodes JPEG-LS/J2K/RLE source
+streams).
+
+> **Note on bit depth:** TCIA mammography collections (CMMD, CBIS-DDSM full
+> images) are largely 8-bit and were excluded to keep the corpus focused on
+> 12–16-bit data; 16-bit mammography is already covered by MG1–MG4 and MG-N.
+
 ## Documentation
 
 | Document | Contents |
@@ -621,6 +729,8 @@ with $\geq \lceil k/2 \rceil$ load ports, parallel scalar loads usually win.
 - [x] Adaptive tableLog refinement — tableLog=13 branch for large symbol sets (symbolLen > 512); reduces probability quantization error on 12-16 bit images — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
 - [x] Content-adaptive strip partitioning — PICA places strip boundaries at entropy transitions (equal-cost on inter-row variance) for more uniform per-strip FSE tables — see [docs/adaptive-compression.md](./docs/adaptive-compression.md)
 - [x] Full C encoder/decoder pipeline — `mic_compress_c.c` implements Delta→RLE→FSE 4-state in C; correctness verified on 21 DICOM images; geometric mean **1.04×** decompression speedup vs HTJ2K; CGO bindings `MICCompressFourStateC`/`MICCompressTwoStateC` — see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md)
+- [ ] **Re-measure all benchmarks on the full 39-image corpus.** The corpus is now 39 images (NEMA + GDCM + TCIA), but several result sets in this README and in [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) were measured on the original 21 (predictor/tableLog ablations, FSE multi-state speedup, the main decompression/encoding tables, HTJ2K win-counts such as "17/21"). Re-run these on all 39 — on Apple M2 Max for the README and on the M4 Pro / c8i reference for the paper — so every reported number reflects the single 39-image list. The `BenchmarkAllCodecs` decode/ratio numbers in the Test Dataset section already cover all 39 on M2 Max.
+- [ ] **Update the paper dataset to 39 images.** `paper/mic-paper-*.tex` still describes 21 images / nine modalities; expand its dataset table and prose to the 39-image / 11-modality corpus once the new images are measured on the M4 Pro / c8i reference per [`.claude/benchmark-rules.md`](./.claude/benchmark-rules.md) §4.
 - [ ] WSI streaming API (io.ReaderAt/WriteSeeker for very large files)
 - [ ] **NEON wavelet kernel for ARM64.** Port the AVX2 `wt53Predict`/`wt53Update` lifting kernels to NEON in a new `wavelet_simd_arm64.s` (Plan-9 assembler syntax). The scalar wavelet path on Apple Silicon already benefits from MIC's blocked column layout, but a 4-lane `int32x4_t` predict/update kernel issued at 4 NEON ops/cycle on Apple M3/M4 should land within roughly 20% of the AVX2 gain on AMD64 — expected +15–35% wavelet decode throughput. The compressed stream must remain bit-identical to the scalar V2 stream and wire into the existing `BenchmarkWaveletV2SIMDRLEFSECompress` dispatch.
 - [ ] **Verify Clang's variable-shift codegen on AArch64.** The four-state FSE C decoder relies on `LSRV`/`LSLV` for the bit-reader inner loop; `objdump -d` on the M4 Pro build should confirm that Clang emits `lsr w_, w_, w_` without spilling the shift count to memory. This is a one-time codegen audit, not a code change — file the result alongside [docs/native-optimizations.md](./docs/native-optimizations.md) so future Clang upgrades have a baseline to diff against.

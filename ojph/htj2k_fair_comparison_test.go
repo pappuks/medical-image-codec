@@ -63,6 +63,26 @@ var testImages = []testImage{
 	{name: "SC1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/SC1_UNC", isBinary: false},
 	{name: "XA1", fileName: "../testdata/compsamples_refanddir/IMAGES/REF/XA1_UNC", isBinary: false},
 	// US1_UNC and VL1–VL6_UNC are RGB (samples=3) — see mic.CompressRGB / rgbbench_test.go
+	// Grayscale DICOM from GDCM public samples + TCIA diagnostic slices
+	// (kept in sync with mic.testFiles in fseu16_test.go).
+	{name: "CT_BRAIN", fileName: "../testdata/expanded/CT_BRAIN_512_512_image.bin", isBinary: true, rows: 512, cols: 512},
+	{name: "CT_ANKLE", fileName: "../testdata/expanded/CT_ANKLE_512_512_image.bin", isBinary: true, rows: 512, cols: 512},
+	{name: "CT_ORT", fileName: "../testdata/expanded/CT_ORT_512_512_image.bin", isBinary: true, rows: 512, cols: 512},
+	{name: "CT_CHEST", fileName: "../testdata/expanded/CT_CHEST_512_400_image.bin", isBinary: true, rows: 400, cols: 512},
+	{name: "MR_HEAD", fileName: "../testdata/expanded/MR_HEAD_256_256_image.bin", isBinary: true, rows: 256, cols: 256},
+	{name: "MR_INTERA", fileName: "../testdata/expanded/MR_INTERA_1024_1024_image.bin", isBinary: true, rows: 1024, cols: 1024},
+	{name: "DX_HAND", fileName: "../testdata/expanded/DX_HAND_1410_1480_image.bin", isBinary: true, rows: 1480, cols: 1410},
+	{name: "DX_CHEST", fileName: "../testdata/expanded/DX_CHEST_1420_1416_image.bin", isBinary: true, rows: 1416, cols: 1420},
+	{name: "CR_THORAX", fileName: "../testdata/expanded/CR_THORAX_1876_2076_image.bin", isBinary: true, rows: 2076, cols: 1876},
+	{name: "PET1", fileName: "../testdata/expanded/PET_NSCLC1_256_256_image.bin", isBinary: true, rows: 256, cols: 256},
+	{name: "PET2", fileName: "../testdata/expanded/PET_NSCLC2_256_256_image.bin", isBinary: true, rows: 256, cols: 256},
+	{name: "CT_LUNG", fileName: "../testdata/expanded/CT_LUNG_512_512_image.bin", isBinary: true, rows: 512, cols: 512},
+	{name: "CT_PANCREAS", fileName: "../testdata/expanded/CT_PANCREAS_512_512_image.bin", isBinary: true, rows: 512, cols: 512},
+	{name: "MR_BRAIN", fileName: "../testdata/expanded/MR_BRAIN_256_320_image.bin", isBinary: true, rows: 320, cols: 256},
+	{name: "MR_BREAST", fileName: "../testdata/expanded/MR_BREAST_256_256_image.bin", isBinary: true, rows: 256, cols: 256},
+	{name: "MR_PROSTATE", fileName: "../testdata/expanded/MR_PROSTATE_320_320_image.bin", isBinary: true, rows: 320, cols: 320},
+	{name: "PET_PSMA", fileName: "../testdata/expanded/PET_PSMA_200_200_image.bin", isBinary: true, rows: 200, cols: 200},
+	{name: "PET_LUNG", fileName: "../testdata/expanded/PET_LUNG_200_200_image.bin", isBinary: true, rows: 200, cols: 200},
 }
 
 func loadImage(ti testImage) ([]byte, []uint16, uint16, int, int) {

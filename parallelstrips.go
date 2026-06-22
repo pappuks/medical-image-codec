@@ -44,7 +44,25 @@ import (
 const (
 	picsMagic      = "PICS"
 	picsHeaderBase = 20 // 4+4+4+4+4 bytes before offset table
+
+	// picsRawFlag is set in the high bit of a strip's length field in the offset
+	// table to mark that strip as stored raw (uncompressed little-endian uint16
+	// pixels) rather than as a Delta+RLE+FSE stream. This is the fallback for
+	// strips that are genuinely incompressible (e.g. a sparse, high-entropy strip
+	// of a noisy 16-bit image), where the FSE normalizer cannot build a table.
+	// Real strip lengths are far below 2^31, so the bit is always free.
+	picsRawFlag = uint32(1) << 31
 )
+
+// rawStripBlob serializes a strip's pixels as little-endian uint16 bytes for the
+// PICS raw fallback. Decoders copy these straight to the output (no Delta/RLE/FSE).
+func rawStripBlob(pixels []uint16) []byte {
+	b := make([]byte, len(pixels)*2)
+	for i, v := range pixels {
+		binary.LittleEndian.PutUint16(b[i*2:], v)
+	}
+	return b
+}
 
 // CompressParallelStrips compresses pixels using numStrips goroutines, one per
 // horizontal strip.  numStrips <= 0 selects GOMAXPROCS automatically.
@@ -72,7 +90,7 @@ func CompressParallelStrips(pixels []uint16, width, height int, maxValue uint16,
 	actual := (height + stripH - 1) / stripH
 
 	results := make([][]byte, actual)
-	errs := make([]error, actual)
+	rawFlags := make([]bool, actual)
 
 	var wg sync.WaitGroup
 	for s := 0; s < actual; s++ {
@@ -86,17 +104,17 @@ func CompressParallelStrips(pixels []uint16, width, height int, maxValue uint16,
 			}
 			sh := y1 - y0
 			blob, err := CompressSingleFrame(pixels[y0*width:y1*width], width, sh, maxValue)
-			results[idx] = blob
-			errs[idx] = err
+			if err != nil {
+				// Incompressible strip (e.g. sparse high-entropy region): store
+				// raw pixels, marked via picsRawFlag. Always lossless.
+				results[idx] = rawStripBlob(pixels[y0*width : y1*width])
+				rawFlags[idx] = true
+			} else {
+				results[idx] = blob
+			}
 		}(s)
 	}
 	wg.Wait()
-
-	for i, err := range errs {
-		if err != nil {
-			return nil, fmt.Errorf("parallelstrips: strip %d: %w", i, err)
-		}
-	}
 
 	// Build output: fixed header + offset table + strip blobs.
 	headerSize := picsHeaderBase + actual*8
@@ -115,8 +133,12 @@ func CompressParallelStrips(pixels []uint16, width, height int, maxValue uint16,
 	offset := 0
 	for s, r := range results {
 		tblOff := picsHeaderBase + s*8
+		lenField := uint32(len(r))
+		if rawFlags[s] {
+			lenField |= picsRawFlag
+		}
 		binary.LittleEndian.PutUint32(out[tblOff:tblOff+4], uint32(offset))
-		binary.LittleEndian.PutUint32(out[tblOff+4:tblOff+8], uint32(len(r)))
+		binary.LittleEndian.PutUint32(out[tblOff+4:tblOff+8], lenField)
 		copy(out[headerSize+offset:], r)
 		offset += len(r)
 	}
@@ -143,7 +165,7 @@ func CompressParallelStrips4State(pixels []uint16, width, height int, maxValue u
 	actual := (height + stripH - 1) / stripH
 
 	results := make([][]byte, actual)
-	errs := make([]error, actual)
+	rawFlags := make([]bool, actual)
 
 	var wg sync.WaitGroup
 	for s := 0; s < actual; s++ {
@@ -157,17 +179,15 @@ func CompressParallelStrips4State(pixels []uint16, width, height int, maxValue u
 			}
 			sh := y1 - y0
 			blob, err := CompressSingleFrame4State(pixels[y0*width:y1*width], width, sh, maxValue)
-			results[idx] = blob
-			errs[idx] = err
+			if err != nil {
+				results[idx] = rawStripBlob(pixels[y0*width : y1*width])
+				rawFlags[idx] = true
+			} else {
+				results[idx] = blob
+			}
 		}(s)
 	}
 	wg.Wait()
-
-	for i, err := range errs {
-		if err != nil {
-			return nil, fmt.Errorf("parallelstrips: strip %d: %w", i, err)
-		}
-	}
 
 	headerSize := picsHeaderBase + actual*8
 	totalData := 0
@@ -185,8 +205,12 @@ func CompressParallelStrips4State(pixels []uint16, width, height int, maxValue u
 	offset := 0
 	for s, r := range results {
 		tblOff := picsHeaderBase + s*8
+		lenField := uint32(len(r))
+		if rawFlags[s] {
+			lenField |= picsRawFlag
+		}
 		binary.LittleEndian.PutUint32(out[tblOff:tblOff+4], uint32(offset))
-		binary.LittleEndian.PutUint32(out[tblOff+4:tblOff+8], uint32(len(r)))
+		binary.LittleEndian.PutUint32(out[tblOff+4:tblOff+8], lenField)
 		copy(out[headerSize+offset:], r)
 		offset += len(r)
 	}
@@ -214,7 +238,7 @@ func CompressParallelStrips8State(pixels []uint16, width, height int, maxValue u
 	actual := (height + stripH - 1) / stripH
 
 	results := make([][]byte, actual)
-	errs := make([]error, actual)
+	rawFlags := make([]bool, actual)
 
 	var wg sync.WaitGroup
 	for s := 0; s < actual; s++ {
@@ -228,17 +252,15 @@ func CompressParallelStrips8State(pixels []uint16, width, height int, maxValue u
 			}
 			sh := y1 - y0
 			blob, err := CompressSingleFrame8State(pixels[y0*width:y1*width], width, sh, maxValue)
-			results[idx] = blob
-			errs[idx] = err
+			if err != nil {
+				results[idx] = rawStripBlob(pixels[y0*width : y1*width])
+				rawFlags[idx] = true
+			} else {
+				results[idx] = blob
+			}
 		}(s)
 	}
 	wg.Wait()
-
-	for i, err := range errs {
-		if err != nil {
-			return nil, fmt.Errorf("parallelstrips: strip %d: %w", i, err)
-		}
-	}
 
 	headerSize := picsHeaderBase + actual*8
 	totalData := 0
@@ -256,8 +278,12 @@ func CompressParallelStrips8State(pixels []uint16, width, height int, maxValue u
 	offset := 0
 	for s, r := range results {
 		tblOff := picsHeaderBase + s*8
+		lenField := uint32(len(r))
+		if rawFlags[s] {
+			lenField |= picsRawFlag
+		}
 		binary.LittleEndian.PutUint32(out[tblOff:tblOff+4], uint32(offset))
-		binary.LittleEndian.PutUint32(out[tblOff+4:tblOff+8], uint32(len(r)))
+		binary.LittleEndian.PutUint32(out[tblOff+4:tblOff+8], lenField)
 		copy(out[headerSize+offset:], r)
 		offset += len(r)
 	}
@@ -295,7 +321,9 @@ func DecompressParallelStrips(compressed []byte) (pixels []uint16, width, height
 			defer wg.Done()
 			tblOff := picsHeaderBase + idx*8
 			stripOffset := int(binary.LittleEndian.Uint32(compressed[tblOff : tblOff+4]))
-			stripLen := int(binary.LittleEndian.Uint32(compressed[tblOff+4 : tblOff+8]))
+			lenField := binary.LittleEndian.Uint32(compressed[tblOff+4 : tblOff+8])
+			isRaw := lenField&picsRawFlag != 0
+			stripLen := int(lenField &^ picsRawFlag)
 
 			start := headerSize + stripOffset
 			end := start + stripLen
@@ -310,6 +338,19 @@ func DecompressParallelStrips(compressed []byte) (pixels []uint16, width, height
 				y1 = height
 			}
 			sh := y1 - y0
+
+			if isRaw {
+				// Raw strip: little-endian uint16 pixels, copied verbatim.
+				if stripLen != sh*width*2 {
+					errs[idx] = fmt.Errorf("strip %d: raw length %d != %d", idx, stripLen, sh*width*2)
+					return
+				}
+				dst := out[y0*width : y0*width+sh*width]
+				for i := range dst {
+					dst[i] = binary.LittleEndian.Uint16(compressed[start+i*2:])
+				}
+				return
+			}
 
 			stripPixels, decErr := DecompressSingleFrame(compressed[start:end], width, sh)
 			if decErr != nil {

@@ -511,6 +511,28 @@ func (s *ScratchU16) optimalTableLog() {
 	if tableLog < minTablelog {
 		tableLog = minTablelog
 	}
+
+	// Guarantee at least one table slot per *distinct* symbol. A small PICS
+	// strip of a noisy high-bit-depth image can have more distinct residual
+	// values than the data-size-derived tableLog allows; the fallback
+	// normalizer (normalizeCount2) then cannot place every symbol and either
+	// divides by zero or spins. This floor only ever *raises* tableLog, and only
+	// when distinct symbols exceed the current table size — which never happens
+	// for streams that already normalize — so existing compressed output is
+	// unchanged. Cost is one O(symbolLen) scan of the histogram.
+	var distinct uint32
+	for _, c := range s.count[:s.symbolLen] {
+		if c != 0 {
+			distinct++
+		}
+	}
+	if distinct > 1 {
+		needBits := uint8(highBits(distinct-1)) + 1
+		if tableLog < needBits {
+			tableLog = needBits
+		}
+	}
+
 	if tableLog > maxTableLog {
 		tableLog = maxTableLog
 	}
@@ -602,6 +624,14 @@ func (s *ScratchU16) normalizeCount2() error {
 	}
 	toDistribute := (1 << tableLog) - distributed
 
+	// Backstop: the optimalTableLog distinct-symbol floor normally guarantees a
+	// free slot per symbol, but a pathological strip can still fill the table
+	// exactly (toDistribute==0), which would divide by zero below. Bail cleanly
+	// so the caller falls back rather than crash. No norm state is touched.
+	if toDistribute == 0 {
+		return ErrIncompressible
+	}
+
 	if (total / toDistribute) > lowOne {
 		// risk of rounding to zero
 		lowOne = (total * 3) / (toDistribute * 2)
@@ -632,7 +662,35 @@ func (s *ScratchU16) normalizeCount2() error {
 	}
 
 	if total == 0 {
-		// all of the symbols were low enough for the lowOne or lowThreshold
+		// all of the symbols were low enough for the lowOne or lowThreshold;
+		// grow the positive-norm symbols to absorb the leftover slots. If no
+		// symbol has a positive norm the loop below cannot make progress and
+		// would spin forever — bail cleanly so the caller falls back. No norm
+		// state is mutated on that path, so nothing is corrupted.
+		hasPositive := false
+		for i := uint32(0); i < uint32(s.symbolLen); i++ {
+			if s.norm[i] > 0 {
+				hasPositive = true
+				break
+			}
+		}
+		if !hasPositive {
+			// Every used symbol is "rare" (norm==-1, one cell each) yet slots
+			// remain. Give all leftover slots to the most frequent symbol: set
+			// (not add) its norm so the cell count is exactly toDistribute+1,
+			// replacing its single -1 cell. Total cells then equal distributed +
+			// toDistribute == tableSize, the invariant writeCount requires.
+			var maxV int
+			var maxC uint32
+			for i, cnt := range s.count[:s.symbolLen] {
+				if cnt > maxC {
+					maxV = i
+					maxC = cnt
+				}
+			}
+			s.norm[maxV] = int32(toDistribute) + 1
+			return nil
+		}
 		for i := uint32(0); toDistribute > 0; i = (i + 1) % (uint32(s.symbolLen)) {
 			if s.norm[i] > 0 {
 				toDistribute--

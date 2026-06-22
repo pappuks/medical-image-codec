@@ -114,9 +114,15 @@ image using N threads — apples to apples with the other single-image columns.
 
 ### `BenchmarkAllCodecs` ([ojph/mic_c_test.go:371](../ojph/mic_c_test.go#L371))
 
-Decompression throughput (serial) across every codec variant on the 21-image
-paper corpus. Reports MB/s and compression ratio for each (image, codec)
-combination. Requires `-tags cgo_ojph`.
+Decompression throughput (serial) across every codec variant on the full
+**39-image test corpus** (`testImages` in
+[ojph/htj2k_fair_comparison_test.go](../ojph/htj2k_fair_comparison_test.go);
+NEMA WG-04 + GDCM samples + TCIA diagnostic slices — see the README "Test
+Dataset" section). Reports MB/s and compression ratio for each (image, codec)
+combination. Requires `-tags cgo_ojph`. Paper-table numbers come from
+`run-paper-benchmarks.sh` on the M4 Pro / c8i reference hardware per
+[`.claude/benchmark-rules.md`](../.claude/benchmark-rules.md) §4 — the M2 Max
+numbers in the README are in-process reference values, not paper numbers.
 
 Variants exercised:
 
@@ -286,7 +292,7 @@ image decoded with N threads.
 |---|---|---|
 | `BenchmarkParallelStripsCompress` | [parallelstrips_test.go:149](../parallelstrips_test.go#L149) | Compress at strips ∈ {1,2,4,8} on CR image |
 | `BenchmarkParallelStripsDecompress` | [parallelstrips_test.go:169](../parallelstrips_test.go#L169) | Decompress at strips ∈ {1,2,4,8} on CR image |
-| `BenchmarkPICSVsAllCodecs` | [parallelstrips_test.go:195](../parallelstrips_test.go#L195) | PICS-1/2/4/8 vs MIC-Go and MIC-4state across all 21 images (no CGO) |
+| `BenchmarkPICSVsAllCodecs` | [parallelstrips_test.go:195](../parallelstrips_test.go#L195) | PICS-1/2/4/8 vs MIC-Go and MIC-4state across the full corpus (no CGO) |
 | `BenchmarkParallelStripsAdaptive` | [parallelstripsadaptive_test.go:79](../parallelstripsadaptive_test.go#L79) | PICA (adaptive: avg vs grad predictor per strip) at strips ∈ {1,2,4,8} on MR image |
 
 The CGO `PICS-C-N` numbers in `BenchmarkAllCodecs` are the variants used for
