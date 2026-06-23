@@ -24,22 +24,32 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-# Canonical 21-image order matching the paper's tables.
+# Canonical 39-image order matching the paper's tables (original 21 then the
+# 18 images from testdata/expanded, in testImages order).
 IMAGE_ORDER = [
     "MR", "CT", "CR", "XR", "MG1", "MG2", "MG3", "MG4",
     "CT1", "CT2", "MG-N",
     "MR1", "MR2", "MR3", "MR4", "NM1",
     "RG1", "RG2", "RG3", "SC1", "XA1",
+    "CT_BRAIN", "CT_ANKLE", "CT_ORT", "CT_CHEST", "MR_HEAD", "MR_INTERA",
+    "DX_HAND", "DX_CHEST", "CR_THORAX", "PET1", "PET2", "CT_LUNG",
+    "CT_PANCREAS", "MR_BRAIN", "MR_BREAST", "MR_PROSTATE", "PET_PSMA", "PET_LUNG",
 ]
 
-# Raw image size in MB as reported by the paper Table 1 (col 2). Used purely
-# for display so the generated table matches the paper layout exactly.
+# Raw image size in MiB (rows*cols*2 / 1048576). The original 21 keep the
+# values the paper Table 1 reports; the 18 expanded images are derived from
+# their dimensions.
 RAW_MB = {
     "MR": 0.13, "CT": 0.50, "CR": 7.18, "XR": 10.1,
     "MG1": 9.35, "MG2": 9.35, "MG3": 27.3, "MG4": 26.0,
     "CT1": 0.50, "CT2": 0.50, "MG-N": 27.3,
     "MR1": 0.50, "MR2": 2.00, "MR3": 0.50, "MR4": 0.50, "NM1": 0.50,
     "RG1": 6.86, "RG2": 7.18, "RG3": 5.91, "SC1": 9.71, "XA1": 2.00,
+    "CT_BRAIN": 0.50, "CT_ANKLE": 0.50, "CT_ORT": 0.50, "CT_CHEST": 0.39,
+    "MR_HEAD": 0.13, "MR_INTERA": 2.00, "DX_HAND": 3.98, "DX_CHEST": 3.84,
+    "CR_THORAX": 7.43, "PET1": 0.13, "PET2": 0.13, "CT_LUNG": 0.50,
+    "CT_PANCREAS": 0.50, "MR_BRAIN": 0.16, "MR_BREAST": 0.13,
+    "MR_PROSTATE": 0.20, "PET_PSMA": 0.08, "PET_LUNG": 0.08,
 }
 
 # One regex covers every benchmark line we care about. Fields after MB/s vary
@@ -82,7 +92,12 @@ def parse_results(results_dir: Path):
                     continue
                 image, variant = parts
             elif bench == "DeltaZstdDecompress":
-                # <image>/<variant>   (variant in {MIC, zstd-3})
+                # <image>/<variant>   (variant in {MIC, zstd-3})  (legacy CLI bench)
+                if len(parts) != 2:
+                    continue
+                image, variant = parts
+            elif bench in ("MICCDeltaZstdDecomp", "MICCDeltaZstdEnc"):
+                # <image>/<variant>   (variant in {MIC-4state-C, Zstd-19}) in-process
                 if len(parts) != 2:
                     continue
                 image, variant = parts
@@ -133,17 +148,23 @@ def render_table(title, headers, rows):
 def table_ratios(data):
     """Table 1 — Compression ratios."""
     allc = data.get("AllCodecs", {})
+    # Prefer the in-process libzstd bench (MICCDeltaZstdDecomp / variant Zstd-19);
+    # fall back to the legacy CLI bench (DeltaZstdDecompress / variant zstd-19).
     zstd = data.get("DeltaZstdDecompress", {})
+    zstd_ip = data.get("MICCDeltaZstdDecomp", {})
     wav = data.get("WaveletV2SIMDRLEFSECompress", {}).get("_", {})
 
     headers = ["Image", "Raw(MB)", "Δ+Zstd-19", "MIC",
                "Wavelet", "PICS-4", "PICS-8", "HTJ2K", "JPEG-LS"]
     rows = []
     for img in IMAGE_ORDER:
+        zstd_ratio = (zstd_ip.get("Zstd-19", {}).get(img, (None, None)))[1]
+        if zstd_ratio is None:
+            zstd_ratio = (zstd.get("zstd-19", {}).get(img, (None, None)))[1]
         rows.append([
             img,
             f"{RAW_MB.get(img, 0):.2f}",
-            fmt_ratio((zstd.get("zstd-19", {}).get(img, (None, None)))[1]),
+            fmt_ratio(zstd_ratio),
             fmt_ratio((allc.get("MIC-4state", {}).get(img, (None, None)))[1]),
             fmt_ratio((wav.get(img, (None, None)))[1]),
             fmt_ratio((allc.get("PICS-4", {}).get(img, (None, None)))[1]),

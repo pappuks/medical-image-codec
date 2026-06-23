@@ -1,0 +1,2 @@
+# mic/ojph
+mic_decompress_c.c:22:44: warning: excess elements in array initializer [-Wexcess-initializers]

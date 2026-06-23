@@ -1,0 +1,92 @@
+# mic/ojph [mic/ojph.test]
+mic_decompress_c.c:22:44: warning: excess elements in array initializer [-Wexcess-initializers]
+# mic/ojph.test
+ld: warning: duplicate -rpath '/usr/local/lib' ignored
+ld: warning: duplicate -rpath '/opt/homebrew/lib' ignored
+ld: warning: duplicate -rpath '/home/dibba/.local/lib' ignored
+ld: warning: ignoring duplicate libraries: '-lc++'
+ld: warning: search path '/home/dibba/.local/lib' not found
+goos: darwin
+goarch: arm64
+pkg: mic/ojph
+cpu: Apple M4 Pro
+BenchmarkMICCDeltaZstdDecomp/MR/MIC-4state-C-14         	      10	    270004 ns/op	 485.44 MB/s	         2.353 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR/Zstd-19-14              	      10	    337371 ns/op	 388.51 MB/s	         1.946 ratio	  131073 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT/MIC-4state-C-14         	      10	   1330483 ns/op	 394.06 MB/s	         2.237 ratio	  524856 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT/Zstd-19-14              	      10	   1291962 ns/op	 405.81 MB/s	         2.049 ratio	  524291 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CR/MIC-4state-C-14         	      10	  13072796 ns/op	 576.22 MB/s	         3.693 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CR/Zstd-19-14              	      10	  14286621 ns/op	 527.26 MB/s	         3.241 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XR/MIC-4state-C-14         	      10	  19074262 ns/op	 553.38 MB/s	         1.738 ratio	10559488 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XR/Zstd-19-14              	      10	  20604642 ns/op	 512.28 MB/s	         1.434 ratio	10559488 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG1/MIC-4state-C-14        	      10	  11875758 ns/op	 825.91 MB/s	         8.785 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG1/Zstd-19-14             	      10	  14311012 ns/op	 685.37 MB/s	         7.200 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG2/MIC-4state-C-14        	      10	  11740321 ns/op	 835.44 MB/s	         8.773 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG2/Zstd-19-14             	      10	  14170842 ns/op	 692.15 MB/s	         7.206 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG3/MIC-4state-C-14        	      10	  47071821 ns/op	 621.50 MB/s	         2.289 ratio	29261824 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG3/Zstd-19-14             	      10	  67514321 ns/op	 433.32 MB/s	         2.090 ratio	29261825 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG4/MIC-4state-C-14        	      10	  38312771 ns/op	 711.59 MB/s	         3.473 ratio	27262976 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG4/Zstd-19-14             	      10	  54067150 ns/op	 504.24 MB/s	         3.104 ratio	27262976 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT1/MIC-4state-C-14        	      10	   1122554 ns/op	 467.05 MB/s	         2.789 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT1/Zstd-19-14             	      10	   1164912 ns/op	 450.07 MB/s	         2.466 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT2/MIC-4state-C-14        	      10	   1132383 ns/op	 463.00 MB/s	         3.485 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT2/Zstd-19-14             	      10	   1113108 ns/op	 471.01 MB/s	         3.244 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG-N/MIC-4state-C-14       	      10	  51588571 ns/op	 554.02 MB/s	         2.238 ratio	28581888 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MG-N/Zstd-19-14            	      10	  70057038 ns/op	 407.97 MB/s	         2.042 ratio	28581888 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR1/MIC-4state-C-14        	      10	    983850 ns/op	 532.89 MB/s	         2.087 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR1/Zstd-19-14             	      10	   1435721 ns/op	 365.17 MB/s	         1.790 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR2/MIC-4state-C-14        	      10	   3555733 ns/op	 589.79 MB/s	         3.282 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR2/Zstd-19-14             	      10	   4710733 ns/op	 445.19 MB/s	         2.766 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR3/MIC-4state-C-14        	      10	    795754 ns/op	 658.86 MB/s	         3.925 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR3/Zstd-19-14             	      10	   1002688 ns/op	 522.88 MB/s	         3.473 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR4/MIC-4state-C-14        	      10	    828529 ns/op	 632.79 MB/s	         4.124 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR4/Zstd-19-14             	      10	   1125704 ns/op	 465.74 MB/s	         3.579 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/NM1/MIC-4state-C-14        	      10	    757200 ns/op	 692.40 MB/s	         5.149 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/NM1/Zstd-19-14             	      10	   1051308 ns/op	 498.70 MB/s	         4.878 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG1/MIC-4state-C-14        	      10	  17336788 ns/op	 415.20 MB/s	         1.698 ratio	 7200768 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG1/Zstd-19-14             	      10	  18801658 ns/op	 382.86 MB/s	         1.447 ratio	 7200768 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG2/MIC-4state-C-14        	      10	  12129350 ns/op	 621.04 MB/s	         4.230 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG2/Zstd-19-14             	      10	  14777854 ns/op	 509.74 MB/s	         3.685 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG3/MIC-4state-C-14        	      10	   8532242 ns/op	 726.09 MB/s	         6.079 ratio	 6201344 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/RG3/Zstd-19-14             	      10	   9654329 ns/op	 641.70 MB/s	         5.457 ratio	 6201344 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/SC1/MIC-4state-C-14        	      10	  16572404 ns/op	 614.68 MB/s	         3.710 ratio	10190848 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/SC1/Zstd-19-14             	      10	  19928154 ns/op	 511.17 MB/s	         3.464 ratio	10190848 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XA1/MIC-4state-C-14        	      10	   3096371 ns/op	 677.29 MB/s	         5.009 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/XA1/Zstd-19-14             	      10	   4182000 ns/op	 501.47 MB/s	         4.366 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_BRAIN/MIC-4state-C-14   	      10	   1269592 ns/op	 412.96 MB/s	         3.055 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_BRAIN/Zstd-19-14        	      10	   1126062 ns/op	 465.59 MB/s	         3.080 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_ANKLE/MIC-4state-C-14   	      10	    669529 ns/op	 783.07 MB/s	         9.483 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_ANKLE/Zstd-19-14        	      10	    893433 ns/op	 586.82 MB/s	         9.298 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_ORT/MIC-4state-C-14     	      10	   1170642 ns/op	 447.86 MB/s	         2.680 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_ORT/Zstd-19-14          	      10	   1185212 ns/op	 442.36 MB/s	         2.361 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_CHEST/MIC-4state-C-14   	      10	   1051754 ns/op	 389.44 MB/s	         2.817 ratio	  409600 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_CHEST/Zstd-19-14        	      10	    920508 ns/op	 444.97 MB/s	         2.456 ratio	  409600 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_HEAD/MIC-4state-C-14    	      10	    226771 ns/op	 577.99 MB/s	         2.608 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_HEAD/Zstd-19-14         	      10	    352204 ns/op	 372.15 MB/s	         2.112 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_INTERA/MIC-4state-C-14  	      10	   3594667 ns/op	 583.41 MB/s	         3.682 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_INTERA/Zstd-19-14       	      10	   3723433 ns/op	 563.23 MB/s	         4.713 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/DX_HAND/MIC-4state-C-14    	      10	   9901942 ns/op	 421.49 MB/s	         2.244 ratio	 4177920 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/DX_HAND/Zstd-19-14         	      10	  10076579 ns/op	 414.19 MB/s	         1.992 ratio	 4177920 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/DX_CHEST/MIC-4state-C-14   	      10	  10594621 ns/op	 379.57 MB/s	         1.664 ratio	 4022272 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/DX_CHEST/Zstd-19-14        	      10	  11413829 ns/op	 352.33 MB/s	         1.426 ratio	 4022272 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CR_THORAX/MIC-4state-C-14  	      10	  19271000 ns/op	 404.19 MB/s	         1.823 ratio	 7790592 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CR_THORAX/Zstd-19-14       	      10	  19337662 ns/op	 402.80 MB/s	         1.612 ratio	 7790592 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET1/MIC-4state-C-14       	      10	    214408 ns/op	 611.32 MB/s	         2.741 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET1/Zstd-19-14            	      10	    314888 ns/op	 416.25 MB/s	         2.374 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET2/MIC-4state-C-14       	      10	    199346 ns/op	 657.51 MB/s	         3.386 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET2/Zstd-19-14            	      10	    254450 ns/op	 515.12 MB/s	         3.386 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_LUNG/MIC-4state-C-14    	      10	   1135362 ns/op	 461.78 MB/s	         2.733 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_LUNG/Zstd-19-14         	      10	   1656733 ns/op	 316.46 MB/s	         2.403 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_PANCREAS/MIC-4state-C-14         	      10	   1227071 ns/op	 427.27 MB/s	         2.357 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/CT_PANCREAS/Zstd-19-14              	      10	   1163288 ns/op	 450.70 MB/s	         2.086 ratio	  524288 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_BRAIN/MIC-4state-C-14            	      10	    219792 ns/op	 745.43 MB/s	         7.267 ratio	  163840 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_BRAIN/Zstd-19-14                 	      10	    288933 ns/op	 567.05 MB/s	         6.174 ratio	  163840 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_BREAST/MIC-4state-C-14           	      10	    194700 ns/op	 673.20 MB/s	         4.012 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_BREAST/Zstd-19-14                	      10	    240333 ns/op	 545.38 MB/s	         3.313 ratio	  131072 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_PROSTATE/MIC-4state-C-14         	      10	    356962 ns/op	 573.73 MB/s	         2.302 ratio	  204800 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/MR_PROSTATE/Zstd-19-14              	      10	    485500 ns/op	 421.83 MB/s	         2.042 ratio	  204800 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET_PSMA/MIC-4state-C-14            	      10	    127362 ns/op	 628.13 MB/s	        10.12 ratio	   81920 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET_PSMA/Zstd-19-14                 	      10	    117917 ns/op	 678.45 MB/s	        11.88 ratio	   81920 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET_LUNG/MIC-4state-C-14            	      10	    173942 ns/op	 459.92 MB/s	         2.971 ratio	   81920 B/op	       1 allocs/op
+BenchmarkMICCDeltaZstdDecomp/PET_LUNG/Zstd-19-14                 	      10	    160792 ns/op	 497.54 MB/s	         4.564 ratio	   81920 B/op	       1 allocs/op
+PASS
+ok  	mic/ojph	65.998s

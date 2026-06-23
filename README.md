@@ -15,9 +15,9 @@ The key insight: DICOM stores pixels at 10–16 bits per sample, but every mains
 | Compression ratio | 1.7× – 8.9× greyscale; 3–5× RGB tissue tiles (lossless) |
 | vs. HTJ2K ratio | Matches or exceeds on 7/8 modalities (wavelet pipeline) |
 | Peak decompression speed | up to 16 GB/s (ARM64, 64 cores); ~7.5 GB/s geometric mean |
-| vs. HTJ2K speed | Faster on all 8 modalities (single-thread); PICS-C-8 exceeds HTJ2K on all 21 test images |
+| vs. HTJ2K speed | Faster on all modalities (single-thread); PICS-C-8 exceeds HTJ2K on all 39 test images |
 | vs. JPEG-LS | Consistently faster decompression; better or equal ratio |
-| vs. Delta+Zstandard | 10–22% better compression ratio (16-bit alphabet advantage) |
+| vs. Delta+Zstandard | ~10% better compression ratio (geometric mean; 16-bit alphabet advantage) |
 | Implementations | Pure Go · C + pthreads + BMI2/NEON SIMD · JavaScript ES module · Go WebAssembly |
 | Browser throughput | up to 483 MB/s (12-core, PICS parallel strips via `worker_threads`) |
 | Supported formats | 8–16 bit greyscale; 8-bit RGB (single-frame US/VL + WSI/pathology tiled) |
@@ -262,54 +262,74 @@ For throughput scaling numbers, the C/pthreads API, and format specification, se
 
 ## Compression Results
 
-All images are 16-bit greyscale DICOM. Ratios measured in-process on Apple M2 Max (`-tags cgo_ojph`).
+All images are 16-bit greyscale DICOM (39-image corpus). Compression ratios are CPU-independent; values below are from the `BenchmarkAllCodecs` run (`-tags cgo_ojph`, Apple M4 Pro reference).
 
 | Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
 |-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:-----:|:-------:|
 | MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.38× | **2.52×** |
 | CT (512×512) | 0.50 | 2.24× | 2.24× | 1.67× | 2.15× | 1.96× | 1.77× | **2.68×** |
 | CR (2140×1760) | 7.18 | 3.69× | 3.69× | 3.81× | 3.70× | 3.71× | 3.77× | **3.96×** |
-| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | **1.76×** | 1.67× | **1.76×** |
-| MG1 (2457×1996) | 9.35 | 8.79× | 8.79× | 8.67× | 8.84× | 8.87× | 8.25× | **8.91×** |
+| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | 1.75× | 1.67× | **1.76×** |
+| MG1 (2457×1996) | 9.35 | 8.78× | 8.78× | 8.66× | 8.84× | 8.87× | 8.25× | **8.91×** |
 | MG2 (2457×1996) | 9.35 | 8.77× | 8.77× | 8.65× | 8.83× | 8.85× | 8.24× | **8.90×** |
-| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.22× | **2.38×** |
-| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.59× | 3.62× | 3.51× | **3.71×** |
-| CT1 (512×512) | 0.50 | 2.79× | 2.79× | 2.49× | 2.54× | 2.29× | 2.70× | **3.19×** |
-| CT2 (512×512) | 0.50 | 3.49× | 3.49× | 2.87× | 3.11× | 2.72× | 3.29× | **4.54×** |
+| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.31× | 2.31× | 2.33× | 2.22× | **2.38×** |
+| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.58× | 3.62× | 3.51× | **3.71×** |
+| CT1 (512×512) | 0.50 | 2.79× | 2.79× | 2.48× | 2.54× | 2.29× | 2.70× | **3.19×** |
+| CT2 (512×512) | 0.50 | 3.48× | 3.48× | 2.87× | 3.11× | 2.72× | 3.29× | **4.54×** |
 | MG-N (3064×4664) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.23× | **2.38×** |
 | MR1 (512×512) | 0.50 | 2.09× | 2.09× | 2.14× | 2.10× | 2.08× | 2.13× | **2.30×** |
 | MR2 (1024×1024) | 2.00 | 3.28× | 3.28× | 3.34× | 3.31× | 3.31× | 3.35× | **3.52×** |
-| MR3 (512×512) | 0.50 | 3.93× | 3.93× | 4.09× | 3.89× | 3.84× | 4.33× | **4.51×** |
+| MR3 (512×512) | 0.50 | 3.92× | 3.92× | 4.09× | 3.89× | 3.83× | 4.33× | **4.51×** |
 | MR4 (512×512) | 0.50 | 4.12× | 4.12× | 4.18× | 4.09× | 4.03× | 4.21× | **4.49×** |
-| NM1 (256×1024) | 0.50 | 5.15× | 5.15× | 5.02× | 5.26× | 5.28× | 5.76× | **6.28×** |
+| NM1 (256×1024) | 0.50 | 5.15× | 5.15× | 5.01× | 5.25× | 5.28× | 5.76× | **6.28×** |
 | RG1 (1841×1955) | 6.86 | 1.70× | 1.70× | 1.70× | 1.70× | 1.69× | 1.63× | **1.72×** |
 | RG2 (1760×2140) | 7.18 | 4.23× | 4.23× | 4.32× | 4.28× | 4.30× | 4.32× | **4.51×** |
 | RG3 (1760×1760) | 5.91 | 6.08× | 6.08× | 6.82× | 6.11× | 6.12× | 6.99× | **7.31×** |
-| SC1 (2048×2487) | 9.71 | 3.71× | 3.71× | 3.70× | 3.73× | 3.74× | 3.85× | **4.73×** |
+| SC1 (2048×2487) | 9.71 | 3.71× | 3.71× | 3.70× | 3.73× | 3.73× | 3.85× | **4.73×** |
 | XA1 (1024×1024) | 2.00 | 5.01× | 5.01× | 4.94× | 5.04× | 5.03× | 4.88× | **5.39×** |
+| CT_BRAIN (512×512) | 0.50 | 3.06× | 3.06× | 2.89× | 2.77× | 2.47× | 3.39× | **4.28×** |
+| CT_ANKLE (512×512) | 0.50 | **9.48×** | **9.48×** | 5.02× | 9.30× | 9.14× | 4.97× | 6.87× |
+| CT_ORT (512×512) | 0.50 | 2.68× | 2.68× | 2.38× | 2.51× | 2.26× | 2.56× | **3.00×** |
+| CT_CHEST (400×512) | 0.39 | 2.82× | 2.82× | 2.10× | 2.52× | 2.21× | 2.23× | **3.22×** |
+| MR_HEAD (256×256) | 0.13 | 2.61× | 2.61× | 2.65× | 2.57× | 2.53× | 2.67× | **2.86×** |
+| MR_INTERA (1024×1024) | 2.00 | 3.68× | 3.68× | 4.05× | 3.75× | 3.78× | 5.04× | **5.08×** |
+| DX_HAND (1480×1410) | 3.98 | 2.24× | 2.24× | 2.35× | 2.26× | 2.25× | 2.37× | **2.48×** |
+| DX_CHEST (1416×1420) | 3.84 | 1.66× | 1.66× | **1.82×** | 1.65× | 1.63× | 1.63× | 1.70× |
+| CR_THORAX (2076×1876) | 7.43 | 1.82× | 1.82× | 1.81× | 1.84× | 1.83× | 1.81× | **1.90×** |
+| PET1 (256×256) | 0.13 | 2.74× | 2.74× | 2.81× | 2.64× | 2.52× | 3.02× | **3.21×** |
+| PET2 (256×256) | 0.13 | 3.38× | 3.38× | 3.48× | 3.16× | 2.58× | 4.37× | **4.74×** |
+| CT_LUNG (512×512) | 0.50 | 2.73× | 2.73× | 2.45× | 2.50× | 2.25× | 2.67× | **3.15×** |
+| CT_PANCREAS (512×512) | 0.50 | 2.36× | 2.36× | 1.76× | 2.18× | 1.98× | 1.85× | **2.70×** |
+| MR_BRAIN (320×256) | 0.16 | 7.26× | 7.26× | 6.75× | 7.31× | 7.24× | 7.62× | **8.46×** |
+| MR_BREAST (256×256) | 0.13 | 4.01× | 4.01× | 3.94× | 4.00× | 3.91× | 4.10× | **4.48×** |
+| MR_PROSTATE (320×320) | 0.20 | 2.30× | 2.30× | 2.34× | 2.28× | 2.26× | 2.49× | **2.65×** |
+| PET_PSMA (200×200) | 0.08 | 10.11× | 10.11× | 7.67× | 1.20× | 1.18× | 13.92× | **15.78×** |
+| PET_LUNG (200×200) | 0.08 | 2.97× | 2.97× | 2.97× | 1.00× | 1.03× | 5.21× | **5.62×** |
 
-MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) but improves it on large CR/MG images where strip-local FSE table adaptation helps. JPEG-LS consistently achieves the highest ratios but at 3–6× lower decompression throughput (see Performance table below).
+MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) and can fall back to near-raw on the smallest 200×200 PET frames, but improves ratio on large CR/MG images where strip-local FSE table adaptation helps. JPEG-LS achieves the highest ratio on most images (37 of 39; MIC wins CT_ANKLE and the wavelet pipeline wins DX_CHEST) but at 3–6× lower decompression throughput (see Performance table below).
 
 `CompressSingleFrameGapRemoval` adds +0.45% on CT (2.237× → **2.247×**) by collapsing the 65536-symbol RLE alphabet to the 1782 symbols that actually occur, via a delta-encoded expand map (1798 bytes overhead). Other modalities are unaffected. See [docs/compression-results.md](./docs/compression-results.md).
 
-**Predictor ablation (21 images, full pipeline):** Four predictors were evaluated — left-only, avg (MIC default), Paeth, and MED (JPEG-LS):
+**Predictor ablation (39 images, full pipeline):** Four predictors were evaluated — left-only, avg (MIC default), Paeth, and MED (JPEG-LS):
 
-| Predictor | Geo. Mean Ratio | Wins (21 imgs) | vs. Avg |
+| Predictor | Geo. Mean Ratio | Wins (39 imgs) | vs. Avg |
 |-----------|:--------------:|:--------------:|:-------:|
-| Left-only | 3.38× | 3/21 | -2.3% |
-| **Avg (MIC default)** | **3.46×** | **13/21** | baseline |
-| Paeth | 3.48× | 2/21 | +0.5% |
-| MED (JPEG-LS) | 3.52× | 16/21 | +1.6% |
+| Left-only | 3.22× | 2/39 | -4.4% |
+| **Avg (MIC default)** | **3.36×** | **11/39** | baseline |
+| Paeth | 3.39× | 0/39 | +0.8% |
+| MED (JPEG-LS) | 3.44× | 26/39 | +2.4% |
 
-No single predictor dominates across all modalities. The avg predictor is best for mammography (MG1/MG2) and fluoroscopy; Paeth and MED improve on CT1/CT2, MR3, MR4, SC1, and RG3 (up to +10.5%) but regress on NM1 (−8%) and MG images (−2%). MED provides the best overall geomean at the cost of 1.5–2× slower decompression due to its three-way conditional branch.
+No single predictor dominates across all modalities. The avg predictor is best for mammography (MG1/MG2) and several MR studies; Paeth and MED improve on CT1/CT2, MR3, MR4, SC1, RG3, and the new CT studies (CT_ANKLE up to +32%) but regress on NM1 (−8%), MG-N, and the PET_PSMA/MR_BRAIN studies. MED provides the best overall geomean at the cost of 1.5–2× slower decompression due to its three-way conditional branch.
 
-**TableLog ablation (21 images, full pipeline):** The adaptive tableLog selection bumps from 11→12 or 11→13 for 9 of 21 images (those with many distinct residual symbols and sufficient data per symbol — notably CR, MG1/MG2, RG2, RG3, XA1, MR2, MR3, NM1), gaining 0.9–9.9% compression ratio. Decompression speed is unaffected by tableLog choice (variation <5%, within measurement noise). See `TestTableLogAblation` in [ablation_test.go](ablation_test.go) for full data.
+**TableLog ablation (39 images, full pipeline):** The adaptive tableLog selection bumps from 11→12 or 11→13 for 15 of 39 images (those with many distinct residual symbols and sufficient data per symbol — notably CR, MG1/MG2, RG2, RG3, XA1, MR2, MR3, NM1, and several added MR studies), gaining 0.2–9.9% compression ratio. Decompression speed is unaffected by tableLog choice (variation <5%, within measurement noise). See `TestTableLogAblation` in [ablation_test.go](ablation_test.go) for full data.
 
 For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compression-results.md](./docs/compression-results.md).
 
 ---
 
 ## Performance
+
+> **Note:** The per-image throughput tables below are reference values measured on the original 21-image corpus on the machines named in each header (Apple M2 Max, Intel Core Ultra 9 285K). They have not been regenerated for the 39-image corpus. The current paper-quality single-threaded throughput numbers (Apple M4 Pro / AWS c8i, 39 images on ARM64) live in the paper tables and in `results/<timestamp>/paper-tables.txt` from `./run-paper-benchmarks.sh`.
 
 **Decompression throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`). C variants compiled with `-O3` (no `-march=native` on ARM64; `MIC-4state-SIMD` = `MIC-4state-C` scalar fallback — no AVX2). PICS-C-N uses C pthreads with N concurrent threads. ⊕ Pure-Go `DecompressParallelStrips` (no CGO) achieves ~60–70% of PICS-C throughput.
 

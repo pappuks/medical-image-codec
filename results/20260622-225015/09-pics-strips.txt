@@ -1,0 +1,18 @@
+goos: darwin
+goarch: arm64
+pkg: mic
+cpu: Apple M4 Pro
+BenchmarkParallelStripsCompress/strips1-14         	      10	  28613504 ns/op	 263.26 MB/s	34841417 B/op	   52420 allocs/op
+BenchmarkParallelStripsCompress/strips2-14         	      10	  15317312 ns/op	 491.78 MB/s	35996003 B/op	   52412 allocs/op
+BenchmarkParallelStripsCompress/strips4-14         	      10	   8515825 ns/op	 884.56 MB/s	38232741 B/op	   52408 allocs/op
+BenchmarkParallelStripsCompress/strips8-14         	      10	   6042371 ns/op	1246.66 MB/s	42786156 B/op	   52480 allocs/op
+BenchmarkParallelStripsDecompress/strips1-14       	      10	  23206692 ns/op	 324.60 MB/s	46748872 B/op	      19 allocs/op
+BenchmarkParallelStripsDecompress/strips2-14       	      10	  11954654 ns/op	 630.11 MB/s	47581600 B/op	      34 allocs/op
+BenchmarkParallelStripsDecompress/strips4-14       	      10	   6624579 ns/op	1137.10 MB/s	49485052 B/op	      65 allocs/op
+BenchmarkParallelStripsDecompress/strips8-14       	      10	   4116192 ns/op	1830.04 MB/s	49580331 B/op	     118 allocs/op
+BenchmarkParallelStripsAdaptive/strips1-14         	      10	   1435800 ns/op	  91.29 MB/s	 3911864 B/op	     758 allocs/op
+BenchmarkParallelStripsAdaptive/strips2-14         	      10	   1030538 ns/op	 127.19 MB/s	 6108889 B/op	     769 allocs/op
+BenchmarkParallelStripsAdaptive/strips4-14         	      10	   1328858 ns/op	  98.64 MB/s	10505627 B/op	     805 allocs/op
+BenchmarkParallelStripsAdaptive/strips8-14         	      10	   1764621 ns/op	  74.28 MB/s	19098660 B/op	     907 allocs/op
+PASS
+ok  	mic	1.631s
