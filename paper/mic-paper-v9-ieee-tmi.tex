@@ -84,11 +84,11 @@ on 34 of 39 images) and reaches a geometric-mean ratio of 3.36$\times$,
 within about 2\% of High-Throughput JPEG~2000 (HTJ2K, 3.42$\times$) and
 about 88\% of JPEG-LS's 3.84$\times$. A multi-state interleaved decoder
 yields a 36\% geometric-mean FSE-stage decompression speedup on ARM64 at
-four states and a further 5\% at eight states (8\% and 2\% respectively
+four states and a further 5\% at eight states (12\% and 1\% respectively
 on AMD64). Single-threaded, MIC's C decoder is the fastest of the four
-tested codecs on all 39 ARM64 images and on all 21 images measured on
+tested codecs on all 39 ARM64 images and on 36 of 39 images measured on
 AMD64, and on the encoding side it leads on 38 of 39 ARM64 images and on
-18 of 21 AMD64 images. A strip-parallel mode adds near-linear scaling on
+32 of 39 AMD64 images. A strip-parallel mode adds near-linear scaling on
 large images. We also provide a 20\,KB pure JavaScript decoder and a Go
 WebAssembly build; these implementations show that the format can be
 decoded on the client side in a web viewer. The current study is limited
@@ -199,8 +199,8 @@ The main contributions of this paper are as follows.
   \item \textbf{A multi-state interleaved entropy decoder.}
   We implement and evaluate two-, four- and eight-state FSE decoding to
   exploit ILP. Four states deliver a geometric-mean $+$36\% FSE-stage
-  speedup on ARM64 ($+$8\% on AMD64) and eight states deliver a further
-  $+$5\% on ARM64 ($+$2\% on AMD64), with no compression ratio penalty.
+  speedup on ARM64 ($+$12\% on AMD64) and eight states deliver a further
+  $+$5\% on ARM64 ($+$1\% on AMD64), with no compression ratio penalty.
 
   \item \textbf{An empirical evaluation against standard codecs and a
   general-purpose baseline.}
@@ -998,14 +998,14 @@ MR             & 0.13 & 1.95$\times$ & 2.35$\times$ & 2.38$\times$ & 2.28$\times
 CT             & 0.50 & 2.05$\times$ & 2.24$\times$ & 1.67$\times$ & 2.15$\times$ & 1.96$\times$ & 1.77$\times$ & \textbf{2.68$\times$} \\
 CR             & 7.18 & 3.24$\times$ & 3.69$\times$ & 3.81$\times$ & 3.70$\times$ & 3.71$\times$ & 3.77$\times$ & \textbf{3.96$\times$} \\
 XR             & 10.1 & 1.43$\times$ & 1.74$\times$ & \textbf{1.76$\times$} & 1.75$\times$ & 1.75$\times$ & 1.67$\times$ & \textbf{1.76$\times$} \\
-MG1            & 9.35 & 7.20$\times$ & 8.78$\times$ & 8.66$\times$ & 8.84$\times$ & 8.87$\times$ & 8.25$\times$ & \textbf{8.91$\times$} \\
+MG1            & 9.35 & 7.20$\times$ & 8.79$\times$ & 8.66$\times$ & 8.84$\times$ & 8.87$\times$ & 8.25$\times$ & \textbf{8.91$\times$} \\
 MG2            & 9.35 & 7.21$\times$ & 8.77$\times$ & 8.65$\times$ & 8.83$\times$ & 8.85$\times$ & 8.24$\times$ & \textbf{8.90$\times$} \\
 MG3            & 27.3 & 2.09$\times$ & 2.24$\times$ & 2.31$\times$ & 2.31$\times$ & 2.33$\times$ & 2.22$\times$ & \textbf{2.38$\times$} \\
 MG4            & 26.0 & 3.10$\times$ & 3.47$\times$ & 3.59$\times$ & 3.58$\times$ & 3.62$\times$ & 3.51$\times$ & \textbf{3.71$\times$} \\
 CT1            & 0.50 & 2.47$\times$ & 2.79$\times$ & 2.48$\times$ & 2.54$\times$ & 2.29$\times$ & 2.70$\times$ & \textbf{3.19$\times$} \\
 CT2            & 0.50 & 3.24$\times$ & 3.48$\times$ & 2.87$\times$ & 3.11$\times$ & 2.72$\times$ & 3.29$\times$ & \textbf{4.54$\times$} \\
 MG-N           & 27.3 & 2.04$\times$ & 2.24$\times$ & 2.32$\times$ & 2.31$\times$ & 2.34$\times$ & 2.23$\times$ & \textbf{2.38$\times$} \\
-MR1            & 0.50 & 1.79$\times$ & 2.09$\times$ & 2.14$\times$ & 2.10$\times$ & 2.08$\times$ & 2.13$\times$ & \textbf{2.30$\times$} \\
+MR1            & 0.50 & 1.79$\times$ & 2.09$\times$ & 2.14$\times$ & 2.10$\times$ & 2.08$\times$ & 2.12$\times$ & \textbf{2.30$\times$} \\
 MR2            & 2.00 & 2.77$\times$ & 3.28$\times$ & 3.34$\times$ & 3.31$\times$ & 3.31$\times$ & 3.35$\times$ & \textbf{3.52$\times$} \\
 MR3            & 0.50 & 3.47$\times$ & 3.92$\times$ & 4.09$\times$ & 3.89$\times$ & 3.83$\times$ & 4.33$\times$ & \textbf{4.51$\times$} \\
 MR4            & 0.50 & 3.58$\times$ & 4.12$\times$ & 4.18$\times$ & 4.09$\times$ & 4.03$\times$ & 4.21$\times$ & \textbf{4.49$\times$} \\
@@ -1025,13 +1025,13 @@ DX\_HAND       & 3.98 & 1.99$\times$ & 2.24$\times$ & 2.35$\times$ & 2.26$\times
 DX\_CHEST      & 3.84 & 1.43$\times$ & 1.66$\times$ & \textbf{1.82$\times$} & 1.65$\times$ & 1.63$\times$ & 1.63$\times$ & 1.70$\times$ \\
 CR\_THORAX     & 7.43 & 1.61$\times$ & 1.82$\times$ & 1.81$\times$ & 1.84$\times$ & 1.83$\times$ & 1.81$\times$ & \textbf{1.90$\times$} \\
 PET1           & 0.13 & 2.37$\times$ & 2.74$\times$ & 2.81$\times$ & 2.64$\times$ & 2.52$\times$ & 3.02$\times$ & \textbf{3.21$\times$} \\
-PET2           & 0.13 & 3.39$\times$ & 3.38$\times$ & 3.48$\times$ & 3.16$\times$ & 2.58$\times$ & 4.37$\times$ & \textbf{4.74$\times$} \\
+PET2           & 0.13 & 3.39$\times$ & 3.39$\times$ & 3.48$\times$ & 3.16$\times$ & 2.58$\times$ & 4.37$\times$ & \textbf{4.74$\times$} \\
 CT\_LUNG       & 0.50 & 2.40$\times$ & 2.73$\times$ & 2.45$\times$ & 2.50$\times$ & 2.25$\times$ & 2.67$\times$ & \textbf{3.15$\times$} \\
 CT\_PANCREAS   & 0.50 & 2.09$\times$ & 2.36$\times$ & 1.76$\times$ & 2.18$\times$ & 1.98$\times$ & 1.85$\times$ & \textbf{2.70$\times$} \\
-MR\_BRAIN      & 0.16 & 6.17$\times$ & 7.26$\times$ & 6.75$\times$ & 7.31$\times$ & 7.24$\times$ & 7.62$\times$ & \textbf{8.46$\times$} \\
+MR\_BRAIN      & 0.16 & 6.17$\times$ & 7.27$\times$ & 6.75$\times$ & 7.31$\times$ & 7.24$\times$ & 7.62$\times$ & \textbf{8.46$\times$} \\
 MR\_BREAST     & 0.13 & 3.31$\times$ & 4.01$\times$ & 3.94$\times$ & 4.00$\times$ & 3.91$\times$ & 4.10$\times$ & \textbf{4.48$\times$} \\
 MR\_PROSTATE   & 0.20 & 2.04$\times$ & 2.30$\times$ & 2.34$\times$ & 2.28$\times$ & 2.26$\times$ & 2.49$\times$ & \textbf{2.65$\times$} \\
-PET\_PSMA      & 0.08 & 11.88$\times$ & 10.11$\times$ & 7.67$\times$ & 1.20$\times$ & 1.18$\times$ & 13.92$\times$ & \textbf{15.78$\times$} \\
+PET\_PSMA      & 0.08 & 11.88$\times$ & 10.12$\times$ & 7.67$\times$ & 1.20$\times$ & 1.18$\times$ & 13.91$\times$ & \textbf{15.78$\times$} \\
 PET\_LUNG      & 0.08 & 4.56$\times$ & 2.97$\times$ & 2.97$\times$ & 1.00$\times$ & 1.03$\times$ & 5.21$\times$ & \textbf{5.62$\times$} \\
 \midrule
 \textbf{Geomean} & --- & \textbf{3.06$\times$} & \textbf{3.36$\times$} & \textbf{3.21$\times$} & \textbf{3.04$\times$} & \textbf{2.95$\times$} & \textbf{3.42$\times$} & \textbf{3.84$\times$} \\
@@ -1049,9 +1049,9 @@ reaches a geometric-mean ratio of 3.36$\times$, approximately 88\% of
 JPEG-LS's 3.84$\times$ and within about 2\% of HTJ2K's 3.42$\times$,
 while decoding faster than either (Table~\ref{tab:decomp}). Mammography
 images yield among the highest MIC ratios
-(up to 8.78$\times$) because their smooth tissue regions produce long
+(up to 8.79$\times$) because their smooth tissue regions produce long
 near-zero RLE runs; the largest single-image ratios occur on studies with
-extensive uniform background, for example PET\_PSMA at 10.11$\times$ and
+extensive uniform background, for example PET\_PSMA at 10.12$\times$ and
 CT\_ANKLE at 9.48$\times$.
 
 \textbf{PICS strip adaptation.} Each PICS strip receives a dedicated FSE table
@@ -1076,9 +1076,11 @@ tested on both reference platforms. On ARM64, MIC leads on 38 of 39
 images, running at roughly 1.0--3.3$\times$ HTJ2K's throughput,
 1.0--7.1$\times$ JPEG-LS's throughput, and 30--320$\times$
 $\Delta$+Zstd-19's throughput; HTJ2K is faster only on the small
-PET\_LUNG study. On AMD64, MIC leads on 18 of 21 images at roughly
-1.0--1.6$\times$ HTJ2K and 3--6$\times$ JPEG-LS; HTJ2K narrowly wins on
-the two largest mammography slabs (MG1, MG2) and on RG3. The detailed
+PET\_LUNG study. On AMD64, MIC leads on 32 of 39 images at roughly
+1.0--1.6$\times$ HTJ2K's throughput and up to 6$\times$ JPEG-LS's; HTJ2K
+is faster on the two largest mammography slabs (MG1, MG2), on RG3, and on
+four smaller new-corpus studies (CT\_BRAIN, MR\_BRAIN, and the two
+0.08\,MB PET images, where per-image table-build overhead dominates). The detailed
 per-image numbers are in Table~\ref{tab:enc}.
 
 The throughput advantage is primarily structural: MIC's encoder is a
@@ -1099,10 +1101,8 @@ pipeline is smaller.
 \caption{Single-threaded encoding throughput (MB/s). Codec
 baselines as defined in Section~\ref{sec:methodology}; MIC is the
 eight-state C encoder. Bold marks the fastest codec per row on each
-platform. ARM64 columns and geometric means cover all 39 images;
-AMD64 columns cover the original 21 images, with the 18 additional
-images (shown as ---) pending measurement on the AMD64 reference
-platform.}
+platform. Both ARM64 and AMD64 columns and geometric means cover all 39
+images.}
 \label{tab:enc}
 \scriptsize
 \begin{tabular}{l|rrrr|rrrr}
@@ -1111,47 +1111,47 @@ platform.}
 \cmidrule(lr){2-5}\cmidrule(lr){6-9}
 Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
 \midrule
-MR             & \textbf{457} & 7 & 236 & 91 & \textbf{338} & 5 & 229 & 62 \\
-CT             & \textbf{476} & 7 & 183 & 126 & \textbf{292} & 5 & 206 & 97 \\
-CR             & \textbf{525} & 2 & 186 & 110 & \textbf{322} & 2 & 284 & 75 \\
-XR             & \textbf{661} & 3 & 229 & 113 & \textbf{405} & 3 & 250 & 84 \\
-MG1            & \textbf{1{,}057} & 11 & 414 & 277 & 546 & 8 & \textbf{647} & 209 \\
-MG2            & \textbf{1{,}047} & 12 & 407 & 284 & 541 & 8 & \textbf{646} & 209 \\
-MG3            & \textbf{639} & 2 & 211 & 132 & \textbf{332} & 2 & 251 & 104 \\
-MG4            & \textbf{883} & 5 & 342 & 196 & \textbf{431} & 6 & 415 & 150 \\
-CT1            & \textbf{615} & 9 & 243 & 176 & \textbf{329} & 7 & 277 & 125 \\
-CT2            & \textbf{536} & 7 & 204 & 172 & \textbf{286} & 5 & 266 & 125 \\
-MG-N           & \textbf{639} & 2 & 214 & 140 & \textbf{339} & 2 & 243 & 104 \\
-MR1            & \textbf{616} & 9 & 205 & 114 & \textbf{344} & 6 & 244 & 86 \\
-MR2            & \textbf{685} & 7 & 216 & 118 & \textbf{397} & 4 & 300 & 84 \\
-MR3            & \textbf{768} & 19 & 264 & 167 & \textbf{428} & 12 & 353 & 123 \\
-MR4            & \textbf{585} & 7 & 212 & 163 & \textbf{358} & 6 & 318 & 141 \\
-NM1            & \textbf{633} & 6 & 208 & 162 & \textbf{336} & 5 & 312 & 116 \\
-RG1            & \textbf{595} & 4 & 218 & 84 & \textbf{392} & 4 & 250 & 65 \\
-RG2            & \textbf{737} & 4 & 263 & 151 & \textbf{416} & 3 & 356 & 99 \\
-RG3            & \textbf{757} & 6 & 276 & 183 & 397 & 4 & \textbf{407} & 126 \\
-SC1            & \textbf{667} & 5 & 225 & 203 & \textbf{407} & 4 & 309 & 168 \\
-XA1            & \textbf{612} & 5 & 203 & 133 & \textbf{358} & 4 & 310 & 97 \\
-CT\_BRAIN      & \textbf{352} & 5 & 168 & 147 & -- & -- & -- & -- \\
-CT\_ANKLE      & \textbf{955} & 15 & 290 & 327 & -- & -- & -- & -- \\
-CT\_ORT        & \textbf{644} & 10 & 198 & 138 & -- & -- & -- & -- \\
-CT\_CHEST      & \textbf{463} & 6 & 177 & 133 & -- & -- & -- & -- \\
-MR\_HEAD       & \textbf{430} & 6 & 211 & 106 & -- & -- & -- & -- \\
-MR\_INTERA     & \textbf{415} & 4 & 180 & 115 & -- & -- & -- & -- \\
-DX\_HAND       & \textbf{587} & 4 & 218 & 102 & -- & -- & -- & -- \\
-DX\_CHEST      & \textbf{636} & 6 & 209 & 109 & -- & -- & -- & -- \\
-CR\_THORAX     & \textbf{585} & 4 & 226 & 91 & -- & -- & -- & -- \\
-PET1           & \textbf{479} & 7 & 240 & 129 & -- & -- & -- & -- \\
-PET2           & \textbf{550} & 6 & 236 & 145 & -- & -- & -- & -- \\
-CT\_LUNG       & \textbf{586} & 10 & 195 & 141 & -- & -- & -- & -- \\
-CT\_PANCREAS   & \textbf{454} & 7 & 193 & 130 & -- & -- & -- & -- \\
-MR\_BRAIN      & \textbf{607} & 7 & 229 & 191 & -- & -- & -- & -- \\
-MR\_BREAST     & \textbf{522} & 5 & 241 & 141 & -- & -- & -- & -- \\
-MR\_PROSTATE   & \textbf{465} & 8 & 195 & 97 & -- & -- & -- & -- \\
-PET\_PSMA      & \textbf{434} & 14 & 423 & 426 & -- & -- & -- & -- \\
-PET\_LUNG      & 232 & 6 & \textbf{245} & 235 & -- & -- & -- & -- \\
+MR             & \textbf{457} & 7 & 236 & 91 & \textbf{344} & 5 & 246 & 62 \\
+CT             & \textbf{476} & 7 & 183 & 126 & \textbf{280} & 5 & 207 & 97 \\
+CR             & \textbf{525} & 2 & 186 & 110 & \textbf{322} & 2 & 286 & 75 \\
+XR             & \textbf{661} & 3 & 229 & 113 & \textbf{400} & 4 & 256 & 84 \\
+MG1            & \textbf{1{,}057} & 11 & 414 & 277 & 532 & 8 & \textbf{632} & 211 \\
+MG2            & \textbf{1{,}047} & 12 & 407 & 284 & 552 & 8 & \textbf{629} & 209 \\
+MG3            & \textbf{639} & 2 & 211 & 132 & \textbf{352} & 2 & 245 & 104 \\
+MG4            & \textbf{883} & 5 & 342 & 196 & \textbf{457} & 6 & 408 & 151 \\
+CT1            & \textbf{615} & 9 & 243 & 176 & \textbf{321} & 7 & 271 & 125 \\
+CT2            & \textbf{536} & 7 & 204 & 172 & \textbf{285} & 5 & 271 & 124 \\
+MG-N           & \textbf{639} & 2 & 214 & 140 & \textbf{358} & 2 & 248 & 104 \\
+MR1            & \textbf{616} & 9 & 205 & 114 & \textbf{367} & 6 & 241 & 86 \\
+MR2            & \textbf{685} & 7 & 216 & 118 & \textbf{409} & 4 & 309 & 85 \\
+MR3            & \textbf{768} & 19 & 264 & 167 & \textbf{441} & 12 & 354 & 123 \\
+MR4            & \textbf{585} & 7 & 212 & 163 & \textbf{367} & 5 & 312 & 142 \\
+NM1            & \textbf{633} & 6 & 208 & 162 & \textbf{340} & 5 & 313 & 115 \\
+RG1            & \textbf{595} & 4 & 218 & 84 & \textbf{396} & 5 & 252 & 66 \\
+RG2            & \textbf{737} & 4 & 263 & 151 & \textbf{425} & 3 & 360 & 100 \\
+RG3            & \textbf{757} & 6 & 276 & 183 & 389 & 4 & \textbf{412} & 126 \\
+SC1            & \textbf{667} & 5 & 225 & 203 & \textbf{416} & 4 & 306 & 169 \\
+XA1            & \textbf{612} & 5 & 203 & 133 & \textbf{356} & 4 & 303 & 98 \\
+CT\_BRAIN      & \textbf{352} & 5 & 168 & 147 & 239 & 4 & \textbf{253} & 112 \\
+CT\_ANKLE      & \textbf{955} & 15 & 290 & 327 & \textbf{450} & 11 & 358 & 261 \\
+CT\_ORT        & \textbf{644} & 10 & 198 & 138 & \textbf{350} & 7 & 269 & 112 \\
+CT\_CHEST      & \textbf{463} & 6 & 177 & 133 & \textbf{267} & 4 & 234 & 100 \\
+MR\_HEAD       & \textbf{430} & 6 & 211 & 106 & \textbf{288} & 4 & 252 & 65 \\
+MR\_INTERA     & \textbf{415} & 4 & 180 & 115 & \textbf{269} & 3 & 268 & 89 \\
+DX\_HAND       & \textbf{587} & 4 & 218 & 102 & \textbf{378} & 3 & 261 & 65 \\
+DX\_CHEST      & \textbf{636} & 6 & 209 & 109 & \textbf{389} & 6 & 241 & 77 \\
+CR\_THORAX     & \textbf{585} & 4 & 226 & 91 & \textbf{397} & 4 & 261 & 68 \\
+PET1           & \textbf{479} & 7 & 240 & 129 & \textbf{295} & 5 & 252 & 111 \\
+PET2           & \textbf{550} & 6 & 236 & 145 & \textbf{269} & 4 & 256 & 103 \\
+CT\_LUNG       & \textbf{586} & 10 & 195 & 141 & \textbf{337} & 7 & 258 & 110 \\
+CT\_PANCREAS   & \textbf{454} & 7 & 193 & 130 & \textbf{292} & 5 & 240 & 98 \\
+MR\_BRAIN      & \textbf{607} & 7 & 229 & 191 & 338 & 6 & \textbf{351} & 141 \\
+MR\_BREAST     & \textbf{522} & 5 & 241 & 141 & \textbf{292} & 4 & 290 & 96 \\
+MR\_PROSTATE   & \textbf{465} & 8 & 195 & 97 & \textbf{313} & 6 & 250 & 66 \\
+PET\_PSMA      & \textbf{434} & 14 & 423 & 426 & 296 & 10 & \textbf{377} & 364 \\
+PET\_LUNG      & 232 & 6 & \textbf{245} & 235 & 144 & 5 & \textbf{260} & 167 \\
 \midrule
-\textbf{Geomean} & \textbf{582} & \textbf{6} & \textbf{231} & \textbf{148} & \textbf{376} & \textbf{4} & \textbf{311} & \textbf{110} \\
+\textbf{Geomean} & \textbf{582} & \textbf{6} & \textbf{231} & \textbf{148} & \textbf{343} & \textbf{5} & \textbf{293} & \textbf{110} \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1188,10 +1188,8 @@ JPEG-LS is between decode latency and archival storage cost.
 Codec baselines as defined in Section~\ref{sec:methodology}; MIC is
 the eight-state C decoder (AVX-512 acceleration of the RLE and delta
 inverse stages on AMD64). Bold marks the fastest codec per row on
-each platform. ARM64 columns and geometric means cover all 39 images;
-AMD64 columns cover the original 21 images, with the 18 additional
-images (shown as ---) pending measurement on the AMD64 reference
-platform.}
+each platform. Both ARM64 and AMD64 columns and geometric means cover all 39
+images.}
 \label{tab:decomp}
 \scriptsize
 \begin{tabular}{l|rrrr|rrrr}
@@ -1200,47 +1198,47 @@ platform.}
 \cmidrule(lr){2-5}\cmidrule(lr){6-9}
 Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
 \midrule
-MR             & \textbf{649} & 389 & 328 & 137 & \textbf{552} & 357 & 439 & 91 \\
-CT             & \textbf{495} & 406 & 299 & 158 & \textbf{453} & 384 & 329 & 111 \\
-CR             & \textbf{580} & 527 & 316 & 181 & \textbf{566} & 475 & 439 & 123 \\
-XR             & \textbf{668} & 512 & 324 & 131 & \textbf{617} & 508 & 386 & 88 \\
-MG1            & \textbf{762} & 685 & 612 & 481 & \textbf{913} & 599 & 907 & 332 \\
-MG2            & \textbf{753} & 692 & 622 & 492 & \textbf{920} & 599 & 896 & 333 \\
-MG3            & \textbf{600} & 433 & 314 & 175 & \textbf{556} & 358 & 390 & 117 \\
-MG4            & \textbf{788} & 504 & 508 & 246 & \textbf{676} & 466 & 611 & 157 \\
-CT1            & \textbf{600} & 450 & 357 & 224 & \textbf{525} & 425 & 390 & 143 \\
-CT2            & \textbf{570} & 471 & 342 & 212 & \textbf{512} & 456 & 383 & 133 \\
-MG-N           & \textbf{600} & 408 & 289 & 180 & \textbf{545} & 355 & 391 & 117 \\
-MR1            & \textbf{734} & 365 & 342 & 149 & \textbf{603} & 384 & 397 & 94 \\
-MR2            & \textbf{700} & 445 & 363 & 211 & \textbf{644} & 464 & 491 & 132 \\
-MR3            & \textbf{839} & 523 & 432 & 289 & \textbf{773} & 485 & 543 & 192 \\
-MR4            & \textbf{692} & 466 & 326 & 220 & \textbf{632} & 480 & 446 & 153 \\
-NM1            & \textbf{778} & 499 & 384 & 260 & \textbf{598} & 486 & 467 & 172 \\
-RG1            & \textbf{469} & 383 & 318 & 123 & \textbf{550} & 347 & 363 & 80 \\
-RG2            & \textbf{652} & 510 & 383 & 225 & \textbf{730} & 497 & 535 & 154 \\
-RG3            & \textbf{685} & 642 & 432 & 294 & \textbf{723} & 552 & 628 & 196 \\
-SC1            & \textbf{699} & 511 & 366 & 263 & \textbf{690} & 484 & 456 & 183 \\
-XA1            & \textbf{662} & 501 & 346 & 244 & \textbf{688} & 534 & 477 & 165 \\
-CT\_BRAIN      & \textbf{528} & 466 & 326 & 190 & -- & -- & -- & -- \\
-CT\_ANKLE      & \textbf{853} & 587 & 452 & 426 & -- & -- & -- & -- \\
-CT\_ORT        & \textbf{538} & 442 & 348 & 190 & -- & -- & -- & -- \\
-CT\_CHEST      & \textbf{500} & 445 & 297 & 178 & -- & -- & -- & -- \\
-MR\_HEAD       & \textbf{595} & 372 & 280 & 167 & -- & -- & -- & -- \\
-MR\_INTERA     & \textbf{590} & 563 & 304 & 178 & -- & -- & -- & -- \\
-DX\_HAND       & \textbf{500} & 414 & 316 & 147 & -- & -- & -- & -- \\
-DX\_CHEST      & \textbf{476} & 352 & 307 & 121 & -- & -- & -- & -- \\
-CR\_THORAX     & \textbf{552} & 403 & 346 & 129 & -- & -- & -- & -- \\
-PET1           & \textbf{732} & 416 & 377 & 197 & -- & -- & -- & -- \\
-PET2           & \textbf{656} & 515 & 381 & 227 & -- & -- & -- & -- \\
-CT\_LUNG       & \textbf{522} & 316 & 348 & 189 & -- & -- & -- & -- \\
-CT\_PANCREAS   & \textbf{517} & 451 & 316 & 172 & -- & -- & -- & -- \\
-MR\_BRAIN      & \textbf{866} & 567 & 422 & 375 & -- & -- & -- & -- \\
-MR\_BREAST     & \textbf{640} & 545 & 350 & 221 & -- & -- & -- & -- \\
-MR\_PROSTATE   & \textbf{679} & 422 & 353 & 165 & -- & -- & -- & -- \\
-PET\_PSMA      & \textbf{759} & 678 & 475 & 684 & -- & -- & -- & -- \\
-PET\_LUNG      & \textbf{502} & 498 & 283 & 278 & -- & -- & -- & -- \\
+MR             & \textbf{649} & 389 & 328 & 137 & \textbf{614} & 360 & 453 & 91 \\
+CT             & \textbf{495} & 406 & 299 & 158 & \textbf{444} & 393 & 329 & 110 \\
+CR             & \textbf{580} & 527 & 316 & 181 & \textbf{570} & 479 & 445 & 124 \\
+XR             & \textbf{668} & 512 & 324 & 131 & \textbf{626} & 509 & 393 & 88 \\
+MG1            & \textbf{762} & 685 & 612 & 481 & \textbf{916} & 596 & 913 & 336 \\
+MG2            & \textbf{753} & 692 & 622 & 492 & \textbf{942} & 599 & 902 & 334 \\
+MG3            & \textbf{600} & 433 & 314 & 175 & \textbf{547} & 362 & 392 & 118 \\
+MG4            & \textbf{788} & 504 & 508 & 246 & \textbf{686} & 469 & 634 & 158 \\
+CT1            & \textbf{600} & 450 & 357 & 224 & \textbf{535} & 432 & 389 & 142 \\
+CT2            & \textbf{570} & 471 & 342 & 212 & \textbf{522} & 458 & 383 & 131 \\
+MG-N           & \textbf{600} & 408 & 289 & 180 & \textbf{549} & 357 & 398 & 118 \\
+MR1            & \textbf{734} & 365 & 342 & 149 & \textbf{586} & 381 & 392 & 93 \\
+MR2            & \textbf{700} & 445 & 363 & 211 & \textbf{682} & 460 & 486 & 131 \\
+MR3            & \textbf{839} & 523 & 432 & 289 & \textbf{742} & 497 & 520 & 192 \\
+MR4            & \textbf{692} & 466 & 326 & 220 & \textbf{664} & 496 & 433 & 152 \\
+NM1            & \textbf{778} & 499 & 384 & 260 & \textbf{597} & 515 & 485 & 171 \\
+RG1            & \textbf{469} & 383 & 318 & 123 & \textbf{547} & 340 & 363 & 80 \\
+RG2            & \textbf{652} & 510 & 383 & 225 & \textbf{716} & 503 & 544 & 154 \\
+RG3            & \textbf{685} & 642 & 432 & 294 & \textbf{719} & 564 & 641 & 195 \\
+SC1            & \textbf{699} & 511 & 366 & 263 & \textbf{673} & 483 & 457 & 184 \\
+XA1            & \textbf{662} & 501 & 346 & 244 & \textbf{670} & 541 & 501 & 165 \\
+CT\_BRAIN      & \textbf{528} & 466 & 326 & 190 & 420 & \textbf{477} & 354 & 122 \\
+CT\_ANKLE      & \textbf{853} & 587 & 452 & 426 & \textbf{774} & 562 & 537 & 282 \\
+CT\_ORT        & \textbf{538} & 442 & 348 & 190 & \textbf{565} & 430 & 384 & 124 \\
+CT\_CHEST      & \textbf{500} & 445 & 297 & 178 & \textbf{446} & 428 & 333 & 110 \\
+MR\_HEAD       & \textbf{595} & 372 & 280 & 167 & \textbf{679} & 371 & 406 & 100 \\
+MR\_INTERA     & \textbf{590} & 563 & 304 & 178 & 454 & \textbf{527} & 436 & 133 \\
+DX\_HAND       & \textbf{500} & 414 & 316 & 147 & \textbf{570} & 416 & 362 & 101 \\
+DX\_CHEST      & \textbf{476} & 352 & 307 & 121 & \textbf{547} & 349 & 358 & 83 \\
+CR\_THORAX     & \textbf{552} & 403 & 346 & 129 & \textbf{561} & 365 & 365 & 84 \\
+PET1           & \textbf{732} & 416 & 377 & 197 & \textbf{679} & 384 & 389 & 120 \\
+PET2           & \textbf{656} & 515 & 381 & 227 & \textbf{487} & 438 & 389 & 141 \\
+CT\_LUNG       & \textbf{522} & 316 & 348 & 189 & \textbf{534} & 420 & 383 & 122 \\
+CT\_PANCREAS   & \textbf{517} & 451 & 316 & 172 & \textbf{439} & 390 & 337 & 110 \\
+MR\_BRAIN      & \textbf{866} & 567 & 422 & 375 & \textbf{708} & 514 & 641 & 221 \\
+MR\_BREAST     & \textbf{640} & 545 & 350 & 221 & \textbf{759} & 449 & 510 & 156 \\
+MR\_PROSTATE   & \textbf{679} & 422 & 353 & 165 & \textbf{545} & 386 & 408 & 103 \\
+PET\_PSMA      & \textbf{759} & 678 & 475 & 684 & \textbf{747} & 655 & 539 & 395 \\
+PET\_LUNG      & \textbf{502} & 498 & 283 & 278 & 365 & \textbf{508} & 363 & 170 \\
 \midrule
-\textbf{Geomean} & \textbf{631} & \textbf{473} & \textbf{359} & \textbf{215} & \textbf{602} & \textbf{501} & \textbf{475} & \textbf{144} \\
+\textbf{Geomean} & \textbf{631} & \textbf{473} & \textbf{359} & \textbf{215} & \textbf{598} & \textbf{452} & \textbf{445} & \textbf{140} \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1249,17 +1247,20 @@ PET\_LUNG      & \textbf{502} & 498 & 283 & 278 & -- & -- & -- & -- \\
 \label{subsec:decomp-amd}
 
 \textbf{Summary.} On AMD64, MIC is the fastest single-threaded decoder
-on all 21 of the 21 medical images we tested. The margin over the
-runner-up ranges from 1.01$\times$ on MG1 (the closest contest, 913
-vs.\ 907\,MB/s) to 1.62$\times$ on XR. MIC decodes roughly
-1.0--1.6$\times$ HTJ2K, 1.1--1.6$\times$ $\Delta$+Zstd-19, and
-3.9--6.9$\times$ JPEG-LS. The per-image numbers are in
+on 36 of the 39 medical images we tested; on the three exceptions
+(CT\_BRAIN, MR\_INTERA, and the small PET\_LUNG study) in-process
+$\Delta$+Zstd-19 is marginally faster. Across the 36 wins the margin
+over the runner-up ranges from 1.00$\times$ on MG1 (the closest contest,
+916 vs.\ 913\,MB/s against HTJ2K) to 1.75$\times$ on PET1. MIC decodes
+roughly 1.0--1.8$\times$ HTJ2K and 1.9--7.1$\times$ JPEG-LS, and stays
+within 0.7--1.8$\times$ of $\Delta$+Zstd-19. The per-image numbers are in
 Table~\ref{tab:decomp}.
 
 This is a stronger result than the four-state SIMD variant produced on
 this platform: switching the AMD64 ``MIC'' column from four-state to
-eight-state turned three of the previously narrow HTJ2K wins (MG1, MG2,
-MG4) and two narrow $\Delta$+Zstandard wins (CT, CT2) into MIC wins.
+eight-state turned two of the previously narrow HTJ2K wins (MG1, MG2)
+and four narrow $\Delta$+Zstandard wins (CT, CT2, CT\_CHEST,
+CT\_PANCREAS) into MIC wins.
 The win has two sources. First, the eight-state inner loop exposes
 eight independent FSE state-update chains, doubling the work the
 wide-issue Granite Rapids core can keep in flight per cycle without any
@@ -1329,10 +1330,8 @@ decoder interleaves per inner-loop iteration.
 \caption{FSE decompression throughput (MB/s) for representative modalities,
 single-thread pure-Go decoder. Increasing the number of independent state
 chains exposes more instruction-level parallelism to the out-of-order
-engine. Per-image rows are ten representative modalities; the two
-new-modality rows (DX\_HAND, PET1) are shown as --- in the AMD64 columns
-pending the AMD64 reference run. ARM64 geometric means are over all 39
-images, while AMD64 geometric means cover the original 21 images.}
+engine. Per-image rows are ten representative modalities. Both ARM64 and AMD64
+geometric means are over all 39 images.}
 \label{tab:fse-combined}
 \scriptsize
 \setlength{\tabcolsep}{4pt}
@@ -1342,25 +1341,25 @@ images, while AMD64 geometric means cover the original 21 images.}
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 Image & 1-st & 4-st & 8-st & 1-st & 4-st & 8-st \\
 \midrule
-MR     & 1{,}066 & 1{,}576 & 1{,}068 & 636 & 899 & 759 \\
-CT     & 1{,}001 & 1{,}549 & 2{,}142 & 974 & 986 & 953 \\
-CR     & 2{,}941 & 4{,}882 & 6{,}245 & 1{,}426 & 1{,}581 & 1{,}638 \\
-XR     & 3{,}597 & 6{,}081 & 6{,}030 & 1{,}939 & 1{,}890 & 2{,}248 \\
-MG1    & 3{,}558 & 4{,}865 & 4{,}885 & 2{,}075 & 1{,}521 & 1{,}753 \\
-MG-N   & 3{,}949 & 6{,}647 & 6{,}037 & 1{,}714 & 2{,}294 & 2{,}473 \\
-NM1    & 1{,}971 & 2{,}661 & 2{,}570 & 1{,}091 & 1{,}274 & 1{,}522 \\
-RG1    & 1{,}768 & 4{,}356 & 5{,}332 & 1{,}198 & 1{,}717 & 2{,}104 \\
-DX\_HAND & 2{,}120 & 3{,}163 & 4{,}816 & -- & -- & -- \\
-PET1   & 1{,}105 & 1{,}252 & 1{,}530 & -- & -- & -- \\
+MR       & 1{,}066 & 1{,}576 & 1{,}068 & 656 & 1{,}007 & 847 \\
+CT       & 1{,}001 & 1{,}549 & 2{,}142 & 972 & 1{,}034 & 1{,}362 \\
+CR       & 2{,}941 & 4{,}882 & 6{,}245 & 1{,}456 & 1{,}844 & 1{,}709 \\
+XR       & 3{,}597 & 6{,}081 & 6{,}030 & 1{,}745 & 2{,}341 & 2{,}014 \\
+MG1      & 3{,}558 & 4{,}865 & 4{,}885 & 2{,}216 & 1{,}487 & 1{,}975 \\
+MG-N     & 3{,}949 & 6{,}647 & 6{,}037 & 1{,}940 & 2{,}545 & 2{,}415 \\
+NM1      & 1{,}971 & 2{,}661 & 2{,}570 & 917 & 1{,}346 & 1{,}356 \\
+RG1      & 1{,}768 & 4{,}356 & 5{,}332 & 1{,}239 & 1{,}709 & 1{,}869 \\
+DX\_HAND & 2{,}120 & 3{,}163 & 4{,}816 & 1{,}245 & 1{,}833 & 1{,}520 \\
+PET1     & 1{,}105 & 1{,}252 & 1{,}530 & 575 & 763 & 616 \\
 \midrule
-\textbf{Geomean} & \textbf{1{,}742} & \textbf{2{,}372} & \textbf{2{,}492} & \textbf{1{,}464} & \textbf{1{,}575} & \textbf{1{,}614} \\
+\textbf{Geomean} & \textbf{1{,}742} & \textbf{2{,}372} & \textbf{2{,}492} & \textbf{1{,}093} & \textbf{1{,}228} & \textbf{1{,}246} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 The 4-state decoder delivers a geometric-mean speedup of $+$36\% on
-ARM64 and $+$8\% on AMD64 over the 1-state baseline; the 8-state
-decoder adds a further $+$5\% on ARM64 and $+$2\% on AMD64 over
+ARM64 and $+$12\% on AMD64 over the 1-state baseline; the 8-state
+decoder adds a further $+$5\% on ARM64 and $+$1\% on AMD64 over
 4-state. The ARM64 trajectory is roughly monotonic with state count:
 each doubling of independent chains continues to unlock more
 out-of-order parallelism. The AMD64 trajectory flattens earlier; the
@@ -1395,9 +1394,7 @@ applicable (Table~\ref{tab:pics}).
 strip-parallel mode. The ``MIC'' column is the single-threaded eight-state
 C decoder from Table~\ref{tab:decomp}; the $N$-strip columns decode the same
 compressed bytes in $N$ parallel threads using the C pthreads worker pool.
-ARM64 columns cover all 39 images; AMD64 columns cover the original 21
-images, with the 18 additional images (shown as ---) pending measurement on
-the AMD64 reference platform.}
+Both ARM64 and AMD64 columns cover all 39 images.}
 \label{tab:pics}
 \scriptsize
 \begin{tabular}{l|rrrr|rrrr}
@@ -1406,45 +1403,45 @@ the AMD64 reference platform.}
 \cmidrule(lr){2-5}\cmidrule(lr){6-9}
 Image & MIC & 2-strip & 4-strip & 8-strip & MIC & 2-strip & 4-strip & 8-strip \\
 \midrule
-MR   & 649 & 698     & 939     & 1{,}033 & 552 & 329     & 367     & 294\,$^\dagger$ \\
-CT   & 495 & 511     & 987     & 1{,}549 & 453 & 398     & 633     & 714 \\
-CR   & 580 & 865     & 1{,}771 & 3{,}227 & 566 & 758     & 1{,}320 & 2{,}169 \\
-XR   & 668 & 888     & 1{,}728 & 3{,}197 & 617 & 793     & 1{,}515 & 2{,}579 \\
-MG1  & 762 & 1{,}415 & 2{,}403 & 4{,}342 & 913 & 1{,}317 & 1{,}951 & 2{,}890 \\
-MG2  & 753 & 1{,}369 & 2{,}226 & 4{,}109 & 920 & 1{,}356 & 1{,}971 & 3{,}026 \\
-MG3  & 600 & 934     & 1{,}763 & 3{,}158 & 556 & 838     & 1{,}449 & 2{,}767 \\
-MG4  & 788 & 1{,}263 & 2{,}185 & 4{,}120 & 676 & 1{,}207 & 1{,}897 & 3{,}126 \\
-CT1  & 600 & 779     & 1{,}178 & 1{,}639 & 525 & 458     & 703     & 725 \\
-CT2  & 570 & 773     & 1{,}249 & 1{,}296 & 512 & 481     & 734     & 719 \\
-MG-N & 600 & 988     & 1{,}852 & 3{,}569 & 545 & 913     & 1{,}537 & 2{,}819 \\
-MR1  & 734 & 931     & 1{,}375 & 1{,}898 & 603 & 504     & 761     & 764 \\
-MR2  & 700 & 1{,}003 & 1{,}699 & 2{,}750 & 644 & 778     & 1{,}171 & 1{,}534 \\
-MR3  & 839 & 919     & 1{,}381 & 2{,}035 & 773 & 591     & 788     & 835 \\
-MR4  & 692 & 954     & 1{,}301 & 2{,}063 & 632 & 540     & 796     & 804 \\
-NM1  & 778 & 964     & 1{,}410 & 1{,}868 & 598 & 523     & 824     & 762 \\
-RG1  & 469 & 586     & 1{,}068 & 1{,}964 & 550 & 603     & 1{,}101 & 1{,}890 \\
-RG2  & 652 & 1{,}095 & 1{,}887 & 3{,}269 & 730 & 916     & 1{,}473 & 2{,}268 \\
-RG3  & 685 & 1{,}081 & 2{,}027 & 3{,}289 & 723 & 971     & 1{,}618 & 2{,}730 \\
-SC1  & 699 & 1{,}171 & 2{,}005 & 3{,}174 & 690 & 1{,}024 & 1{,}673 & 2{,}541 \\
-XA1  & 662 & 973     & 1{,}692 & 2{,}404 & 688 & 792     & 1{,}246 & 1{,}748 \\
-CT\_BRAIN    & 528 & 627 & 1{,}025 & 1{,}291 & -- & -- & -- & -- \\
-CT\_ANKLE    & 853 & 1{,}082 & 1{,}745 & 1{,}713 & -- & -- & -- & -- \\
-CT\_ORT      & 538 & 679 & 1{,}099 & 1{,}316 & -- & -- & -- & -- \\
-CT\_CHEST    & 500 & 622 & 1{,}042 & 1{,}354 & -- & -- & -- & -- \\
-MR\_HEAD     & 595 & 620 & 915 & 880 & -- & -- & -- & -- \\
-MR\_INTERA   & 590 & 910 & 1{,}575 & 2{,}405 & -- & -- & -- & -- \\
-DX\_HAND     & 500 & 605 & 1{,}113 & 2{,}051 & -- & -- & -- & -- \\
-DX\_CHEST    & 476 & 566 & 1{,}003 & 1{,}971 & -- & -- & -- & -- \\
-CR\_THORAX   & 552 & 588 & 1{,}128 & 1{,}733 & -- & -- & -- & -- \\
-PET1         & 732 & 637 & 854 & 854 & -- & -- & -- & -- \\
-PET2         & 656 & 669 & 776 & 923 & -- & -- & -- & -- \\
-CT\_LUNG     & 522 & 689 & 1{,}107 & 1{,}462 & -- & -- & -- & -- \\
-CT\_PANCREAS & 517 & 506 & 1{,}018 & 1{,}316 & -- & -- & -- & -- \\
-MR\_BRAIN    & 866 & 815 & 999 & 1{,}143 & -- & -- & -- & -- \\
-MR\_BREAST   & 640 & 653 & 920 & 956 & -- & -- & -- & -- \\
-MR\_PROSTATE & 679 & 742 & 1{,}093 & 1{,}279 & -- & -- & -- & -- \\
-PET\_PSMA$^\ddagger$ & 759 & 727 & -- & -- & -- & -- & -- & -- \\
-PET\_LUNG$^\ddagger$ & 502 & 359 & -- & -- & -- & -- & -- & -- \\
+MR                   & 649 & 698 & 939 & 1{,}033 & 614 & 281 & 369 & 291\,$^\dagger$ \\
+CT                   & 495 & 511 & 987 & 1{,}549 & 444 & 379 & 641 & 736 \\
+CR                   & 580 & 865 & 1{,}771 & 3{,}227 & 570 & 768 & 1{,}404 & 2{,}236 \\
+XR                   & 668 & 888 & 1{,}728 & 3{,}197 & 626 & 787 & 1{,}408 & 2{,}252 \\
+MG1                  & 762 & 1{,}415 & 2{,}403 & 4{,}342 & 916 & 1{,}330 & 1{,}924 & 3{,}575 \\
+MG2                  & 753 & 1{,}369 & 2{,}226 & 4{,}109 & 942 & 1{,}302 & 1{,}698 & 3{,}011 \\
+MG3                  & 600 & 934 & 1{,}763 & 3{,}158 & 547 & 868 & 1{,}597 & 2{,}781 \\
+MG4                  & 788 & 1{,}263 & 2{,}185 & 4{,}120 & 686 & 1{,}258 & 1{,}957 & 3{,}107 \\
+CT1                  & 600 & 779 & 1{,}178 & 1{,}639 & 535 & 477 & 743 & 797 \\
+CT2                  & 570 & 773 & 1{,}249 & 1{,}296 & 522 & 475 & 718 & 806 \\
+MG-N                 & 600 & 988 & 1{,}852 & 3{,}569 & 549 & 871 & 1{,}644 & 2{,}913 \\
+MR1                  & 734 & 931 & 1{,}375 & 1{,}898 & 586 & 517 & 729 & 827 \\
+MR2                  & 700 & 1{,}003 & 1{,}699 & 2{,}750 & 682 & 786 & 1{,}064 & 1{,}476 \\
+MR3                  & 839 & 919 & 1{,}381 & 2{,}035 & 742 & 627 & 861 & 853 \\
+MR4                  & 692 & 954 & 1{,}301 & 2{,}063 & 664 & 573 & 813 & 877 \\
+NM1                  & 778 & 964 & 1{,}410 & 1{,}868 & 597 & 561 & 777 & 771 \\
+RG1                  & 469 & 586 & 1{,}068 & 1{,}964 & 547 & 626 & 1{,}113 & 1{,}833 \\
+RG2                  & 652 & 1{,}095 & 1{,}887 & 3{,}269 & 716 & 922 & 1{,}523 & 2{,}494 \\
+RG3                  & 685 & 1{,}081 & 2{,}027 & 3{,}289 & 719 & 991 & 1{,}596 & 2{,}504 \\
+SC1                  & 699 & 1{,}171 & 2{,}005 & 3{,}174 & 673 & 1{,}042 & 1{,}690 & 2{,}598 \\
+XA1                  & 662 & 973 & 1{,}692 & 2{,}404 & 670 & 806 & 1{,}170 & 1{,}443 \\
+CT\_BRAIN            & 528 & 627 & 1{,}025 & 1{,}291 & 420 & 426 & 630 & 681 \\
+CT\_ANKLE            & 853 & 1{,}082 & 1{,}745 & 1{,}713 & 774 & 654 & 869 & 877 \\
+CT\_ORT              & 538 & 679 & 1{,}099 & 1{,}316 & 565 & 485 & 726 & 778 \\
+CT\_CHEST            & 500 & 622 & 1{,}042 & 1{,}354 & 446 & 409 & 633 & 691 \\
+MR\_HEAD             & 595 & 620 & 915 & 880 & 679 & 306 & 417 & 307 \\
+MR\_INTERA           & 590 & 910 & 1{,}575 & 2{,}405 & 454 & 618 & 940 & 1{,}329 \\
+DX\_HAND             & 500 & 605 & 1{,}113 & 2{,}051 & 570 & 619 & 1{,}133 & 1{,}697 \\
+DX\_CHEST            & 476 & 566 & 1{,}003 & 1{,}971 & 547 & 592 & 990 & 1{,}712 \\
+CR\_THORAX           & 552 & 588 & 1{,}128 & 1{,}733 & 561 & 624 & 1{,}141 & 1{,}937 \\
+PET1                 & 732 & 637 & 854 & 854 & 679 & 289 & 406 & 317 \\
+PET2                 & 656 & 669 & 776 & 923 & 487 & 341 & 356 & 320 \\
+CT\_LUNG             & 522 & 689 & 1{,}107 & 1{,}462 & 534 & 468 & 752 & 808 \\
+CT\_PANCREAS         & 517 & 506 & 1{,}018 & 1{,}316 & 439 & 390 & 652 & 688 \\
+MR\_BRAIN            & 866 & 815 & 999 & 1{,}143 & 708 & 435 & 490 & 448 \\
+MR\_BREAST           & 640 & 653 & 920 & 956 & 759 & 288 & 396 & 337 \\
+MR\_PROSTATE         & 679 & 742 & 1{,}093 & 1{,}279 & 545 & 321 & 507 & 455 \\
+PET\_PSMA$^\ddagger$ & 759 & 727 & -- & -- & 747 & 282 & -- & -- \\
+PET\_LUNG$^\ddagger$ & 502 & 359 & -- & -- & 365 & 208 & -- & -- \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1568,8 +1565,8 @@ Second, on the very largest mammography images on AMD64, HTJ2K's block
 coder recovers the throughput lead by amortising its per-block setup
 over many pixels; MIC remains within 0--20\% of HTJ2K's throughput on
 those images. Third, multi-state interleaved entropy decoding gives MIC
-a further +36\% (ARM64) / +8\% (AMD64) at four states and an additional
-+5\% / +2\% at eight states without any change to the compressed bytes
+a further +36\% (ARM64) / +12\% (AMD64) at four states and an additional
++5\% / +1\% at eight states without any change to the compressed bytes
 (Table~\ref{tab:fse-combined}); this is the gain that makes MIC's C
 decoder competitive with HTJ2K's vectorised block coder.
 
@@ -1784,10 +1781,11 @@ spanning eleven modalities, MIC reaches a geometric-mean compression
 ratio of 3.36$\times$, within about 2\% of HTJ2K (3.42$\times$) and
 approximately 88\% of JPEG-LS (3.84$\times$). On the same
 dataset MIC is the fastest of the four tested codecs on all 39 ARM64
-decompression measurements and on all 21 AMD64 decompression
+decompression measurements and on 36 of 39 AMD64 decompression
 measurements; it leads on encoding on 38 of 39 ARM64 images (HTJ2K is
-faster on the small PET\_LUNG study) and on 18 of 21 AMD64 images,
-with HTJ2K leading on MG1, MG2, and RG3 on AMD64. A 20\,KB JavaScript
+faster on the small PET\_LUNG study) and on 32 of 39 AMD64 images,
+with HTJ2K leading on the two largest mammography slabs, RG3, and four
+smaller studies on AMD64. A 20\,KB JavaScript
 decoder and a Go WebAssembly build show that the format can be decoded
 on the client side in a web viewer.
 

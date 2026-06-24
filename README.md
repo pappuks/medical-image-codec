@@ -1,6 +1,6 @@
 # MIC — Medical Image Codec
 
-A **lossless compression codec for 16-bit DICOM images** with implementations in Go, C/SIMD assembly, and browser-native JavaScript/WebAssembly. MIC beats HTJ2K (High-Throughput JPEG 2000) in decompression speed on all tested modalities while matching or exceeding its compression ratio on 7 of 8 — packaged in ~500 lines of core Go and a 15 KB zero-dependency JS decoder.
+A **lossless compression codec for 16-bit DICOM images** with implementations in Go, C/SIMD assembly, and browser-native JavaScript/WebAssembly. MIC beats HTJ2K (High-Throughput JPEG 2000) in decompression speed on all tested modalities while matching or exceeding its compression ratio on 7 of 8 — packaged in ~500 lines of core Go and a ~19 KB zero-dependency JS decoder.
 
 The key insight: DICOM stores pixels at 10–16 bits per sample, but every mainstream codec (Zstandard, JPEG 2000, JPEG-LS) was designed for 8-bit byte streams. Treating a 16-bit residual as two bytes discards the mutual information between them, inflating compressed output by 10–22%. MIC's 16-bit-native RLE+FSE pipeline closes that gap directly.
 
@@ -19,11 +19,11 @@ The key insight: DICOM stores pixels at 10–16 bits per sample, but every mains
 | vs. JPEG-LS | Consistently faster decompression; better or equal ratio |
 | vs. Delta+Zstandard | ~10% better compression ratio (geometric mean; 16-bit alphabet advantage) |
 | Implementations | Pure Go · C + pthreads + BMI2/NEON SIMD · JavaScript ES module · Go WebAssembly |
-| Browser throughput | up to 483 MB/s (12-core, PICS parallel strips via `worker_threads`) |
+| Browser throughput | up to 559 MB/s (14-core M4 Pro, PICS parallel strips via `worker_threads`) |
 | Supported formats | 8–16 bit greyscale; 8-bit RGB (single-frame US/VL + WSI/pathology tiled) |
 | Multi-frame support | MIC2 container (random access or temporal prediction) |
 | WSI support | MIC3 tiled container with pyramid levels and parallel encode/decode |
-| Footprint | ~15 KB JS decoder (zero dependencies); no native libs required for browser use |
+| Footprint | ~19 KB JS decoder (zero dependencies); no native libs required for browser use |
 
 ---
 
@@ -329,7 +329,7 @@ For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compressio
 
 ## Performance
 
-> **Note:** The per-image throughput tables below are reference values measured on the original 21-image corpus on the machines named in each header (Apple M2 Max, Intel Core Ultra 9 285K). They have not been regenerated for the 39-image corpus. The current paper-quality single-threaded throughput numbers (Apple M4 Pro / AWS c8i, 39 images on ARM64) live in the paper tables and in `results/<timestamp>/paper-tables.txt` from `./run-paper-benchmarks.sh`.
+> **Note:** The per-image throughput tables below are reference values measured on the original 21-image corpus on the machines named in each header (Apple M2 Max, Intel Core Ultra 9 285K). They have not been regenerated for the 39-image corpus. The current paper-quality single-threaded throughput numbers (Apple M4 Pro / AWS c8i, all 39 images on both ARM64 and AMD64) live in the paper tables and in `results/<timestamp>/paper-tables.txt` from `./run-paper-benchmarks.sh`.
 
 **Decompression throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`). C variants compiled with `-O3` (no `-march=native` on ARM64; `MIC-4state-SIMD` = `MIC-4state-C` scalar fallback — no AVX2). PICS-C-N uses C pthreads with N concurrent threads. ⊕ Pure-Go `DecompressParallelStrips` (no CGO) achieves ~60–70% of PICS-C throughput.
 

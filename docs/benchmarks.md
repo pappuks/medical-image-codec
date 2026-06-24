@@ -42,7 +42,7 @@ With `-benchtime=10x` on a 14-core machine, all 10 goroutines run in parallel,
 so the number scales with `min(b.N, GOMAXPROCS)` and is several × the serial
 number.
 
-This is what the FSE entropy-coder microbenchmarks (Table 6) and the legacy
+This is what the FSE entropy-coder microbenchmarks (`tab:fse-combined`) and the legacy
 pipeline benchmarks in [fseu16_test.go](../fseu16_test.go) report. **Do not
 compare a parallel benchmark's MB/s against a serial benchmark's MB/s** — they
 are not on the same scale.
@@ -62,7 +62,7 @@ The inventory in §6 below tags each benchmark accordingly.
 
 ## 2. Running the paper benchmarks
 
-All numbers in [paper/mic-paper-v6-ieee-tmi.tex](../paper/mic-paper-v6-ieee-tmi.tex)
+All numbers in [paper/mic-paper-v9-ieee-tmi.tex](../paper/mic-paper-v9-ieee-tmi.tex)
 are produced by [run-paper-benchmarks.sh](../run-paper-benchmarks.sh), which
 runs the seven benchmarks below and post-processes them with
 [paper-tables.py](../paper-tables.py).
@@ -88,22 +88,25 @@ and fails fast.
 
 ### Mapping benchmarks → paper tables
 
+v9 combined the former per-platform encode/decode tables into single
+ARM64+AMD64 tables (`tab:enc`, `tab:decomp`) and added the multi-threaded
+`tab:pics`.
+
 | Paper table | Source benchmark | File produced | Parallelism |
 |---|---|---|---|
-| Table 1 (`tab:ratios`) — compression ratios | `BenchmarkAllCodecs` (ratios) + `BenchmarkDeltaZstdDecompress` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…txt`, `05-…txt`, `06-…txt` | serial |
-| Table 2 (`tab:enc-amd64`) — AMD64 encoding | `BenchmarkAllCodecsEncode` | `02-…txt` | serial |
-| Table 3 (`tab:enc-arm64-full`) — ARM64 encoding | `BenchmarkAllCodecsEncode` | `02-…txt` | serial |
-| Table 4 (`tab:decomp-arm`) — ARM64 decoding | `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…txt`, `06-…txt` | serial |
-| Table 5 (`tab:decomp-amd64`) — AMD64 decoding | `BenchmarkAllCodecs` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…txt`, `06-…txt` | serial |
-| Table 6 (`tab:fse-combined`) — FSE 1/4-state | `BenchmarkFSEDecompress` + `BenchmarkFSEDecompress4State` | `03-…txt`, `04-…txt` | **parallel** |
+| `tab:ratios` — compression ratios (all variants, 39 images) | `BenchmarkAllCodecs` (ratios) + `BenchmarkMICCDeltaZstdDecomp` (Δ+Zstd-19) + `BenchmarkWaveletV2SIMDRLEFSECompress` (wavelet) | `01-…txt`, `05a-…txt`, `06-…txt` | serial |
+| `tab:enc` — encoding throughput (ARM64 + AMD64) | `BenchmarkAllCodecsEncode` + `BenchmarkMICCDeltaZstdEnc` | `02-…txt`, `05b-…txt` | serial |
+| `tab:decomp` — decompression throughput (ARM64 + AMD64) | `BenchmarkAllCodecs` + `BenchmarkMICCDeltaZstdDecomp` | `01-…txt`, `05a-…txt` | serial |
+| `tab:pics` — multi-threaded (strip-parallel) decompression | `BenchmarkAllCodecs` (`MIC-8state-SIMD` + `PICS-C-2/4/8`) | `01-…txt` | serial loop, internally-parallel C |
+| `tab:fse-combined` — FSE 1/4/8-state microbench | `BenchmarkFSEDecompress` + `BenchmarkFSEDecompress4State` + `BenchmarkFSEDecompress8State` | `03-…txt`, `04-…txt`, `10-…txt` | **parallel** |
 
-Table 6 reports **aggregate parallel FSE-only throughput** by design — that
-table is a microbenchmark of the entropy coder running flat-out across all
-cores, isolated from the surrounding pipeline. Tables 4/5 report
+`tab:fse-combined` reports **aggregate parallel FSE-only throughput** by
+design — that table is a microbenchmark of the entropy coder running flat-out
+across all cores, isolated from the surrounding pipeline. `tab:decomp` reports
 **single-thread end-to-end** throughput for the full Delta+RLE+FSE pipeline.
 The numbers are not directly comparable.
 
-The PICS columns in Tables 4/5 (`PICS-C-2/4/8`) are *also* parallel, but the
+The PICS columns in `tab:pics` (`PICS-C-2/4/8`) are *also* parallel, but the
 parallelism is internal to the codec (pthread-based strip decoder), driven by
 a serial benchmark loop. That correctly measures wall-clock decode time of one
 image using N threads — apples to apples with the other single-image columns.
@@ -145,7 +148,7 @@ go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x \
 ### `BenchmarkAllCodecsEncode` ([ojph/mic_c_test.go:528](../ojph/mic_c_test.go#L528))
 
 Encoding-side counterpart of the above. Same variant list, plus `Wavelet+SIMD`
-(serial wavelet compress). Powers Tables 2/3.
+(serial wavelet compress). Powers `tab:enc`.
 
 ```bash
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x \
@@ -173,9 +176,11 @@ End-to-end C pipeline (delta + RLE + FSE all in C) vs HTJ2K. Serial.
 
 ### `BenchmarkDeltaZstdDecompress` ([comparison_test.go:86](../comparison_test.go#L86))
 
-Δ+Zstd-19 baseline column for Table 1. Note: Zstd is invoked via the CLI
-(subprocess), so timings include process-launch overhead — this benchmark is
-only useful for the *ratio* column (Table 1), not for throughput. Serial.
+Legacy Δ+Zstd-19 baseline via the `zstd` CLI (subprocess), so timings include
+process-launch overhead. **Not** a paper source in v9 — the `tab:ratios`
+Δ+Zstd-19 ratio column and the `tab:enc`/`tab:decomp` Δ+Zstd-19 throughput come
+from the in-process `BenchmarkMICCDeltaZstd{Decomp,Enc}` (see
+`.claude/benchmark-rules.md` §5). Treat this as a sanity-check fallback. Serial.
 
 ### `BenchmarkMEDPredictor` ([comparison_test.go:185](../comparison_test.go#L185))
 
@@ -194,7 +199,7 @@ not the original pixels. **All benchmarks in this section are parallel
 
 ### `BenchmarkFSEDecompress` ([fse2state_test.go:269](../fse2state_test.go#L269))
 
-1-state vs 2-state FSE decompression isolated. Feeds Table 6 (1-state column).
+1-state vs 2-state FSE decompression isolated. Feeds `tab:fse-combined` (1-state column).
 
 ```bash
 go test -benchmem -run=^$ -benchtime=10x -bench '^BenchmarkFSEDecompress$' .
@@ -202,7 +207,7 @@ go test -benchmem -run=^$ -benchtime=10x -bench '^BenchmarkFSEDecompress$' .
 
 ### `BenchmarkFSEDecompress4State` ([fse4state_test.go:150](../fse4state_test.go#L150))
 
-1-state vs 2-state vs 4-state FSE decompression. Feeds Table 6 (4-state
+1-state vs 2-state vs 4-state FSE decompression. Feeds `tab:fse-combined` (4-state
 column).
 
 ```bash
@@ -260,8 +265,9 @@ several use parallel goroutines and are flagged accordingly.
 
 All wavelet decompression benchmarks are now serial (single-thread) — see
 [the recent fix](../waveletu16_test.go) that replaced parallel goroutines with
-a serial loop so the Wav+SIMD column in Tables 4/5 is comparable to the other
-single-thread columns.
+a serial loop. In v9 the wavelet variant contributes only its compression
+*ratio* to a paper table — the Wavelet column in `tab:ratios` — so this keeps
+the throughput measurement honest even though it is no longer a paper column.
 
 | Benchmark | File | Parallelism | Pipeline |
 |---|---|---|---|
@@ -397,7 +403,7 @@ Sorted by file. P = parallel goroutines per iteration; S = serial loop.
 The numbers in this section come from the parallel `BenchmarkDeltaRLEFSECompress`,
 `BenchmarkFSE2StateSummary`, and (the now-fixed) parallel wavelet benches.
 They report **aggregate multi-core throughput**, not single-thread MB/s — so
-they are higher than the equivalent rows in the paper's Tables 4/5.
+they are higher than the equivalent rows in the paper's `tab:decomp`.
 
 > These are kept for historical reference. To reproduce current numbers,
 > run `./run-paper-benchmarks.sh` and look at `paper-tables.txt` in the

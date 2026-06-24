@@ -106,10 +106,10 @@ sed -i 's|./mic-decoder.js|./mic-decoder.min.js|g' mic-worker.min.js
 
 | File | Source | Minified |
 |------|--------|----------|
-| `mic-decoder.js` | ~49 KB | ~17 KB |
+| `mic-decoder.js` | ~54 KB | ~19 KB |
 | `mic-decoder-parallel.js` | ~9.5 KB | ~3.3 KB |
 | `mic-worker.js` | ~4 KB | ~1 KB |
-| **Total** | **~62 KB** | **~22 KB** |
+| **Total** | **~68 KB** | **~23 KB** |
 
 ## Architecture
 

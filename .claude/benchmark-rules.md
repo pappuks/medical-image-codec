@@ -48,12 +48,14 @@ Benchmarks in this repo come in two structurally different shapes (see
 
 Rules:
 
-1. Paper Tables 4/5 (decompression) and Tables 2/3 (encoding) are
-   **single-thread** columns. Only serial benchmarks may feed them.
-2. Paper Table 6 (FSE 1-state vs 4-state) is **intentionally aggregate
-   parallel** — it is the entropy coder microbench. Keep the goroutine
-   pattern in `BenchmarkFSEDecompress` and `BenchmarkFSEDecompress4State`.
-3. PICS-C-N entries in Tables 4/5 are serial benchmarks wrapping
+1. The paper's `tab:decomp` (decompression) and `tab:enc` (encoding) are
+   **single-thread** columns; each is one combined table with an ARM64 and
+   an AMD64 column group. Only serial benchmarks may feed them.
+2. The paper's `tab:fse-combined` (FSE 1/4/8-state) is **intentionally
+   aggregate parallel** — it is the entropy coder microbench. Keep the
+   goroutine pattern in `BenchmarkFSEDecompress`, `BenchmarkFSEDecompress4State`,
+   and `BenchmarkFSEDecompress8State`.
+3. PICS-C-N entries in `tab:pics` are serial benchmarks wrapping
    internally-parallel C pthread code. That is correct — wall-clock decode
    time of one image using N threads is the apples-to-apples comparison.
 4. Never paste an aggregate-parallel MB/s number into a single-thread column.
@@ -67,8 +69,10 @@ Rules:
 The four wavelet decompression benchmarks
 (`BenchmarkWaveletFSECompress`, `BenchmarkWaveletRLEFSECompress`,
 `BenchmarkWaveletV2RLEFSECompress`, `BenchmarkWaveletV2SIMDRLEFSECompress`)
-were corrected from parallel to serial. They must stay serial — they feed
-the Wav+SIMD column in Tables 1, 4, 5.
+were corrected from parallel to serial. They must stay serial. In v9 only
+their compression *ratio* feeds a paper column (the Wavelet column in
+`tab:ratios`); wavelet throughput is no longer a paper column, but keep the
+serial loop in case it returns.
 
 ---
 
@@ -102,15 +106,14 @@ Rules:
 
 ### TODO: known cross-platform gaps to close
 
-These are open as of v8 of the paper. Each must be closed before the
+These are open as of v9 of the paper. Each must be closed before the
 corresponding column is treated as final in any future revision.
 
-- **JPEG-LS on AMD64 decompression.** `BenchmarkAllCodecs` produces the
-  ARM64 JPEG-LS column, but the AMD64 decompression table currently has
-  no JPEG-LS row. Re-run on the AMD64 reference platform and update
-  Table `tab:decomp-amd64`.
-- **PICS-C-2 on AMD64.** ARM64 reports PICS-C-2/4/8; AMD64 reports only
-  PICS-C-4/8. Add PICS-C-2 to the AMD64 run.
+*Closed in v9 by the full 39-image AWS c8i run (2026-06-24):* the AMD64
+column groups of `tab:enc`, `tab:decomp`, `tab:pics`, and `tab:fse-combined`
+now cover all 39 images, including the previously-missing AMD64 **JPEG-LS**
+decode column and the AMD64 **PICS-C-2** column.
+
 - **Wavelet NEON kernel on ARM64.** Until a NEON predict/update kernel
   exists, the Wavelet column on ARM64 must keep the *Wavelet* label, not
   *Wav+SIMD*. When the NEON kernel ships, rename the column and update
@@ -146,9 +149,9 @@ Forbidden mistakes:
 - Quoting numbers from a non-c8i AMD64 machine (older 285K data, a
   laptop, a different EC2 family) as AMD64 numbers. If you re-run on a
   different machine, label the column with the new platform.
-- Mixing platforms within a single table. If Table 5 has 21 rows from
-  c8i, all 21 must be c8i — never patch a missing row from a different
-  machine.
+- Mixing platforms within a single table. The AMD64 column group of
+  `tab:decomp` has 39 rows from c8i; all 39 must be c8i — never patch a
+  missing row from a different machine.
 
 System hygiene before a paper-quality run:
 
@@ -167,19 +170,24 @@ System hygiene before a paper-quality run:
 This map must be kept in sync with `run-paper-benchmarks.sh` and
 `paper-tables.py`. If you change any of the three, change all three.
 
+v9 merged the former per-platform tables — `tab:enc-amd64`/`tab:enc-arm64-full`
+became the combined `tab:enc`, and `tab:decomp-arm`/`tab:decomp-amd64` became
+the combined `tab:decomp` (each an ARM64 + AMD64 column group) — and added the
+multi-threaded `tab:pics`.
+
 | Paper table | LaTeX label | Source benchmark(s) | Output file | Parallelism |
 |---|---|---|---|---|
-| Table 1 — Compression ratios | `tab:ratios` | `BenchmarkAllCodecs` (ratio metric) + `BenchmarkMICCDeltaZstdDecomp` (zstd-19 column) + `BenchmarkWaveletV2SIMDRLEFSECompress` (wavelet column) | `01-…`, `05a-…`, `06-…` | Serial |
-| Table 2 — AMD64 encoding | `tab:enc-amd64` | `BenchmarkAllCodecsEncode` + `BenchmarkMICCDeltaZstdEnc` | `02-…`, `05b-…` | Serial |
-| Table 3 — ARM64 encoding | `tab:enc-arm64-full` | `BenchmarkAllCodecsEncode` + `BenchmarkMICCDeltaZstdEnc` | `02-…`, `05b-…` | Serial |
-| Table 4 — ARM64 decoding | `tab:decomp-arm` | `BenchmarkAllCodecs` + `BenchmarkMICCDeltaZstdDecomp` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…`, `05a-…`, `06-…` | Serial |
-| Table 5 — AMD64 decoding | `tab:decomp-amd64` | `BenchmarkAllCodecs` + `BenchmarkMICCDeltaZstdDecomp` + `BenchmarkWaveletV2SIMDRLEFSECompress` | `01-…`, `05a-…`, `06-…` | Serial |
-| Table 6 — FSE 1-state vs 4-state | `tab:fse-combined` | `BenchmarkFSEDecompress` + `BenchmarkFSEDecompress4State` | `03-…`, `04-…` | **Parallel** |
+| Compression ratios (all variants, 39 images) | `tab:ratios` | `BenchmarkAllCodecs` (ratio metric) + `BenchmarkMICCDeltaZstdDecomp` (Δ+Zstd-19 column) + `BenchmarkWaveletV2SIMDRLEFSECompress` (wavelet column) | `01-…`, `05a-…`, `06-…` | Serial |
+| Encoding throughput (ARM64 + AMD64) | `tab:enc` | `BenchmarkAllCodecsEncode` + `BenchmarkMICCDeltaZstdEnc` | `02-…`, `05b-…` | Serial |
+| Decompression throughput (ARM64 + AMD64) | `tab:decomp` | `BenchmarkAllCodecs` + `BenchmarkMICCDeltaZstdDecomp` | `01-…`, `05a-…` | Serial |
+| Multi-threaded (strip-parallel) decompression | `tab:pics` | `BenchmarkAllCodecs` (`MIC-8state-SIMD` MIC column + `PICS-C-2/4/8`) | `01-…` | Serial loop, internally-parallel C |
+| FSE 1/4/8-state microbench | `tab:fse-combined` | `BenchmarkFSEDecompress` + `BenchmarkFSEDecompress4State` + `BenchmarkFSEDecompress8State` | `03-…`, `04-…`, `10-…` | **Parallel** |
 
 ### Delta+Zstd-19 source-of-truth
 
-Both the ratio column in Table 1 and the throughput rows in Tables 2/3/4/5
-for the **Delta+Zstandard-19 baseline** come from `BenchmarkMICCDeltaZstdDecomp`
+Both the Δ+Zstd-19 ratio column in `tab:ratios` and the Δ+Zstd-19 throughput
+columns in `tab:enc`/`tab:decomp` for the **Delta+Zstandard-19 baseline** come
+from `BenchmarkMICCDeltaZstdDecomp`
 and `BenchmarkMICCDeltaZstdEnc` in
 [`ojph/delta_zstd_micc_test.go`](../ojph/delta_zstd_micc_test.go) (build
 tags `cgo_ojph cgo_zstd`). These call libzstd **in-process via CGO** so
@@ -253,7 +261,7 @@ once; if the second run agrees with the first, accept. If it disagrees,
 investigate (background process? thermal throttling? bug?). Variance is the
 gate, not the average — outliers must be reproduced before they're paper.
 
-Encoding numbers (Tables 2/3) have higher inherent variance than decoding
+Encoding numbers (`tab:enc`) have higher inherent variance than decoding
 because the encoder allocates and builds tables. A 5–8% encoding jitter is
 normal; investigate only if it exceeds 10%.
 
@@ -265,7 +273,7 @@ Three artifacts must be changed together. If only some of them change, the
 column will silently disappear from the next paper rebuild.
 
 1. **Add the benchmark** — a serial loop (or a parallel one only if the
-   column is in Table 6 / a microbench). Place it in the same package as
+   column is in `tab:fse-combined` / a microbench). Place it in the same package as
    adjacent columns (`ojph/` for cgo-dependent variants, root `mic` package
    otherwise).
 2. **Add the invocation** to `run-paper-benchmarks.sh` with a new numbered
@@ -292,7 +300,7 @@ LaTeX still referencing it.
   reason — parallel, summary-only, not in the source-of-truth pipeline.
 - ❌ Reintroduce `var wg sync.WaitGroup` / `go func()` patterns into the
   wavelet decompression benchmarks, or into any new benchmark that feeds
-  Tables 4/5.
+  `tab:decomp`.
 - ❌ Run `go test -bench` with `-cpu=1` to "force serial" — that changes
   `GOMAXPROCS` for the whole process and skews other measurements. If you
   need single-thread numbers, restructure the benchmark to a serial loop.
@@ -313,7 +321,8 @@ LaTeX still referencing it.
 
 ## 10. Wavelet+SIMD Specifics
 
-The Wav+SIMD column in Tables 1, 4, 5 must be sourced from
+The Wavelet column in `tab:ratios` (a compression-ratio column in v9; the
+wavelet throughput tables were dropped) must be sourced from
 `BenchmarkWaveletV2SIMDRLEFSECompress`, which is a serial loop after the
 recent fix.
 
@@ -333,7 +342,7 @@ recent fix.
 ## 11. PICS Specifics
 
 - PICS-C-N (C pthreads + per-strip SIMD) is the canonical PICS column in
-  Tables 4/5. The Go-only PICS-N variant is reported alongside but is not
+  `tab:pics`. The Go-only PICS-N variant is reported alongside but is not
   the headline number.
 - PICS-N for small images (MR 256×256) shows speedup ≤ 1.0× — thread
   scheduling overhead exceeds the work. Footnote this in the paper rather

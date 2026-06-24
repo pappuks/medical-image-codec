@@ -111,7 +111,7 @@ The WASM decoder is useful when you need absolute certainty of format compatibil
 | Scenario | Recommended |
 |----------|-------------|
 | Web app with bundler (Webpack, Vite, etc.) | **JavaScript** — tree-shakeable, zero overhead |
-| Minimal page weight / mobile | **JavaScript** — 15 KB vs 2.5 MB |
+| Minimal page weight / mobile | **JavaScript** — 19 KB vs 2.5 MB |
 | Maximum decode speed on very large images | **WASM** — no BigInt overhead |
 | Offline / service worker use | **JavaScript** — no async WASM loading |
 | Must guarantee format compatibility | **WASM** — same Go code |
@@ -371,7 +371,7 @@ sed -i 's|./mic-decoder.js|./mic-decoder.min.js|g' mic-worker.min.js
 | `mic-decoder.js` | ~54 KB | ~19 KB |
 | `mic-decoder-parallel.js` | ~9.5 KB | ~3.3 KB |
 | `mic-worker.js` | ~4 KB | ~1 KB |
-| **Total** | **~68 KB** | **~24 KB** |
+| **Total** | **~68 KB** | **~23 KB** |
 
 > The `sed` step is required because terser does not rewrite string literals — the `import … from './mic-decoder.js'` and `new URL('./mic-worker.js', …)` references inside the source files must be updated to point to the `.min.js` counterparts.
 
@@ -613,14 +613,14 @@ All images verified pixel-perfect against the Go implementation:
 
 | Image | Modality | Dimensions | Original | Compressed | Ratio | JS Decode |
 |-------|----------|-----------|----------|------------|-------|-----------|
-| MR | Brain MRI | 256x256 | 128 KB | 55 KB | 2.35:1 | ~25 ms |
-| CT | Computed Tomography | 512x512 | 512 KB | 234 KB | 2.24:1 | ~90 ms |
-| CR | Computed Radiography | 1760x2140 | 7.2 MB | 2.0 MB | 3.63:1 | ~330 ms |
-| MG1 | Mammography | 1996x2457 | 9.4 MB | 1.1 MB | 8.57:1 | ~150 ms |
-| MG2 | Mammography | 1996x2457 | 9.4 MB | 1.1 MB | 8.55:1 | ~150 ms |
-| MG3 | Mammography | 3064x4774 | 27.3 MB | 12.8 MB | 2.24:1 | ~1200 ms |
+| MR | Brain MRI | 256x256 | 128 KB | 55 KB | 2.35:1 | ~3 ms |
+| CT | Computed Tomography | 512x512 | 512 KB | 229 KB | 2.24:1 | ~12 ms |
+| CR | Computed Radiography | 1760x2140 | 7.2 MB | 1.95 MB | 3.69:1 | ~148 ms |
+| MG1 | Mammography | 1996x2457 | 9.4 MB | 1.07 MB | 8.79:1 | ~65 ms |
+| MG2 | Mammography | 1996x2457 | 9.4 MB | 1.07 MB | 8.77:1 | ~70 ms |
+| MG3 | Mammography | 3064x4774 | 27.3 MB | 11.9 MB | 2.29:1 | ~553 ms |
 
-Times measured in Node.js v22 (V8). Browser performance varies by engine and device. Mammography images (MG1/MG2) achieve the best compression ratios because large areas of the detector are unexposed (uniform background), which delta encoding + RLE compress extremely well.
+Decode times are the median single-threaded (1-state) decode on Apple M4 Pro, Node.js v22 (V8); browser performance varies by engine and device. Mammography images (MG1/MG2) achieve the best compression ratios because large areas of the detector are unexposed (uniform background), which delta encoding + RLE compress extremely well.
 
 ### Benchmark — Apple M4 Pro (Node.js v22.16, 20 iterations + 3 warm-up)
 
@@ -693,7 +693,7 @@ Run `go run ./cmd/mic-compress/ -testdata` from the repository root to generate 
 
 ```
 web/
-├── mic-decoder.js             # Pure JS decoder — source (~49 KB)
+├── mic-decoder.js             # Pure JS decoder — source (~54 KB)
 ├── mic-decoder.min.js         # Pure JS decoder — minified (~19 KB, used by index.html)
 ├── mic-decoder-parallel.js    # Parallel PICS/RGB decoder — source (~9.5 KB)
 ├── mic-decoder-parallel.min.js# Parallel PICS/RGB decoder — minified (~3.3 KB, used by index.html)
