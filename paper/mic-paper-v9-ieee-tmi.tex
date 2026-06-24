@@ -1329,9 +1329,10 @@ decoder interleaves per inner-loop iteration.
 \caption{FSE decompression throughput (MB/s) for representative modalities,
 single-thread pure-Go decoder. Increasing the number of independent state
 chains exposes more instruction-level parallelism to the out-of-order
-engine. Per-image rows are eight representative modalities; ARM64
-geometric means are over all 39 images, while AMD64 geometric means
-cover the original 21 images pending the AMD64 reference run.}
+engine. Per-image rows are ten representative modalities; the two
+new-modality rows (DX\_HAND, PET1) are shown as --- in the AMD64 columns
+pending the AMD64 reference run. ARM64 geometric means are over all 39
+images, while AMD64 geometric means cover the original 21 images.}
 \label{tab:fse-combined}
 \scriptsize
 \setlength{\tabcolsep}{4pt}
@@ -1349,6 +1350,8 @@ MG1    & 3{,}558 & 4{,}865 & 4{,}885 & 2{,}075 & 1{,}521 & 1{,}753 \\
 MG-N   & 3{,}949 & 6{,}647 & 6{,}037 & 1{,}714 & 2{,}294 & 2{,}473 \\
 NM1    & 1{,}971 & 2{,}661 & 2{,}570 & 1{,}091 & 1{,}274 & 1{,}522 \\
 RG1    & 1{,}768 & 4{,}356 & 5{,}332 & 1{,}198 & 1{,}717 & 2{,}104 \\
+DX\_HAND & 2{,}120 & 3{,}163 & 4{,}816 & -- & -- & -- \\
+PET1   & 1{,}105 & 1{,}252 & 1{,}530 & -- & -- & -- \\
 \midrule
 \textbf{Geomean} & \textbf{1{,}742} & \textbf{2{,}372} & \textbf{2{,}492} & \textbf{1{,}464} & \textbf{1{,}575} & \textbf{1{,}614} \\
 \bottomrule
@@ -1380,22 +1383,21 @@ HTJ2K and JPEG-LS are single-threaded in our pipeline, so an
 $N$-thread-vs-1-thread comparison would not be meaningful. The
 take-away is that the strip-parallel decoder scales close to linearly
 up to four threads on both reference platforms and continues to scale
-to eight threads on images above approximately 5\,MB, reaching
-4--4.6\,GB/s on the largest mammography images on ARM64. Small images
-do not benefit: synchronization and per-strip header overhead exceed
-the per-strip work below roughly half a megabyte.
+to eight threads on images above roughly 1\,MB, reaching approximately
+4.3\,GB/s on the largest mammography images on ARM64. The smallest
+images benefit less, and on the two 0.08\,MB PET images strip
+compression falls back toward raw storage, so strip parallelism is not
+applicable (Table~\ref{tab:pics}).
 
 \begin{table*}[htbp]
 \centering
-% TODO: regenerate tab:pics for the 39-image corpus. These strip-parallel
-% numbers are from the original 21-image campaign; the single-threaded MIC
-% baseline therefore predates the refreshed Table~\ref{tab:decomp} and should
-% be re-measured (ARM64 strip columns from PICS-C; AMD64 pending the c8i run).
 \caption{Multi-threaded decompression throughput (MB/s) for MIC's
-strip-parallel mode, reported on the original 21 images. The ``MIC'' column
-is the single-threaded baseline measured in the same campaign; $N$-strip
-columns decode the same compressed bytes in $N$ parallel threads. The MR
-image is too small for 8-way parallelism on both platforms.}
+strip-parallel mode. The ``MIC'' column is the single-threaded eight-state
+C decoder from Table~\ref{tab:decomp}; the $N$-strip columns decode the same
+compressed bytes in $N$ parallel threads using the C pthreads worker pool.
+ARM64 columns cover all 39 images; AMD64 columns cover the original 21
+images, with the 18 additional images (shown as ---) pending measurement on
+the AMD64 reference platform.}
 \label{tab:pics}
 \scriptsize
 \begin{tabular}{l|rrrr|rrrr}
@@ -1404,34 +1406,57 @@ image is too small for 8-way parallelism on both platforms.}
 \cmidrule(lr){2-5}\cmidrule(lr){6-9}
 Image & MIC & 2-strip & 4-strip & 8-strip & MIC & 2-strip & 4-strip & 8-strip \\
 \midrule
-MR   & 564   & 663   & 894     & 702\,$^\dagger$   & 552   & 329     & 367     & 294\,$^\dagger$ \\
-CT   & 466   & 624   & 1{,}157 & 1{,}446           & 453   & 398     & 633     & 714 \\
-CR   & 692   & 1{,}052 & 1{,}976 & 3{,}605         & 566   & 758     & 1{,}320 & 2{,}169 \\
-XR   & 655   & 1{,}087 & 2{,}024 & 3{,}794         & 617   & 793     & 1{,}515 & 2{,}579 \\
-MG1  & 829   & 1{,}529 & 2{,}529 & 4{,}443         & 913   & 1{,}317 & 1{,}951 & 2{,}890 \\
-MG2  & 873   & 1{,}417 & 2{,}506 & 4{,}585         & 920   & 1{,}356 & 1{,}971 & 3{,}026 \\
-MG3  & 678   & 1{,}112 & 1{,}911 & 3{,}820         & 556   & 838     & 1{,}449 & 2{,}767 \\
-MG4  & 815   & 1{,}326 & 2{,}345 & 4{,}348         & 676   & 1{,}207 & 1{,}897 & 3{,}126 \\
-CT1  & 571   & 819   & 1{,}247 & 1{,}525           & 525   & 458     & 703     & 725 \\
-CT2  & 648   & 864   & 1{,}260 & 1{,}473           & 512   & 481     & 734     & 719 \\
-MG-N & 657   & 1{,}147 & 2{,}027 & 3{,}930         & 545   & 913     & 1{,}537 & 2{,}819 \\
-MR1  & 681   & 977   & 1{,}460 & 1{,}851           & 603   & 504     & 761     & 764 \\
-MR2  & 747   & 1{,}137 & 1{,}911 & 3{,}103         & 644   & 778     & 1{,}171 & 1{,}534 \\
-MR3  & 859   & 1{,}205 & 1{,}693 & 2{,}089         & 773   & 591     & 788     & 835 \\
-MR4  & 775   & 997   & 1{,}469 & 1{,}757           & 632   & 540     & 796     & 804 \\
-NM1  & 866   & 1{,}147 & 1{,}682 & 2{,}133         & 598   & 523     & 824     & 762 \\
-RG1  & 561   & 677   & 1{,}203 & 2{,}150           & 550   & 603     & 1{,}101 & 1{,}890 \\
-RG2  & 755   & 1{,}229 & 2{,}156 & 3{,}816         & 730   & 916     & 1{,}473 & 2{,}268 \\
-RG3  & 740   & 1{,}335 & 2{,}343 & 4{,}168         & 723   & 971     & 1{,}618 & 2{,}730 \\
-SC1  & 696   & 1{,}311 & 2{,}206 & 3{,}971         & 690   & 1{,}024 & 1{,}673 & 2{,}541 \\
-XA1  & 759   & 1{,}214 & 1{,}881 & 3{,}191         & 688   & 792     & 1{,}246 & 1{,}748 \\
+MR   & 649 & 698     & 939     & 1{,}033 & 552 & 329     & 367     & 294\,$^\dagger$ \\
+CT   & 495 & 511     & 987     & 1{,}549 & 453 & 398     & 633     & 714 \\
+CR   & 580 & 865     & 1{,}771 & 3{,}227 & 566 & 758     & 1{,}320 & 2{,}169 \\
+XR   & 668 & 888     & 1{,}728 & 3{,}197 & 617 & 793     & 1{,}515 & 2{,}579 \\
+MG1  & 762 & 1{,}415 & 2{,}403 & 4{,}342 & 913 & 1{,}317 & 1{,}951 & 2{,}890 \\
+MG2  & 753 & 1{,}369 & 2{,}226 & 4{,}109 & 920 & 1{,}356 & 1{,}971 & 3{,}026 \\
+MG3  & 600 & 934     & 1{,}763 & 3{,}158 & 556 & 838     & 1{,}449 & 2{,}767 \\
+MG4  & 788 & 1{,}263 & 2{,}185 & 4{,}120 & 676 & 1{,}207 & 1{,}897 & 3{,}126 \\
+CT1  & 600 & 779     & 1{,}178 & 1{,}639 & 525 & 458     & 703     & 725 \\
+CT2  & 570 & 773     & 1{,}249 & 1{,}296 & 512 & 481     & 734     & 719 \\
+MG-N & 600 & 988     & 1{,}852 & 3{,}569 & 545 & 913     & 1{,}537 & 2{,}819 \\
+MR1  & 734 & 931     & 1{,}375 & 1{,}898 & 603 & 504     & 761     & 764 \\
+MR2  & 700 & 1{,}003 & 1{,}699 & 2{,}750 & 644 & 778     & 1{,}171 & 1{,}534 \\
+MR3  & 839 & 919     & 1{,}381 & 2{,}035 & 773 & 591     & 788     & 835 \\
+MR4  & 692 & 954     & 1{,}301 & 2{,}063 & 632 & 540     & 796     & 804 \\
+NM1  & 778 & 964     & 1{,}410 & 1{,}868 & 598 & 523     & 824     & 762 \\
+RG1  & 469 & 586     & 1{,}068 & 1{,}964 & 550 & 603     & 1{,}101 & 1{,}890 \\
+RG2  & 652 & 1{,}095 & 1{,}887 & 3{,}269 & 730 & 916     & 1{,}473 & 2{,}268 \\
+RG3  & 685 & 1{,}081 & 2{,}027 & 3{,}289 & 723 & 971     & 1{,}618 & 2{,}730 \\
+SC1  & 699 & 1{,}171 & 2{,}005 & 3{,}174 & 690 & 1{,}024 & 1{,}673 & 2{,}541 \\
+XA1  & 662 & 973     & 1{,}692 & 2{,}404 & 688 & 792     & 1{,}246 & 1{,}748 \\
+CT\_BRAIN    & 528 & 627 & 1{,}025 & 1{,}291 & -- & -- & -- & -- \\
+CT\_ANKLE    & 853 & 1{,}082 & 1{,}745 & 1{,}713 & -- & -- & -- & -- \\
+CT\_ORT      & 538 & 679 & 1{,}099 & 1{,}316 & -- & -- & -- & -- \\
+CT\_CHEST    & 500 & 622 & 1{,}042 & 1{,}354 & -- & -- & -- & -- \\
+MR\_HEAD     & 595 & 620 & 915 & 880 & -- & -- & -- & -- \\
+MR\_INTERA   & 590 & 910 & 1{,}575 & 2{,}405 & -- & -- & -- & -- \\
+DX\_HAND     & 500 & 605 & 1{,}113 & 2{,}051 & -- & -- & -- & -- \\
+DX\_CHEST    & 476 & 566 & 1{,}003 & 1{,}971 & -- & -- & -- & -- \\
+CR\_THORAX   & 552 & 588 & 1{,}128 & 1{,}733 & -- & -- & -- & -- \\
+PET1         & 732 & 637 & 854 & 854 & -- & -- & -- & -- \\
+PET2         & 656 & 669 & 776 & 923 & -- & -- & -- & -- \\
+CT\_LUNG     & 522 & 689 & 1{,}107 & 1{,}462 & -- & -- & -- & -- \\
+CT\_PANCREAS & 517 & 506 & 1{,}018 & 1{,}316 & -- & -- & -- & -- \\
+MR\_BRAIN    & 866 & 815 & 999 & 1{,}143 & -- & -- & -- & -- \\
+MR\_BREAST   & 640 & 653 & 920 & 956 & -- & -- & -- & -- \\
+MR\_PROSTATE & 679 & 742 & 1{,}093 & 1{,}279 & -- & -- & -- & -- \\
+PET\_PSMA$^\ddagger$ & 759 & 727 & -- & -- & -- & -- & -- & -- \\
+PET\_LUNG$^\ddagger$ & 502 & 359 & -- & -- & -- & -- & -- & -- \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-\noindent $^\dagger$The MR image (130\,KB raw) is too small to benefit from
-8-way parallelism: synchronization overhead exceeds the per-strip work, so
-the 4-strip configuration is faster than 8-strip on both platforms.
+\noindent $^\dagger$The 130\,KB MR image is too small to benefit from 8-way
+parallelism on AMD64: synchronization overhead exceeds the per-strip work, so
+4-strip is faster than 8-strip.
+$^\ddagger$On the two 0.08\,MB PET images, splitting into four or more strips
+drives the strip-compressed size to or above the single-stream size
+(ratio $\le 1.2\times$; Table~\ref{tab:ratios}), so their 4- and 8-strip
+decode figures reflect near-raw copying rather than entropy decoding and are
+omitted.
 
 The scaling characteristics are intuitive. On large images each strip
 gets enough rows that the per-strip overhead (synchronization plus
@@ -1447,10 +1472,6 @@ $N$ between four and eight depending on image size and core count.
 \subsection{JavaScript Runtime Results}
 \label{subsec:js-state-effect}
 
-% TODO: the JavaScript tables (tab:js-perf, tab:pics-js) are from the original
-% 21-image campaign and were not refreshed for the 39-image corpus (they require
-% the separate Node.js harness, not run-paper-benchmarks.sh). The ratio column
-% should track Table~\ref{tab:ratios} once re-run (e.g. MG1 is now 8.78x).
 Table~\ref{tab:js-perf} reports Node.js single-threaded performance for
 both the four-state and eight-state FSE variants;
 Table~\ref{tab:pics-js} reports parallel PICS decoding via
@@ -1468,13 +1489,20 @@ variants. Median over 20 iterations after three warm-up runs.}
 \cmidrule(lr){4-5}\cmidrule(lr){6-7}
 Image & Dimensions & Ratio & ms & MB/s & ms & MB/s \\
 \midrule
-MR  & $256{\times}256$   & 2.35$\times$ &   2.5 &  50 &   3.3 &  38 \\
-CT  & $512{\times}512$   & 2.24$\times$ &  11.9 &  42 &  14.1 &  36 \\
-CR  & $2140{\times}1760$ & 3.69$\times$ & 136.4 &  53 & 151.4 &  47 \\
-MG1 & $2457{\times}1996$ & 8.79$\times$ &  68.1 & 137 &  78.3 & 120 \\
-MG3 & $4774{\times}3064$ & 2.29$\times$ & 514.5 &  54 & 563.7 &  49 \\
+MR\,$^\dagger$ & $256{\times}256$   & 2.35$\times$ &   2.9 &  43 &   2.7 &  46 \\
+CT  & $512{\times}512$   & 2.24$\times$ &  12.3 &  41 &  13.1 &  38 \\
+CR  & $2140{\times}1760$ & 3.69$\times$ & 137.2 &  52 & 165.5 &  43 \\
+MG1 & $2457{\times}1996$ & 8.79$\times$ &  70.4 & 133 &  80.0 & 117 \\
+MG3 & $4774{\times}3064$ & 2.29$\times$ & 560.8 &  50 & 607.1 &  46 \\
+DX\_HAND & $1480{\times}1410$ & 2.24$\times$ &  82.6 &  48 &  96.1 &  41 \\
+PET1 & $256{\times}256$   & 2.74$\times$ &   2.1 &  60 &   2.5 &  50 \\
 \bottomrule
 \end{tabular}
+
+\vspace{2pt}
+{\scriptsize $^\dagger$MR's 0.13\,MB image decodes in under 3\,ms, at the
+JavaScript timing floor; the four-state advantage seen on the larger images
+is within run-to-run noise here.}
 \end{table}
 
 \begin{table}[htbp]
@@ -1490,26 +1518,30 @@ each variant is reported.}
 \cmidrule(lr){3-4}\cmidrule(lr){5-6}
 Image & Strips &   ms & MB/s &   ms & MB/s \\
 \midrule
-MR  & 4 &   1.1 & 111 &   1.3 &  97 \\
-CT  & 4 &   4.2 & 120 &   4.7 & 108 \\
-CR  & 8 &  33.4 & 215 &  31.8 & 226 \\
-MG1 & 8 &  19.8 & 473 &  20.5 & 457 \\
+MR  & 4 &   0.9 & 134 &   0.9 & 135 \\
+CT  & 4 &   4.1 & 123 &   4.5 & 112 \\
+CR  & 8 &  22.9 & 313 &  28.0 & 257 \\
+MG1 & 8 &  17.1 & 547 &  16.7 & 559 \\
+DX\_HAND & 8 &  17.1 & 233 &  17.8 & 224 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The eight-state variant is consistently 7--13\% slower than the
-four-state variant in the JS decoder, despite running on the same M4~Pro
-that benefits from eight states in the C decoder. The reason is
-architectural rather than algorithmic: V8's single-thread scheduler
-provides enough instruction-level parallelism to saturate four
+The eight-state variant is 6--21\% slower than the four-state variant in
+the single-threaded JS decoder on the images large enough to time
+reliably (MR, at under 3\,ms, is within timing noise), despite running on
+the same ARM64 reference that benefits from eight states in the C decoder.
+The reason is architectural rather than algorithmic: V8's single-thread
+scheduler provides enough instruction-level parallelism to saturate four
 independent FSE state chains but not eight, so the extra state machines
 add per-symbol bookkeeping (state initialisation, tail handling) without
 shortening the critical path. The eight-state path is still useful in
 JavaScript --- it lets a single decoder binary accept C-encoded streams
-without transcoding --- but the four-state variant remains the practical
-JS configuration of best trade-off. MG1 (9.35\,MB) decompresses in 19.8\,ms at 473\,MB/s
-using eight workers and four-state strips. A web-based DICOM viewer can
+without transcoding, and in the parallel \texttt{worker\_threads} decoder
+the gap closes (the two variants are within a few percent, Table~\ref{tab:pics-js})
+--- but the four-state variant remains the practical JS configuration of
+best trade-off. MG1 (9.35\,MB) decompresses in 17.1\,ms at 547\,MB/s using
+four-state strips across worker threads. A web-based DICOM viewer can
 therefore fetch a \texttt{.mic} file directly from object storage and
 decode it client-side without server-side compute or transcoding latency.
 

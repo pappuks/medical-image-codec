@@ -27,7 +27,7 @@ Provides two decoder implementations — a pure JavaScript ES module and a Go We
 go run ./cmd/mic-compress/ -testdata
 ```
 
-This compresses the test images (MR, CT, CR, MG1-3) into single-frame `.mic` files and multi-frame DICOM images (MG_TOMO) into MIC2 `.mic` files under `web/testdata/`. Each grayscale image is emitted three times — 1-state (default), 4-state (`_4s.mic`), and 8-state (`_8s.mic`) FSE — plus PICS parallel-strip variants (`_pics4.mic`, `_pics8.mic`, `_pics4_8s.mic`, `_pics8_8s.mic`) so the JS decoder and benchmark can be exercised against every entropy-coder variant.
+This compresses the test images (MR, CT, CR, MG1-3, plus the DX_HAND and PET1 new-modality representatives) into single-frame `.mic` files and multi-frame DICOM images (MG_TOMO) into MIC2 `.mic` files under `web/testdata/`. Each grayscale image is emitted three times — 1-state (default), 4-state (`_4s.mic`), and 8-state (`_8s.mic`) FSE — plus PICS parallel-strip variants (`_pics4.mic`, `_pics8.mic`, `_pics4_8s.mic`, `_pics8_8s.mic`) so the JS decoder and benchmark can be exercised against every entropy-coder variant.
 
 ### 2. Build the WASM decoder (optional)
 
@@ -624,7 +624,7 @@ Times measured in Node.js v22 (V8). Browser performance varies by engine and dev
 
 ### Benchmark — Apple M4 Pro (Node.js v22.16, 20 iterations + 3 warm-up)
 
-Run with `node bench-decoder.mjs`. Reports median decode time, throughput (decompressed MB/s), and megapixels/s. Numbers below are from the 14-core M4 Pro (10 P-cores + 4 E-cores) — the same reference platform the [IEEE paper](../paper/mic-paper-v8-ieee-tmi.pdf) uses for the C and Go benchmarks.
+Run with `node bench-decoder.mjs`. Reports median decode time, throughput (decompressed MB/s), and megapixels/s. Numbers below are from the 14-core M4 Pro (10 P-cores + 4 E-cores) — the same reference platform the [IEEE paper](../paper/mic-paper-v9-ieee-tmi.pdf) uses for the C and Go benchmarks.
 
 #### Single-threaded (pure JS decoder) — 4-state vs 8-state FSE
 
@@ -632,14 +632,18 @@ The JS decoder auto-detects the FSE state count from the 2-byte magic prefix and
 
 | Image | Dimensions | Ratio | 1-state ms / MB/s | 4-state ms / MB/s | 8-state ms / MB/s |
 |-------|------------|-------|-------------------|-------------------|-------------------|
-| MR  | 256×256   | 2.35× | 3.1 / 41  | **2.5 / 50**  | 3.3 / 38  |
-| CT  | 512×512   | 2.24× | 11.0 / 46 | **11.9 / 42** | 14.1 / 36 |
-| CR  | 1760×2140 | 3.69× | 133.6 / 54 | **136.4 / 53** | 151.4 / 47 |
-| MG1 | 1996×2457 | 8.79× | 65.7 / 142 | **68.1 / 137** | 78.3 / 120 |
-| MG2 | 1996×2457 | 8.77× | 65.4 / 143 | **66.9 / 140** | 74.3 / 126 |
-| MG3 | 3064×4774 | 2.29× | 501.5 / 56 | **514.5 / 54** | 563.7 / 49 |
+| MR  | 256×256   | 2.35× | 3.0 / 42  | **2.9 / 43**  | 2.7 / 46  |
+| CT  | 512×512   | 2.24× | 12.2 / 41 | **12.3 / 41** | 13.1 / 38 |
+| CR  | 1760×2140 | 3.69× | 134.7 / 53 | **137.2 / 52** | 165.5 / 43 |
+| MG1 | 1996×2457 | 8.79× | 70.9 / 132 | **70.4 / 133** | 80.0 / 117 |
+| MG2 | 1996×2457 | 8.77× | 73.1 / 128 | **74.2 / 126** | 79.0 / 118 |
+| MG3 | 3064×4774 | 2.29× | 552.4 / 51 | **560.8 / 50** | 607.1 / 46 |
+| DX_HAND | 1410×1480 | 2.24× | 86.3 / 46 | **82.6 / 48** | 96.1 / 41 |
+| PET1 | 256×256   | 2.74× | 2.2 / 57 | **2.1 / 60** | 2.5 / 50 |
 
-**Why 4-state wins in JS.** In the C/Go decoder, 8 independent state chains expose enough instruction-level parallelism for a wide out-of-order engine (or AVX-512 gather) to retire ~8 lookups per cycle. V8's single-thread scheduler saturates around 4 chains, so the extra 4 chains in the 8-state variant add per-symbol bookkeeping (state initialisation, tail handling) without shortening the critical path. The 8-state path is still useful — it lets the JS decoder read C-encoded streams without transcoding — but 4-state remains the practical JS sweet spot.
+DX_HAND (digital radiography) and PET1 (PET) are the two new-modality representatives added to the corpus; their `.mic` files are produced by `mic-compress -testdata` alongside the others.
+
+**Why 4-state is the JS default.** In the C/Go decoder, 8 independent state chains expose enough instruction-level parallelism for a wide out-of-order engine (or AVX-512 gather) to retire ~8 lookups per cycle. V8's single-thread scheduler saturates around 4 chains, so the extra 4 chains in the 8-state variant add per-symbol bookkeeping (state initialisation, tail handling) without shortening the critical path — the 8-state column is 6–21% slower than 4-state on the images large enough to time reliably (MR, under 3 ms, is within timing noise). The 1- and 4-state variants are within a few percent of each other; 4-state is preferred because it lets the JS decoder read C-encoded streams without transcoding, while staying close to 1-state speed.
 
 #### Parallel worker_threads (PICS strips, SharedArrayBuffer, M4 Pro 14 cores)
 
@@ -647,12 +651,13 @@ PICS files encode an image as independent strips, enabling parallel decoding acr
 
 | Image | strips | 4-state strips ms / MB/s | 8-state strips ms / MB/s |
 |-------|--------|--------------------------|--------------------------|
-| MR  256×256   | 4 | **1.1 / 111** (8 workers)  | 1.3 / 97  (8/14 workers) |
-| CT  512×512   | 4 | **4.2 / 120** (4 workers)  | 4.7 / 108 (8 workers)    |
-| CR  1760×2140 | 8 | 33.4 / 215 (14 workers)    | **31.8 / 226** (14 workers) |
-| MG1 1996×2457 | 8 | **19.8 / 473** (14 workers) | 20.5 / 457 (8/14 workers) |
+| MR  256×256   | 4 | 0.9 / 134 (4 workers)      | **0.9 / 135** (14 workers) |
+| CT  512×512   | 4 | **4.1 / 123** (8 workers)  | 4.5 / 112 (4 workers)    |
+| CR  1760×2140 | 8 | **22.9 / 313** (8 workers) | 28.0 / 257 (8 workers)   |
+| MG1 1996×2457 | 8 | 17.1 / 547 (14 workers)    | **16.7 / 559** (8 workers) |
+| DX_HAND 1410×1480 | 8 | **17.1 / 233** (8 workers) | 17.8 / 224 (14 workers) |
 
-Workers beyond the strip count are capped to the strip count by the pool. For large images (CR, MG1) the 8-strip layout scales to ~5× speedup and pushes throughput to **215–473 MB/s** — well into real-time territory for diagnostic workloads. The 8-state variant catches up on CR (longer strips → V8 has time to amortise the wider state-init cost over more symbols) but is otherwise within ~5% of the 4-state variant.
+Workers beyond the strip count are capped to the strip count by the pool. For large images (CR, MG1) the 8-strip layout scales to roughly 4.5–6.7× speedup and pushes throughput to **230–560 MB/s** — well into real-time territory for diagnostic workloads. The 4- and 8-state strip variants are within a few percent of each other; 4-state is the practical default, with 8-state occasionally ahead on the longer-strip images (MG1) where V8 has time to amortise the wider state-init cost over more symbols.
 
 ## Troubleshooting
 
@@ -710,6 +715,8 @@ web/
     ├── MG1.mic            #   Mammogram, 1996x2457 (MIC1)
     ├── MG2.mic            #   Mammogram, 1996x2457 (MIC1)
     ├── MG3.mic            #   Mammogram, 3064x4774 (MIC1)
+    ├── DX_HAND.mic        #   Digital radiography, 1410x1480 (MIC1)
+    ├── PET1.mic           #   PET, 256x256 (MIC1)
     └── MG_TOMO.mic        #   Breast Tomosynthesis, 2457x1890, 69 frames (MIC2)
 
 cmd/

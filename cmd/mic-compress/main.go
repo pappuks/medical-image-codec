@@ -245,6 +245,10 @@ var testImages = []testImage{
 	{name: "MG1", file: "testdata/MG_image_bin2.bin", cols: 1996, rows: 2457},
 	{name: "MG2", file: "testdata/MG_Image_2_frame.bin", cols: 1996, rows: 2457},
 	{name: "MG3", file: "testdata/MG1.RAW", cols: 3064, rows: 4774},
+	// New-modality representatives for the JavaScript decoder tables
+	// (digital radiography and PET); sourced from the expanded corpus.
+	{name: "DX_HAND", file: "testdata/expanded/DX_HAND_1410_1480_image.bin", cols: 1410, rows: 1480},
+	{name: "PET1", file: "testdata/expanded/PET_NSCLC1_256_256_image.bin", cols: 256, rows: 256},
 }
 
 // Multiframe DICOM test images (single multiframe DICOM file)
@@ -281,6 +285,7 @@ var picsTestImages = []struct {
 	{srcName: "MG1", numStrips: 8, outName: "MG1_pics8"},
 	{srcName: "MG2", numStrips: 8, outName: "MG2_pics8"},
 	{srcName: "MG3", numStrips: 8, outName: "MG3_pics8"},
+	{srcName: "DX_HAND", numStrips: 8, outName: "DX_HAND_pics8"},
 }
 
 // WSI test images (raw RGB files)

@@ -43,6 +43,8 @@ const FILES = [
   { mic: 'testdata/MG1.mic',  name: 'MG1 1996×2457 (1-state)' },
   { mic: 'testdata/MG2.mic',  name: 'MG2 1996×2457 (1-state)' },
   { mic: 'testdata/MG3.mic',  name: 'MG3 3064×4774 (1-state)' },
+  { mic: 'testdata/DX_HAND.mic', name: 'DX_HAND 1410×1480 (1-state)' },
+  { mic: 'testdata/PET1.mic',    name: 'PET1 256×256     (1-state)' },
   // 4-state FSE
   { mic: 'testdata/MR_4s.mic',  name: 'MR  256×256   (4-state)' },
   { mic: 'testdata/CT_4s.mic',  name: 'CT  512×512   (4-state)' },
@@ -50,6 +52,8 @@ const FILES = [
   { mic: 'testdata/MG1_4s.mic', name: 'MG1 1996×2457 (4-state)' },
   { mic: 'testdata/MG2_4s.mic', name: 'MG2 1996×2457 (4-state)' },
   { mic: 'testdata/MG3_4s.mic', name: 'MG3 3064×4774 (4-state)' },
+  { mic: 'testdata/DX_HAND_4s.mic', name: 'DX_HAND 1410×1480 (4-state)' },
+  { mic: 'testdata/PET1_4s.mic',    name: 'PET1 256×256     (4-state)' },
   // 8-state FSE
   { mic: 'testdata/MR_8s.mic',  name: 'MR  256×256   (8-state)' },
   { mic: 'testdata/CT_8s.mic',  name: 'CT  512×512   (8-state)' },
@@ -57,6 +61,8 @@ const FILES = [
   { mic: 'testdata/MG1_8s.mic', name: 'MG1 1996×2457 (8-state)' },
   { mic: 'testdata/MG2_8s.mic', name: 'MG2 1996×2457 (8-state)' },
   { mic: 'testdata/MG3_8s.mic', name: 'MG3 3064×4774 (8-state)' },
+  { mic: 'testdata/DX_HAND_8s.mic', name: 'DX_HAND 1410×1480 (8-state)' },
+  { mic: 'testdata/PET1_8s.mic',    name: 'PET1 256×256     (8-state)' },
   // PICS parallel strips, 4-state per strip (decoded sequentially here for baseline)
   { mic: 'testdata/MR_pics4.mic',  name: 'MR  256×256   (PICS-4 4s seq)' },
   { mic: 'testdata/CT_pics4.mic',  name: 'CT  512×512   (PICS-4 4s seq)' },
@@ -81,6 +87,8 @@ const PICS_FILES = [
   { mic: 'testdata/CT_pics4_8s.mic',  name: 'CT  512×512   (8s strips)', strips: 4 },
   { mic: 'testdata/CR_pics8_8s.mic',  name: 'CR  1760×2140 (8s strips)', strips: 8 },
   { mic: 'testdata/MG1_pics8_8s.mic', name: 'MG1 1996×2457 (8s strips)', strips: 8 },
+  { mic: 'testdata/DX_HAND_pics8.mic',    name: 'DX_HAND 1410×1480 (4s strips)', strips: 8 },
+  { mic: 'testdata/DX_HAND_pics8_8s.mic', name: 'DX_HAND 1410×1480 (8s strips)', strips: 8 },
 ];
 
 // ---------------------------------------------------------------------------
