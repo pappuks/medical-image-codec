@@ -1,7 +1,6 @@
-% IEEE-format plain-language ("simplified") version of the MIC paper.
-% Prose is the accessible/simplified narrative; tables (no figures) are
-% reproduced from mic-paper-v9-ieee-tmi.tex; references are the cited
-% subset of the v9 bibliography.
+% IEEE-format edition of the MIC paper.
+% Tables (no figures) are reproduced from mic-paper-v9-ieee-tmi.tex;
+% references are the cited subset of the v9 bibliography.
 % Compile: pdflatex -> pdflatex
 \documentclass[journal]{IEEEtran}
 
@@ -32,18 +31,13 @@
 
 % --------------------------------------------------
 \title{A 16-Bit-Native Compression Pipeline for\\
-       Lossless Medical Images\\
-       \large(Plain-Language Edition)}
+       Lossless Medical Images}
 
 \author{Kuldeep~Singh%
 \thanks{K.\ Singh is with Innovaccer Inc.
 E-mail: kuldeep.singh@innovaccer.com.
 ORCID: 0009-0004-8476-0118.
 Code: \url{https://github.com/pappuks/medical-image-codec}.}%
-\thanks{This is a plain-language edition of the MIC paper. It keeps the main
-ideas, key numbers, and reasoning, but trades the formal equations and
-implementation minutiae for explanations a software engineer can follow.
-Data tables are reproduced from the full manuscript; figures are omitted.}%
 }
 
 % --------------------------------------------------
@@ -56,9 +50,11 @@ Medical images must be stored and transmitted losslessly, since a radiologist
 must see exactly what the scanner produced, and they are ``deep,'' carrying
 10--16 bits per pixel rather than the 8 bits of an ordinary photo. That deep
 format is where most compression tools perform poorly, because nearly all of
-them were built for 8-bit data. This paper describes MIC (Medical Image Codec),
-a lossless codec that works directly on 16-bit data instead of splitting each
-pixel into two bytes. MIC chains three simple stages, a spatial predictor, a
+them were adapted from photographic and general-purpose imaging, where pixels
+are 8 bits, rather than designed for medical data. This paper describes MIC
+(Medical Image Codec), a lossless codec designed natively for medical imaging
+that works directly on 16-bit data instead of splitting each pixel into two
+bytes. MIC chains three simple stages, a spatial predictor, a
 16-bit run-length encoder, and a large-alphabet entropy coder called Finite
 State Entropy (FSE, a fast table-driven form of asymmetric numeral systems),
 and adds a multi-state decoder that keeps the CPU more fully utilized to speed
@@ -83,12 +79,17 @@ imaging.
 \section{Why Medical Images Need a Different Codec}
 \label{sec:intro}
 
-\IEEEPARstart{A}{modern} scanner produces a great deal of data. A single
-digital breast tomosynthesis view can comprise 60 or more image slices and over
-600\,MB; a full screening study can exceed 2\,GB uncompressed. Hospitals store
-and move very large volumes of this data every day, so effective lossless
-compression directly affects storage cost, network load, and how quickly images
-appear in a viewer.
+\IEEEPARstart{M}{edical} imaging plays a central role in understanding the human
+body, and as the instruments that capture these images improve, both their
+resolution and the volume of imaging data they generate continue to rise. A
+modern scanner produces a great deal of data: a single digital breast
+tomosynthesis view can comprise 60 or more image slices and over 600\,MB, and a
+full screening study can exceed 2\,GB uncompressed. Hospitals store and move
+very large volumes of this data every day, so effective compression directly
+affects storage cost, network load, and how quickly images appear in a viewer.
+Because a radiologist must see exactly what the scanner produced, this
+compression must be lossless: the reconstructed image has to match the original
+bit for bit, with no loss of fidelity.
 
 DICOM~\cite{dicom}, the medical imaging standard, already supports several
 lossless formats---JPEG~2000~\cite{taubman2002}, HTJ2K~\cite{htj2k2019},
@@ -97,6 +98,13 @@ trade-off between how small the file gets, how fast it decodes, and how complex
 it is to implement~\cite{liu2017,clunie2000}. JPEG~2000 and HTJ2K compress well
 but rely on fairly heavy machinery. JPEG-LS usually gets the smallest files.
 Plain run-length coding is simple but barely compresses.
+
+Lossless compression for medical images is not new, but a common thread runs
+through these standards: none of them was designed natively for medical imaging.
+Their prediction and entropy stages originated in photographic and
+general-purpose imaging, where pixels are typically 8 bits, and were later
+applied to the 10--16-bit data that medical scanners produce. MIC takes the
+opposite approach and is built from the ground up for medical images.
 
 \subsection{The core problem: most coders assume 8-bit data}
 
@@ -133,6 +141,14 @@ frequently, which is exactly the pattern run-length and entropy coding exploit
 well.
 
 \subsection{What MIC is}
+
+MIC is designed around the characteristics of medical images themselves. Such
+images tend to contain large homogeneous regions and comparatively few sharp
+edges or abrupt changes in contrast, and their pixels are commonly 10--16 bits
+deep. Starting from these properties, we surveyed entropy-coding and
+signal-processing techniques to identify a combination that compresses this kind
+of data well while still decoding at high throughput. The result is a
+three-stage pipeline.
 
 MIC keeps the residuals at their native 16-bit width and combines (i)~a simple
 spatial predictor, (ii)~a 16-bit run-length encoder, and (iii)~an entropy coder
