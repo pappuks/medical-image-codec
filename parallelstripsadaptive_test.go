@@ -117,3 +117,75 @@ func picaGradCount(blob []byte) int {
 	}
 	return count
 }
+
+// picaRawCount parses a PICA blob and returns how many strips used the raw fallback.
+func picaRawCount(blob []byte) int {
+	if len(blob) < picaHdrSize {
+		return 0
+	}
+	numStrips := int(blob[12]) | int(blob[13])<<8 | int(blob[14])<<16 | int(blob[15])<<24
+	count := 0
+	for i := 0; i < numStrips; i++ {
+		off := picaHdrSize + i*picaEntrySize + 12 // flags field
+		if off+4 > len(blob) {
+			break
+		}
+		flags := uint32(blob[off]) | uint32(blob[off+1])<<8 | uint32(blob[off+2])<<16 | uint32(blob[off+3])<<24
+		if flags&picaFlagRaw != 0 {
+			count++
+		}
+	}
+	return count
+}
+
+// TestParallelStripsAdaptiveRawFallback verifies that genuinely incompressible
+// strips (CT1, CT2) are handled via the raw fallback and roundtrip losslessly.
+// It also asserts that at least one raw strip is present in the compressed
+// output, confirming the code path was exercised.
+func TestParallelStripsAdaptiveRawFallback(t *testing.T) {
+	rawImages := []string{"CT1", "CT2"} // high-entropy 16-bit CTs
+	const numStrips = 8 // 8 strips produces smaller per-strip regions that trigger raw fallback on CT images
+
+	for _, name := range rawImages {
+		name := name
+		var td testData
+		found := false
+		for _, f := range testFiles {
+			if f.name == name {
+				td = f
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Skipf("%s not in testFiles, skipping", name)
+		}
+
+		_, pixels, maxVal, width, height := SetupTests(td)
+
+		compressed, err := CompressParallelStripsAdaptive(pixels, width, height, maxVal, numStrips)
+		if err != nil {
+			t.Fatalf("%s: compress should not fail with raw fallback: %v", name, err)
+		}
+
+		// Verify at least one strip used the raw path.
+		rawCount := picaRawCount(compressed)
+		if rawCount == 0 {
+			t.Errorf("%s: expected at least one raw strip, got 0; raw fallback not exercised", name)
+		}
+
+		// Roundtrip must be pixel-exact.
+		got, w, h, err := DecompressParallelStripsAdaptive(compressed)
+		if err != nil {
+			t.Fatalf("%s: decompress: %v", name, err)
+		}
+		if w != width || h != height {
+			t.Fatalf("%s: dimension mismatch: got %dx%d, want %dx%d", name, w, h, width, height)
+		}
+		for i := range pixels {
+			if got[i] != pixels[i] {
+				t.Fatalf("%s: pixel mismatch at index %d: got %d, want %d", name, i, got[i], pixels[i])
+			}
+		}
+	}
+}

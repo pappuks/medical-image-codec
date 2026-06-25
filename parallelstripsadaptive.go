@@ -36,6 +36,8 @@ import (
 // flags bits:
 //
 //	bit 0: picaFlagGradPredictor — strip was encoded with gradient-adaptive predictor
+//	bit 1: picaFlagRaw           — strip is stored as raw little-endian uint16 pixels
+//	                               (incompressible fallback; mutually exclusive with bit 0)
 const (
 	picaMagic     = "PICA"
 	picaEntrySize = 16 // y0(4) + offset(4) + length(4) + flags(4)
@@ -45,6 +47,12 @@ const (
 // picaFlagGradPredictor indicates the strip was compressed with
 // CompressSingleFrameGrad (CALIC-style predictor) rather than CompressSingleFrame.
 const picaFlagGradPredictor = uint32(1 << 0)
+
+// picaFlagRaw indicates the strip is stored as raw little-endian uint16 pixels
+// (no Delta/RLE/FSE encoding). Set when both avg and grad predictors fail to
+// compress the strip (e.g. a genuinely incompressible high-entropy region).
+// Mutually exclusive with picaFlagGradPredictor.
+const picaFlagRaw = uint32(1 << 1)
 
 // CompressParallelStripsAdaptive compresses pixels using content-adaptive strip
 // boundaries and per-strip predictor selection (tries both avg and grad, keeps
@@ -96,10 +104,16 @@ func CompressParallelStripsAdaptive(pixels []uint16, width, height int, maxValue
 				results[idx] = blobGrad
 				stripFlags[idx] = picaFlagGradPredictor
 				errs[idx] = nil
-			} else {
+			} else if err1 == nil {
 				results[idx] = blobAvg
 				stripFlags[idx] = 0
-				errs[idx] = err1
+				errs[idx] = nil
+			} else {
+				// Both avg and grad failed (genuinely incompressible strip).
+				// Store raw little-endian uint16 pixels; always lossless.
+				results[idx] = rawStripBlob(strip)
+				stripFlags[idx] = picaFlagRaw
+				errs[idx] = nil
 			}
 		}(s)
 	}
@@ -195,7 +209,19 @@ func DecompressParallelStripsAdaptive(compressed []byte) (pixels []uint16, width
 
 			var stripPixels []uint16
 			var decErr error
-			if e.flags&picaFlagGradPredictor != 0 {
+			if e.flags&picaFlagRaw != 0 {
+				// Raw fallback: strip is stored as plain little-endian uint16 pixels.
+				expectedLen := sh * width * 2
+				if e.length != expectedLen {
+					decErrs[idx] = fmt.Errorf("strip %d: raw strip length %d != expected %d", idx, e.length, expectedLen)
+					return
+				}
+				raw := compressed[start:end]
+				stripPixels = make([]uint16, sh*width)
+				for i := range stripPixels {
+					stripPixels[i] = uint16(raw[i*2]) | uint16(raw[i*2+1])<<8
+				}
+			} else if e.flags&picaFlagGradPredictor != 0 {
 				stripPixels, decErr = DecompressSingleFrameGrad(compressed[start:end], width, sh)
 			} else {
 				stripPixels, decErr = DecompressSingleFrame(compressed[start:end], width, sh)
