@@ -30,8 +30,8 @@
 }
 
 % --------------------------------------------------
-\title{A 16-Bit-Native Compression Pipeline for\\
-       Lossless Medical Images}
+\title{A 16-Bit-Native Lossless Compression Pipeline\\
+       for Medical Images}
 
 \author{Kuldeep~Singh%
 \thanks{K.\ Singh is with Innovaccer Inc.
@@ -47,8 +47,8 @@ Code: \url{https://github.com/pappuks/medical-image-codec}.}%
 % ============================================================
 \begin{abstract}
 Medical images must be stored and transmitted losslessly, since a radiologist
-must see exactly what the scanner produced, and they are ``deep,'' carrying
-10--16 bits per pixel rather than the 8 bits of an ordinary photo. That deep
+must see exactly what the scanner produced, and they are ``wide,'' carrying
+10--16 bits per pixel rather than the 8 bits of an ordinary photo. That wide
 format is where most compression tools perform poorly, because nearly all of
 them were adapted from photographic and general-purpose imaging, where pixels
 are 8 bits, rather than designed for medical data. This paper describes MIC
@@ -65,8 +65,7 @@ compression ratio of 3.36$\times$ (within about 2\% of High-Throughput
 JPEG~2000 at 3.42$\times$ and about 88\% of JPEG-LS at 3.84$\times$), and is the
 fastest decoder of the four tested codecs on all 39 images on ARM64 and 36 of 39
 on AMD64. A 20\,KB pure-JavaScript decoder lets the format be decoded directly
-in a web browser. The main caveat is that this is a 39-image study; the results
-are encouraging but need confirmation on larger, multi-hospital datasets.
+in a web browser.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -97,14 +96,19 @@ JPEG-LS~\cite{loco1}, and a basic run-length scheme. Each makes a different
 trade-off between how small the file gets, how fast it decodes, and how complex
 it is to implement~\cite{liu2017,clunie2000}. JPEG~2000 and HTJ2K compress well
 but rely on fairly heavy machinery. JPEG-LS usually gets the smallest files.
-Plain run-length coding is simple but barely compresses.
+Plain run-length coding is simple but offers only modest compression, since it
+works on raw bytes with no prediction step.
 
 Lossless compression for medical images is not new, but a common thread runs
-through these standards: none of them was designed natively for medical imaging.
-Their prediction and entropy stages originated in photographic and
-general-purpose imaging, where pixels are typically 8 bits, and were later
-applied to the 10--16-bit data that medical scanners produce. MIC takes the
-opposite approach and is built from the ground up for medical images.
+through these standards. Their prediction and entropy stages were originally
+developed for photographic and general-purpose continuous-tone imaging, where
+pixels are typically 8 bits, and were later applied to the 10--16-bit data that
+medical scanners produce~\cite{liu2017,clunie2000}. Even JPEG-LS, the most
+widely deployed of them in medical imaging, derives from the LOCO-I design for
+general continuous-tone images~\cite{loco1}; its adoption for medical data came
+afterward. None of these standards was designed from the outset around the
+statistics of high-bit-depth medical images. MIC takes the opposite approach
+and is built from the ground up for medical images.
 
 \subsection{The core problem: most coders assume 8-bit data}
 
@@ -130,8 +134,13 @@ almost always the same (just a sign-extension). A byte-by-byte coder still
 spends bits encoding that high byte even though it is nearly fully
 determined by the low one. On the test images, the information shared
 between the two bytes ranges from 0.3 to 1.1 bits per pixel, which is the
-ceiling on how much a byte-splitting coder is wasting, and MIC's measured
-5--22\% advantage falls within that ceiling.
+ceiling on how much a byte-splitting coder is wasting. This sets an
+expectation for how much can be recovered by keeping the two bytes together.
+Section~\ref{sec:results} reports that MIC produces files 5--22\% smaller than
+Delta + Zstandard, a strong byte-oriented baseline that codes the same residuals
+after splitting them into bytes; that measured per-image size advantage falls
+within the ceiling above, which is consistent with the shared-information
+argument being the main source of the gain.
 
 \paragraph{The residual stream} Throughout, a \emph{residual} is the
 difference between a pixel and a prediction of it. Example: if the predictor
@@ -145,7 +154,7 @@ well.
 MIC is designed around the characteristics of medical images themselves. Such
 images tend to contain large homogeneous regions and comparatively few sharp
 edges or abrupt changes in contrast, and their pixels are commonly 10--16 bits
-deep. Starting from these properties, we surveyed entropy-coding and
+wide. Starting from these properties, we surveyed entropy-coding and
 signal-processing techniques to identify a combination that compresses this kind
 of data well while still decoding at high throughput. The result is a
 three-stage pipeline.
@@ -214,14 +223,11 @@ dimensions relevant to medical image compression.
 
 \begin{table}[htbp]
 \centering
-\caption{Feature comparison of MIC with related codecs and entropy coding
-methods. ``Entropy coder sees 16-bit residual as one symbol'' is a property
-of the entropy stage, not of the codec's overall bit-depth support: JPEG-LS
-and HTJ2K both handle 16-bit medical images, but their entropy stages
-(Golomb--Rice on context bins for JPEG-LS, bit-plane coding for HTJ2K) do
-not treat the predicted residual as a single 16-bit symbol. Source-line
-counts are order-of-magnitude context only; the reference libraries also
-implement standard profiles outside MIC's current scope.}
+\caption{Feature comparison of MIC with related codecs and entropy coders.
+``16-bit residual as one symbol'' concerns the entropy stage only: JPEG-LS and
+HTJ2K handle 16-bit images, but their entropy stages (Golomb--Rice, bit-plane
+coding) do not treat the predicted residual as a single 16-bit symbol.
+Source-line counts are order-of-magnitude context.}
 \label{tab:positioning}
 \scriptsize
 \setlength{\tabcolsep}{3pt}
@@ -231,8 +237,11 @@ implement standard profiles outside MIC's current scope.}
 Feature & JPEG-LS & HTJ2K & Zstd & rANS & MIC \\
 \midrule
 Lossless medical & Yes & Yes & General & General & Yes \\
-Entropy coder sees 16-bit residual as one symbol & No & No & No & Configurable & Yes \\
+16-bit residual as one symbol & No & No & No & Configurable & Yes \\
+Large alphabet (symbol cap) & N/A & N/A & 4,096 & Configurable & 65,535 \\
+Adaptive table sizing & No & No & No & No & Yes \\
 Multi-state ILP & No & No & No & Yes & Yes \\
+Strip-parallel decode & No & Yes & Yes & Yes & Yes \\
 Browser decoder & Via WASM port & Via WASM port & Partial & No & Purpose-built JS \\
 Source lines & 5k & 20k & N/A & N/A & 1.1k \\
 \bottomrule
@@ -359,14 +368,32 @@ also \textbf{sizes its tables to the data}: an 8-bit image stored in 16-bit
 containers (common for MR) shrinks the working tables from ${\sim}512$\,KB down
 to about 2\,KB, which keeps everything in fast cache.
 
-\textbf{Picking the table size automatically.} FSE has a ``tableLog'' knob that
-sets how large and precise the probability table is. MIC selects it based on how
-many distinct values it sees and how much data backs each value: it uses a
-larger table only when there are many active symbols \emph{and} enough data to
-estimate their probabilities reliably (for example, mammography images after
-prediction). On the test set this adaptive choice correctly turned on the
+\textbf{Picking the table size automatically.} FSE has a ``tableLog''
+parameter that sets the size of the probability table: the table has
+$2^{\textit{tableLog}}$ entries, so each increment of tableLog doubles it.
+A larger table represents each symbol's probability at finer granularity, which
+can improve the compression ratio, but it uses more memory and takes longer to
+build, and on a small or low-entropy image the extra precision is wasted. MIC
+sets tableLog from
+two measurements of the post-prediction symbol stream that the entropy stage is
+about to encode:
+\begin{itemize}
+  \item the \textbf{alphabet size} (written $\beta$): the number of distinct
+  symbol values that actually occur in the stream; and
+  \item the \textbf{symbol density} (written $C_r$): the average amount of data
+  backing each symbol, computed as the total number of symbols divided by the
+  alphabet size $\beta$.
+\end{itemize}
+MIC uses the larger table (tableLog~12 instead of the default~11) only when
+\emph{both} quantities are high enough, specifically more than 128 distinct
+symbols ($\beta > 128$) and more than 32 symbols of data per distinct value
+($C_r > 32$). The intuition is that a finer table pays off only when the
+alphabet is genuinely large \emph{and} each of its symbols is observed often
+enough to estimate the extra probabilities reliably; a large alphabet with
+little data per symbol ($C_r$ small) would instead produce noisy frequency
+estimates and waste header space. On the test set this rule turned on the
 larger table for exactly the nine images that benefit (1--10\% better ratio),
-and decode speed is unaffected by the choice.
+with no effect on decode speed.
 Table~\ref{tab:tablelog-ablation} shows the ablation across selected images.
 
 \begin{table}[htbp]
@@ -486,10 +513,7 @@ MR, CR, X-ray, mammography, digital radiography, nuclear medicine, PET,
 fluoroscopy, secondary capture, and tomosynthesis), drawn from the public NEMA
 WG-04 sample sets~\cite{nema_wg04}, the NEMA 1997 CD, a public
 breast-tomosynthesis case~\cite{clunie_tomo}, and additional grayscale slices
-from public GDCM and TCIA collections. It is a varied set but small relative to
-a real clinical archive, so the results are reported as ``on this 39-image
-dataset'' rather than as general claims. Table~\ref{tab:dataset} lists the
-images.
+from public GDCM and TCIA collections. Table~\ref{tab:dataset} lists the images.
 
 \begin{table}[htbp]
 \centering
@@ -556,10 +580,24 @@ AMD64 (AWS Intel Xeon 6). Go code used the standard compiler; C components were
 built with \texttt{-O3}. Each benchmark ran the full image 10 times;
 run-to-run variance stayed under 2\% on ARM64 and 5\% on AMD64.
 
-The ``MIC'' column in the result tables is the fastest available C decoder on
-each platform: the eight-state decoder, with AVX-512 acceleration of the
-run-length and prediction-reversal stages on AMD64. Both read identical
-compressed bytes; only the vector width differs.
+\textbf{The ``MIC'' decoder column.} The single ``MIC'' column in the result
+tables always refers to the fastest available C decoder configuration on each
+platform, so that the comparison against the baselines is C-against-C rather
+than mixing a pure-Go decoder with optimized C libraries. Concretely, this is
+the eight-state decoder: eight independent FSE chains decoded in parallel by the
+out-of-order engine (Section~\ref{sec:multistate}), which is the fastest of the
+1/2/4/8-state configurations on both reference machines. The entropy stage is
+identical across platforms; what differs is the vector width applied to the two
+stages that follow it. On AMD64 the run-length expansion and the
+prediction-reversal (delta-inverse) passes are accelerated with AVX-512, which
+widens those memory-bound loops to process more elements per instruction; on
+ARM64 the same passes run with NEON-width or scalar code. This is purely a
+code-generation difference: both builds read the \emph{identical} compressed
+bytes and produce bit-identical output, so a file encoded once decodes correctly
+on either platform, and the only thing the wider vectors change is decode speed,
+not the bitstream. The same eight-state stream is also what the strip-parallel
+mode (Section~\ref{sec:results}) and the JavaScript decoder consume; they reuse
+this decoder rather than defining a separate format.
 
 \textbf{Browser decoder.} A 20\,KB pure-JavaScript ES module (zero npm
 dependencies) plus a 2.5\,MB Go WebAssembly build. The JS decoder
@@ -718,15 +756,13 @@ FSE loop (one lookup, one bit read, one add) with no hard-to-predict branches.
 HTJ2K and JPEG-LS both have data-dependent branches that cause CPU
 mispredictions. Zstandard is the most comparable codec (same predictor, also
 uses FSE) but works on bytes, so it pays the 2$\times$ byte-splitting cost on
-deep data. On \textbf{ARM64}, MIC is fastest on all 39 images: roughly
+wide data. On \textbf{ARM64}, MIC is fastest on all 39 images: roughly
 1.2--2.1$\times$ HTJ2K, 1.0--2.0$\times$ Zstandard, and 1.1--5.1$\times$
 JPEG-LS, with the largest margins on the smaller images. On \textbf{AMD64}, MIC
 is fastest on 36 of 39 images; on the three exceptions (CT\_BRAIN, MR\_INTERA,
 and the tiny PET\_LUNG study) in-process Zstandard is marginally faster. Across
 its wins MIC runs about 1.0--1.8$\times$ HTJ2K and 1.9--7.1$\times$ JPEG-LS, and
-stays within 0.7--1.8$\times$ of Zstandard; switching from four to eight states
-(plus the AVX-512 widening of the post-entropy stages) is what turned several
-remaining close cases into MIC wins.
+stays within 0.7--1.8$\times$ of Zstandard.
 
 MIC therefore delivers both \textbf{a better ratio than Zstandard on most
 images} (34 of 39) and \textbf{faster decoding on nearly every image}, which
@@ -1066,20 +1102,79 @@ Deployment ease                  & 0.20 & 0.20 & 0.20 & \textbf{1.00} & 0.70 & 0
 \end{tabular}
 \end{table}
 
-\subsection{Limitations}
+\subsection{Future Work}
 
-\textbf{Small dataset.} 39 images across eleven modalities is varied but far from
-a clinical archive; broader validation is needed. \textbf{Tuning on the test
-set.} The adaptive table-size thresholds and the predictor choice were informed
-by this dataset; the rules are simple (two thresholds, one predictor), which
-limits overfitting risk, but larger studies should confirm they generalize.
-\textbf{Baseline coverage.} Stronger byte-oriented baselines (Delta +
-byte/bit-shuffle + Zstd, DICOM RLE) would more sharply isolate the value of the
-16-bit entropy stage; left to future work. \textbf{Reporting.} Tables give
-single representative throughput values rather than full confidence intervals.
-\textbf{Not yet a DICOM transfer syntax.} MIC works on the extracted pixel
-array; real PACS integration would need a private encapsulation or a
-standardization step.
+\textbf{Validation on larger datasets.} The evaluation rests on 39 images across eleven
+modalities. This is varied enough to exercise a wide range of pixel statistics,
+from smooth mammography to noisy computed tomography, but it is far smaller than
+a real clinical archive and is not drawn from a controlled multi-site
+collection. Several modalities are represented by only two or three images, so
+their per-modality means carry little statistical weight, and the geometric
+means can be moved noticeably by a single outlier such as a large-background PET
+study. The dataset also says nothing about how MIC behaves on acquisition
+conditions absent here, such as different reconstruction kernels, vendors,
+bit depths beyond the 10--16-bit range tested, or images with substantial
+acquisition noise. The numbers should therefore be read as evidence on this
+specific set, not as population-level claims; validation on larger,
+multi-hospital datasets with per-modality breakdowns is needed before the ratio
+and speed margins can be treated as general.
+
+\textbf{Held-out parameter tuning.} The adaptive table-size thresholds ($\beta >
+128$, $C_r > 32$) and the choice of the average predictor were informed by this
+same dataset, so there is a risk that they are fitted to it rather than to
+medical images in general. Two factors limit, but do not eliminate, that risk:
+the rules are deliberately coarse (two integer thresholds and a single fixed
+predictor, with no per-image search), and the thresholds gate a modest 1--10\%
+ratio gain on a minority of images rather than driving the headline result.
+Even so, a properly held-out study, with the thresholds frozen on one collection
+and measured on a disjoint one, is required to show they generalize.
+
+\textbf{Stronger baselines.} The comparison covers HTJ2K, JPEG-LS, and Delta +
+Zstandard, but omits baselines that would more sharply isolate where MIC's
+advantage comes from. In particular, a byte-oriented pipeline with an explicit
+byte- or bit-shuffle stage before Zstandard, and the basic DICOM run-length
+syntax, would separate the benefit of the 16-bit-native entropy stage from the
+benefit of prediction alone. Research codecs that compress better on natural
+images, such as CALIC~\cite{wu1997} and FLIF~\cite{sneyers2016}, and the newer
+JPEG~XL, are also not included because they are not DICOM-deployable today;
+their absence means the upper end of achievable lossless ratio is not bracketed
+here. Adding these baselines is left to future work.
+
+\subsection{Adding MIC as a DICOM Transfer Syntax}
+
+The evaluation so far operates on the extracted pixel array. To be usable in a
+real clinical workflow, MIC has to be carried inside a DICOM object that
+existing systems can route, store, and display, which means defining it as a
+DICOM transfer syntax. We sketch the path here.
+
+\textbf{Encapsulation.} A transfer syntax specifies how the pixel data is
+serialised into the Pixel Data element (7FE0,0010). MIC fits the existing
+\emph{encapsulated} pixel-data model that JPEG~2000 and JPEG-LS already use:
+the element is encoded with undefined length as a sequence of fragments
+preceded by a Basic Offset Table, and each frame's MIC bitstream is stored as
+one (or more) fragment items. Because MIC already produces a self-contained
+per-image bitstream with its own header (Table~\ref{tab:format}), and a
+multi-frame container for tomosynthesis, the mapping to fragments is direct and
+does not require changing the codec.
+
+\textbf{Identification and attributes.} The syntax needs a registered Transfer
+Syntax UID under the DICOM root, and the associated image-pixel attributes
+(Bits Allocated, Bits Stored, High Bit, Pixel Representation, Photometric
+Interpretation, Planar Configuration) must be defined so that a receiver can
+reconstruct the array unambiguously. Because MIC is lossless and operates on
+the native sample values, these attributes carry over from the source object
+without the value re-scaling that lossy syntaxes require.
+
+\textbf{Standardisation path and an interim option.} Formal adoption would
+proceed through a DICOM Change Proposal: a public specification of the
+bitstream, the encapsulation rules, and conformance test vectors, reviewed by
+the relevant DICOM Working Group. In the interim, two of the partners on a link
+can negotiate MIC as a privately agreed transfer syntax (a private UID) or carry
+the bitstream in a private data element, which allows deployment inside a
+controlled environment before standardisation completes. A reference encoder and
+decoder, plus a published set of conformance images, would be the practical
+prerequisites for either route, and are the natural next deliverable beyond the
+open-source codec.
 
 % ============================================================
 \section{Conclusion}
@@ -1093,9 +1188,9 @@ while being the fastest decoder on all 39 images on ARM64 and 36/39 on AMD64,
 and the fastest encoder on 38/39 ARM64 images and 32/39 on AMD64. A 20\,KB JavaScript
 decoder and a WebAssembly build show the format can be decoded client-side in a
 browser. Future work: larger multi-hospital datasets; stronger shuffle-based
-baselines; full statistical reporting; an ARM64 vector kernel for the wavelet
-variant; and benchmarking the JavaScript decoder in real browsers. MIC is open
-source: \url{https://github.com/pappuks/medical-image-codec}.
+baselines; defining MIC as a DICOM transfer syntax; an ARM64 vector kernel for
+the wavelet variant; and benchmarking the JavaScript decoder in real browsers.
+MIC is open source: \url{https://github.com/pappuks/medical-image-codec}.
 
 % ============================================================
 \begin{thebibliography}{99}
