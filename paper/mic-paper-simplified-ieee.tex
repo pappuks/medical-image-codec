@@ -208,8 +208,11 @@ aimed at high-bit-depth images, with strong speed and easy deployment.
 (ANS)~\cite{duda2009,duda2013} is a family of entropy coders that replaces
 arithmetic coding's interval math with simple integer state updates. FSE is a
 fast, table-driven version of ANS~\cite{fse} made popular by
-Zstandard~\cite{rfc8878}. The limitation is that these implementations are
-tuned for byte streams (Zstandard caps FSE at 4,096 symbols).
+Zstandard~\cite{rfc8878}. Coding directly over a large, multi-symbol alphabet
+rather than a byte stream is not itself new; for example, Mahapatra and Singh
+built a multi-alphabet arithmetic coder in FPGA hardware~\cite{mahapatra2007}.
+The limitation is that the widely deployed software implementations are tuned
+for byte streams (Zstandard caps FSE at 4,096 symbols).
 
 \textbf{Parallel ANS.} Prior work has shown that ANS decoders run faster when
 several independent streams are decoded at once (Giesen on interleaved
@@ -1247,6 +1250,12 @@ Y.\,Collet, ``Finite State Entropy---A new breed of entropy coder,''
 Y.\,Collet and M.\,Kucherawy,
 ``Zstandard Compression and the `application/zstd' Media Type,''
 RFC~8878, IETF, Feb.\,2021.
+
+\bibitem{mahapatra2007}
+S.\,Mahapatra and K.\,Singh,
+``An FPGA-based implementation of multi-alphabet arithmetic coding,''
+\textit{IEEE Trans.\ Circuits Syst.\ I}, vol.\,54, no.\,8, pp.\,1678--1686,
+2007.
 
 \bibitem{giesen2014}
 F.\,Giesen, ``Interleaved entropy coders,'' arXiv:1402.3392, 2014.
