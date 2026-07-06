@@ -155,7 +155,7 @@ def table_ratios(data):
     wav = data.get("WaveletV2SIMDRLEFSECompress", {}).get("_", {})
 
     headers = ["Image", "Raw(MB)", "Δ+Zstd-19", "MIC",
-               "Wavelet", "PICS-4", "PICS-8", "HTJ2K", "JPEG-LS"]
+               "Wavelet", "PICS-4", "PICS-8", "HTJ2K", "JPEG-LS", "JPEG-XL"]
     rows = []
     for img in IMAGE_ORDER:
         zstd_ratio = (zstd_ip.get("Zstd-19", {}).get(img, (None, None)))[1]
@@ -171,6 +171,7 @@ def table_ratios(data):
             fmt_ratio((allc.get("PICS-8", {}).get(img, (None, None)))[1]),
             fmt_ratio((allc.get("HTJ2K", {}).get(img, (None, None)))[1]),
             fmt_ratio((allc.get("JPEGLS", {}).get(img, (None, None)))[1]),
+            fmt_ratio((allc.get("JXL", {}).get(img, (None, None)))[1]),
         ])
     return render_table(
         "Table 1 — Lossless compression ratios (paper tab:ratios)",
@@ -197,11 +198,11 @@ def table_encode(data):
     src = data.get("AllCodecsEncode", {})
     variants = ["MIC-Go", "MIC-4state", "MIC-8state",
                 "MIC-4state-C", "MIC-8state-C", "MIC-C",
-                "Wavelet+SIMD", "HTJ2K", "JPEGLS",
+                "Wavelet+SIMD", "HTJ2K", "JPEGLS", "JXL",
                 "PICS-2", "PICS-4", "PICS-8"]
     labels = ["MIC-Go", "MIC-4s", "MIC-8s",
               "MIC-4s-C", "MIC-8s-C", "MIC-C",
-              "Wav+SIMD", "HTJ2K", "JPEG-LS",
+              "Wav+SIMD", "HTJ2K", "JPEG-LS", "JPEG-XL",
               "PICS-2", "PICS-4", "PICS-8"]
     return _throughput_table(
         "Table 2/3 — Encoding throughput, MB/s (paper tab:enc-*)",
@@ -215,12 +216,12 @@ def table_decompress(data):
     variants = ["MIC-Go", "MIC-4state", "MIC-8state",
                 "MIC-4state-C", "MIC-8state-C",
                 "MIC-4state-SIMD", "MIC-8state-SIMD",
-                "__wavelet__", "HTJ2K", "JPEGLS",
+                "__wavelet__", "HTJ2K", "JPEGLS", "JXL",
                 "PICS-C-2", "PICS-C-4", "PICS-C-8"]
     labels = ["MIC-Go", "MIC-4s", "MIC-8s",
               "MIC-4s-C", "MIC-8s-C",
               "MIC-4s-SIMD", "MIC-8s-SIMD",
-              "Wav+SIMD", "HTJ2K", "JPEG-LS",
+              "Wav+SIMD", "HTJ2K", "JPEG-LS", "JPEG-XL",
               "PICS-C-2", "PICS-C-4", "PICS-C-8"]
     return _throughput_table(
         "Table 4/5 — Decompression throughput, MB/s (paper tab:decomp-*)",

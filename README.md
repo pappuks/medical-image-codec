@@ -17,6 +17,7 @@ The key insight: DICOM stores pixels at 10–16 bits per sample, but every mains
 | Peak decompression speed | up to 16 GB/s (ARM64, 64 cores); ~7.5 GB/s geometric mean |
 | vs. HTJ2K speed | Faster on all modalities (single-thread); PICS-C-8 exceeds HTJ2K on all 39 test images |
 | vs. JPEG-LS | Consistently faster decompression; better or equal ratio |
+| vs. JPEG-XL | JPEG-XL compresses better (top ratio on 34/39 modalities), but MIC decodes 6–11× faster and encodes 30–100× faster |
 | vs. Delta+Zstandard | ~10% better compression ratio (geometric mean; 16-bit alphabet advantage) |
 | Implementations | Pure Go · C + pthreads + BMI2/NEON SIMD · JavaScript ES module · Go WebAssembly |
 | Browser throughput | up to 559 MB/s (14-core M4 Pro, PICS parallel strips via `worker_threads`) |
@@ -264,49 +265,49 @@ For throughput scaling numbers, the C/pthreads API, and format specification, se
 
 All images are 16-bit greyscale DICOM (39-image corpus). Compression ratios are CPU-independent; values below are from the `BenchmarkAllCodecs` run (`-tags cgo_ojph`, Apple M4 Pro reference).
 
-| Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | HTJ2K | JPEG-LS |
-|-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:-----:|:-------:|
-| MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.38× | **2.52×** |
-| CT (512×512) | 0.50 | 2.24× | 2.24× | 1.67× | 2.15× | 1.96× | 1.77× | **2.68×** |
-| CR (2140×1760) | 7.18 | 3.69× | 3.69× | 3.81× | 3.70× | 3.71× | 3.77× | **3.96×** |
-| XR (2048×2577) | 10.1 | 1.74× | 1.74× | **1.76×** | 1.75× | 1.75× | 1.67× | **1.76×** |
-| MG1 (2457×1996) | 9.35 | 8.78× | 8.78× | 8.66× | 8.84× | 8.87× | 8.25× | **8.91×** |
-| MG2 (2457×1996) | 9.35 | 8.77× | 8.77× | 8.65× | 8.83× | 8.85× | 8.24× | **8.90×** |
-| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.31× | 2.31× | 2.33× | 2.22× | **2.38×** |
-| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.58× | 3.62× | 3.51× | **3.71×** |
-| CT1 (512×512) | 0.50 | 2.79× | 2.79× | 2.48× | 2.54× | 2.29× | 2.70× | **3.19×** |
-| CT2 (512×512) | 0.50 | 3.48× | 3.48× | 2.87× | 3.11× | 2.72× | 3.29× | **4.54×** |
-| MG-N (3064×4664) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.23× | **2.38×** |
-| MR1 (512×512) | 0.50 | 2.09× | 2.09× | 2.14× | 2.10× | 2.08× | 2.13× | **2.30×** |
-| MR2 (1024×1024) | 2.00 | 3.28× | 3.28× | 3.34× | 3.31× | 3.31× | 3.35× | **3.52×** |
-| MR3 (512×512) | 0.50 | 3.92× | 3.92× | 4.09× | 3.89× | 3.83× | 4.33× | **4.51×** |
-| MR4 (512×512) | 0.50 | 4.12× | 4.12× | 4.18× | 4.09× | 4.03× | 4.21× | **4.49×** |
-| NM1 (256×1024) | 0.50 | 5.15× | 5.15× | 5.01× | 5.25× | 5.28× | 5.76× | **6.28×** |
-| RG1 (1841×1955) | 6.86 | 1.70× | 1.70× | 1.70× | 1.70× | 1.69× | 1.63× | **1.72×** |
-| RG2 (1760×2140) | 7.18 | 4.23× | 4.23× | 4.32× | 4.28× | 4.30× | 4.32× | **4.51×** |
-| RG3 (1760×1760) | 5.91 | 6.08× | 6.08× | 6.82× | 6.11× | 6.12× | 6.99× | **7.31×** |
-| SC1 (2048×2487) | 9.71 | 3.71× | 3.71× | 3.70× | 3.73× | 3.73× | 3.85× | **4.73×** |
-| XA1 (1024×1024) | 2.00 | 5.01× | 5.01× | 4.94× | 5.04× | 5.03× | 4.88× | **5.39×** |
-| CT_BRAIN (512×512) | 0.50 | 3.06× | 3.06× | 2.89× | 2.77× | 2.47× | 3.39× | **4.28×** |
-| CT_ANKLE (512×512) | 0.50 | **9.48×** | **9.48×** | 5.02× | 9.30× | 9.14× | 4.97× | 6.87× |
-| CT_ORT (512×512) | 0.50 | 2.68× | 2.68× | 2.38× | 2.51× | 2.26× | 2.56× | **3.00×** |
-| CT_CHEST (400×512) | 0.39 | 2.82× | 2.82× | 2.10× | 2.52× | 2.21× | 2.23× | **3.22×** |
-| MR_HEAD (256×256) | 0.13 | 2.61× | 2.61× | 2.65× | 2.57× | 2.53× | 2.67× | **2.86×** |
-| MR_INTERA (1024×1024) | 2.00 | 3.68× | 3.68× | 4.05× | 3.75× | 3.78× | 5.04× | **5.08×** |
-| DX_HAND (1480×1410) | 3.98 | 2.24× | 2.24× | 2.35× | 2.26× | 2.25× | 2.37× | **2.48×** |
-| DX_CHEST (1416×1420) | 3.84 | 1.66× | 1.66× | **1.82×** | 1.65× | 1.63× | 1.63× | 1.70× |
-| CR_THORAX (2076×1876) | 7.43 | 1.82× | 1.82× | 1.81× | 1.84× | 1.83× | 1.81× | **1.90×** |
-| PET1 (256×256) | 0.13 | 2.74× | 2.74× | 2.81× | 2.64× | 2.52× | 3.02× | **3.21×** |
-| PET2 (256×256) | 0.13 | 3.38× | 3.38× | 3.48× | 3.16× | 2.58× | 4.37× | **4.74×** |
-| CT_LUNG (512×512) | 0.50 | 2.73× | 2.73× | 2.45× | 2.50× | 2.25× | 2.67× | **3.15×** |
-| CT_PANCREAS (512×512) | 0.50 | 2.36× | 2.36× | 1.76× | 2.18× | 1.98× | 1.85× | **2.70×** |
-| MR_BRAIN (320×256) | 0.16 | 7.26× | 7.26× | 6.75× | 7.31× | 7.24× | 7.62× | **8.46×** |
-| MR_BREAST (256×256) | 0.13 | 4.01× | 4.01× | 3.94× | 4.00× | 3.91× | 4.10× | **4.48×** |
-| MR_PROSTATE (320×320) | 0.20 | 2.30× | 2.30× | 2.34× | 2.28× | 2.26× | 2.49× | **2.65×** |
-| PET_PSMA (200×200) | 0.08 | 10.11× | 10.11× | 7.67× | 1.20× | 1.18× | 13.92× | **15.78×** |
-| PET_LUNG (200×200) | 0.08 | 2.97× | 2.97× | 2.97× | 1.00× | 1.03× | 5.21× | **5.62×** |
+| Image | Raw (MB) | MIC | MIC-4state | Wavelet | PICS-4 | PICS-8 | HTJ2K | JPEG-LS | JPEG-XL |
+|-------|:--------:|:---:|:----------:|:-------:|:------:|:------:|:-----:|:-------:|:-------:|
+| MR (256×256) | 0.13 | 2.35× | 2.35× | 2.38× | 2.28× | 2.21× | 2.38× | 2.52× | **2.56×** |
+| CT (512×512) | 0.50 | 2.24× | 2.24× | 1.67× | 2.15× | 1.96× | 1.77× | **2.68×** | 2.61× |
+| CR (2140×1760) | 7.18 | 3.69× | 3.69× | 3.81× | 3.70× | 3.71× | 3.77× | 3.96× | **4.06×** |
+| XR (2048×2577) | 10.1 | 1.74× | 1.74× | 1.76× | 1.75× | 1.75× | 1.67× | 1.76× | **2.08×** |
+| MG1 (2457×1996) | 9.35 | 8.78× | 8.78× | 8.66× | 8.84× | 8.87× | 8.25× | 8.91× | **9.42×** |
+| MG2 (2457×1996) | 9.35 | 8.77× | 8.77× | 8.65× | 8.83× | 8.85× | 8.24× | 8.90× | **9.41×** |
+| MG3 (4774×3064) | 27.3 | 2.24× | 2.24× | 2.31× | 2.31× | 2.33× | 2.22× | **2.38×** | 2.34× |
+| MG4 (4096×3328) | 26.0 | 3.47× | 3.47× | 3.59× | 3.58× | 3.62× | 3.51× | 3.71× | **4.01×** |
+| CT1 (512×512) | 0.50 | 2.79× | 2.79× | 2.48× | 2.54× | 2.29× | 2.70× | 3.19× | **3.29×** |
+| CT2 (512×512) | 0.50 | 3.48× | 3.48× | 2.87× | 3.11× | 2.72× | 3.29× | 4.54× | **4.92×** |
+| MG-N (3064×4664) | 27.3 | 2.24× | 2.24× | 2.32× | 2.31× | 2.34× | 2.23× | **2.38×** | 2.34× |
+| MR1 (512×512) | 0.50 | 2.09× | 2.09× | 2.14× | 2.10× | 2.08× | 2.13× | 2.30× | **2.34×** |
+| MR2 (1024×1024) | 2.00 | 3.28× | 3.28× | 3.34× | 3.31× | 3.31× | 3.35× | 3.52× | **3.63×** |
+| MR3 (512×512) | 0.50 | 3.92× | 3.92× | 4.09× | 3.89× | 3.83× | 4.33× | 4.51× | **4.82×** |
+| MR4 (512×512) | 0.50 | 4.12× | 4.12× | 4.18× | 4.09× | 4.03× | 4.21× | 4.49× | **4.86×** |
+| NM1 (256×1024) | 0.50 | 5.15× | 5.15× | 5.01× | 5.25× | 5.28× | 5.76× | 6.28× | **6.72×** |
+| RG1 (1841×1955) | 6.86 | 1.70× | 1.70× | 1.70× | 1.70× | 1.69× | 1.63× | **1.72×** | **1.72×** |
+| RG2 (1760×2140) | 7.18 | 4.23× | 4.23× | 4.32× | 4.28× | 4.30× | 4.32× | 4.51× | **5.33×** |
+| RG3 (1760×1760) | 5.91 | 6.08× | 6.08× | 6.82× | 6.11× | 6.12× | 6.99× | 7.31× | **7.77×** |
+| SC1 (2048×2487) | 9.71 | 3.71× | 3.71× | 3.70× | 3.73× | 3.73× | 3.85× | 4.73× | **5.08×** |
+| XA1 (1024×1024) | 2.00 | 5.01× | 5.01× | 4.94× | 5.04× | 5.03× | 4.88× | 5.39× | **5.58×** |
+| CT_BRAIN (512×512) | 0.50 | 3.06× | 3.06× | 2.89× | 2.77× | 2.47× | 3.39× | 4.28× | **4.80×** |
+| CT_ANKLE (512×512) | 0.50 | 9.48× | 9.48× | 5.02× | 9.30× | 9.14× | 4.97× | 6.87× | **19.91×** |
+| CT_ORT (512×512) | 0.50 | 2.68× | 2.68× | 2.38× | 2.51× | 2.26× | 2.56× | 3.00× | **3.04×** |
+| CT_CHEST (400×512) | 0.39 | 2.82× | 2.82× | 2.10× | 2.52× | 2.21× | 2.23× | 3.22× | **3.30×** |
+| MR_HEAD (256×256) | 0.13 | 2.61× | 2.61× | 2.65× | 2.57× | 2.53× | 2.67× | 2.86× | **2.96×** |
+| MR_INTERA (1024×1024) | 2.00 | 3.68× | 3.68× | 4.05× | 3.75× | 3.78× | 5.04× | 5.08× | **6.56×** |
+| DX_HAND (1480×1410) | 3.98 | 2.24× | 2.24× | 2.35× | 2.26× | 2.25× | 2.37× | 2.48× | **2.61×** |
+| DX_CHEST (1416×1420) | 3.84 | 1.66× | 1.66× | **1.82×** | 1.65× | 1.63× | 1.63× | 1.70× | 1.70× |
+| CR_THORAX (2076×1876) | 7.43 | 1.82× | 1.82× | 1.81× | 1.84× | 1.83× | 1.81× | 1.90× | **1.91×** |
+| PET1 (256×256) | 0.13 | 2.74× | 2.74× | 2.81× | 2.64× | 2.52× | 3.02× | 3.21× | **3.56×** |
+| PET2 (256×256) | 0.13 | 3.38× | 3.38× | 3.48× | 3.16× | 2.58× | 4.37× | 4.74× | **5.41×** |
+| CT_LUNG (512×512) | 0.50 | 2.73× | 2.73× | 2.45× | 2.50× | 2.25× | 2.67× | 3.15× | **3.28×** |
+| CT_PANCREAS (512×512) | 0.50 | 2.36× | 2.36× | 1.76× | 2.18× | 1.98× | 1.85× | 2.70× | **2.72×** |
+| MR_BRAIN (320×256) | 0.16 | 7.26× | 7.26× | 6.75× | 7.31× | 7.24× | 7.62× | 8.46× | **8.58×** |
+| MR_BREAST (256×256) | 0.13 | 4.01× | 4.01× | 3.94× | 4.00× | 3.91× | 4.10× | 4.48× | **4.64×** |
+| MR_PROSTATE (320×320) | 0.20 | 2.30× | 2.30× | 2.34× | 2.28× | 2.26× | 2.49× | 2.65× | **2.82×** |
+| PET_PSMA (200×200) | 0.08 | 10.11× | 10.11× | 7.67× | 1.20× | 1.18× | 13.92× | 15.78× | **17.85×** |
+| PET_LUNG (200×200) | 0.08 | 2.97× | 2.97× | 2.97× | 1.00× | 1.03× | 5.21× | 5.62× | **6.74×** |
 
-MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) and can fall back to near-raw on the smallest 200×200 PET frames, but improves ratio on large CR/MG images where strip-local FSE table adaptation helps. JPEG-LS achieves the highest ratio on most images (37 of 39; MIC wins CT_ANKLE and the wavelet pipeline wins DX_CHEST) but at 3–6× lower decompression throughput (see Performance table below).
+MIC and MIC-4state encode identically — the 4-state variant only unlocks a faster decoder. PICS strips compress independently, which slightly reduces ratio on small images (MR, CT) and can fall back to near-raw on the smallest 200×200 PET frames, but improves ratio on large CR/MG images where strip-local FSE table adaptation helps. JPEG-XL (libjxl modular, effort 7) achieves the highest ratio on most images (34 of 39, plus a tie with JPEG-LS on RG1); JPEG-LS remains best on CT, MG3, and MG-N, and the wavelet pipeline on DX_CHEST. Both transform/context codecs pay for their ratio in decode speed: JPEG-LS decompresses 3–6× slower than MIC and JPEG-XL 6–11× slower (see Performance tables below), and JPEG-XL's effort-7 encoder is roughly 30–100× slower than MIC's. JPEG-XL's ratio lead is largest on smooth low-entropy studies (CT_ANKLE 19.91× vs MIC 9.48×, PET_PSMA 17.85× vs 10.11×) where its adaptive context modeling and larger prediction neighborhood pay off.
 
 `CompressSingleFrameGapRemoval` adds +0.45% on CT (2.237× → **2.247×**) by collapsing the 65536-symbol RLE alphabet to the 1782 symbols that actually occur, via a delta-encoded expand map (1798 bytes overhead). Other modalities are unaffected. See [docs/compression-results.md](./docs/compression-results.md).
 
@@ -331,31 +332,31 @@ For predictor comparisons (MED, Zstandard) and WSI results, see [docs/compressio
 
 > **Note:** The per-image throughput tables below are reference values measured on the original 21-image corpus on the machines named in each header (Apple M2 Max, Intel Core Ultra 9 285K). They have not been regenerated for the 39-image corpus. The current paper-quality single-threaded throughput numbers (Apple M4 Pro / AWS c8i, all 39 images on both ARM64 and AMD64) live in the paper tables and in `results/<timestamp>/paper-tables.txt` from `./run-paper-benchmarks.sh`.
 
-**Decompression throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`). C variants compiled with `-O3` (no `-march=native` on ARM64; `MIC-4state-SIMD` = `MIC-4state-C` scalar fallback — no AVX2). PICS-C-N uses C pthreads with N concurrent threads. ⊕ Pure-Go `DecompressParallelStrips` (no CGO) achieves ~60–70% of PICS-C throughput.
+**Decompression throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecs` (`-tags cgo_ojph`, `-benchtime=10x`). C variants compiled with `-O3` (no `-march=native` on ARM64; `MIC-4state-SIMD` = `MIC-4state-C` scalar fallback — no AVX2). PICS-C-N uses C pthreads with N concurrent threads. ⊕ Pure-Go `DecompressParallelStrips` (no CGO) achieves ~60–70% of PICS-C throughput. JPEG-XL is libjxl 0.11 modular lossless (effort 7); it is the slowest to decode in every row (~29–55 MB/s, 6–11× below MIC-4state) — the cost of its context-modeling gains in the ratio table above.
 
-| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-C-2 | PICS-C-4 | PICS-C-8 | HTJ2K | JPEG-LS |
-|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:--------:|:--------:|:--------:|:-----:|:-------:|
-| MR (256×256) | 0.13 | 144 | 207 | 348 | _377_ | 248 | 530 | **710** | 482 ⚠ | 265 | 102 |
-| CT (512×512) | 0.50 | 191 | 245 | 356 | _372_ | 316 | 524 | 955 | **1092** | 307 | 137 |
-| CR (2140×1760) | 7.18 | 296 | 338 | 524 | 529 | _567_ | 867 | 1635 | **2661** | 367 | 153 |
-| XR (2048×2577) | 10.1 | 308 | 341 | 533 | 532 | _627_ | 874 | 1666 | **3025** | 334 | 108 |
-| MG1 (2457×1996) | 9.35 | 482 | 514 | 683 | 682 | 678 | 1205 | 2112 | **3656** | _810_ | 409 |
-| MG2 (2457×1996) | 9.35 | 479 | 514 | 686 | 684 | 697 | 1225 | 2120 | **3773** | _790_ | 416 |
-| MG3 (4774×3064) | 27.3 | 308 | 347 | _531_ | _531_ | 422 | 864 | 1673 | **3117** | 338 | 153 |
-| MG4 (4096×3328) | 26.0 | 417 | 444 | 625 | _624_ | 516 | 1093 | 2004 | **3689** | 548 | 184 |
-| CT1 (512×512) | 0.50 | 239 | 289 | 436 | _436_ | 425 | 686 | 1013 | **1183** | 362 | 182 |
-| CT2 (512×512) | 0.50 | 238 | 281 | 439 | 442 | _481_ | 676 | 1041 | **1189** | 375 | 175 |
-| MG-N (3064×4664) | 27.3 | 316 | 352 | 536 | _537_ | 468 | 883 | 1711 | **3175** | 340 | 153 |
-| MR1 (512×512) | 0.50 | 278 | 325 | 521 | _527_ | 435 | 751 | 1207 | **1402** | 325 | 116 |
-| MR2 (1024×1024) | 2.00 | 333 | 373 | 563 | _568_ | 498 | 913 | 1552 | **2466** | 388 | 172 |
-| MR3 (512×512) | 0.50 | 375 | 417 | 639 | _643_ | 507 | 908 | 1430 | **1614** | 441 | 236 |
-| MR4 (512×512) | 0.50 | 316 | 362 | 571 | _574_ | 479 | 818 | 1341 | **1558** | 406 | 197 |
-| NM1 (256×1024) | 0.50 | 327 | 375 | _632_ | 624 | 575 | 888 | 1400 | **1679** | 410 | 210 |
-| RG1 (1841×1955) | 6.86 | 235 | 298 | 406 | 408 | _584_ | 602 | 1128 | **2017** | 332 | 104 |
-| RG2 (1760×2140) | 7.18 | 367 | 402 | 590 | 594 | _644_ | 986 | 1803 | **3194** | 443 | 193 |
-| RG3 (1760×1760) | 5.91 | 374 | 410 | 604 | 610 | _656_ | 1035 | 1944 | **3302** | 562 | 246 |
-| SC1 (2048×2487) | 9.71 | 375 | 405 | 587 | _588_ | 388 | 1017 | 1861 | **3279** | 401 | 229 |
-| XA1 (1024×1024) | 2.00 | 331 | 371 | _576_ | 575 | 459 | 928 | 1583 | **2493** | 419 | 204 |
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-C-2 | PICS-C-4 | PICS-C-8 | HTJ2K | JPEG-LS | JPEG-XL |
+|-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:--------:|:--------:|:--------:|:-----:|:-------:|:-------:|
+| MR (256×256) | 0.13 | 144 | 207 | 348 | _377_ | 248 | 530 | **710** | 482 ⚠ | 265 | 102 | 29 |
+| CT (512×512) | 0.50 | 191 | 245 | 356 | _372_ | 316 | 524 | 955 | **1092** | 307 | 137 | 33 |
+| CR (2140×1760) | 7.18 | 296 | 338 | 524 | 529 | _567_ | 867 | 1635 | **2661** | 367 | 153 | 44 |
+| XR (2048×2577) | 10.1 | 308 | 341 | 533 | 532 | _627_ | 874 | 1666 | **3025** | 334 | 108 | 30 |
+| MG1 (2457×1996) | 9.35 | 482 | 514 | 683 | 682 | 678 | 1205 | 2112 | **3656** | _810_ | 409 | 55 |
+| MG2 (2457×1996) | 9.35 | 479 | 514 | 686 | 684 | 697 | 1225 | 2120 | **3773** | _790_ | 416 | 55 |
+| MG3 (4774×3064) | 27.3 | 308 | 347 | _531_ | _531_ | 422 | 864 | 1673 | **3117** | 338 | 153 | 29 |
+| MG4 (4096×3328) | 26.0 | 417 | 444 | 625 | _624_ | 516 | 1093 | 2004 | **3689** | 548 | 184 | 41 |
+| CT1 (512×512) | 0.50 | 239 | 289 | 436 | _436_ | 425 | 686 | 1013 | **1183** | 362 | 182 | 39 |
+| CT2 (512×512) | 0.50 | 238 | 281 | 439 | 442 | _481_ | 676 | 1041 | **1189** | 375 | 175 | 42 |
+| MG-N (3064×4664) | 27.3 | 316 | 352 | 536 | _537_ | 468 | 883 | 1711 | **3175** | 340 | 153 | 29 |
+| MR1 (512×512) | 0.50 | 278 | 325 | 521 | _527_ | 435 | 751 | 1207 | **1402** | 325 | 116 | 32 |
+| MR2 (1024×1024) | 2.00 | 333 | 373 | 563 | _568_ | 498 | 913 | 1552 | **2466** | 388 | 172 | 42 |
+| MR3 (512×512) | 0.50 | 375 | 417 | 639 | _643_ | 507 | 908 | 1430 | **1614** | 441 | 236 | 47 |
+| MR4 (512×512) | 0.50 | 316 | 362 | 571 | _574_ | 479 | 818 | 1341 | **1558** | 406 | 197 | 41 |
+| NM1 (256×1024) | 0.50 | 327 | 375 | _632_ | 624 | 575 | 888 | 1400 | **1679** | 410 | 210 | 46 |
+| RG1 (1841×1955) | 6.86 | 235 | 298 | 406 | 408 | _584_ | 602 | 1128 | **2017** | 332 | 104 | 35 |
+| RG2 (1760×2140) | 7.18 | 367 | 402 | 590 | 594 | _644_ | 986 | 1803 | **3194** | 443 | 193 | 44 |
+| RG3 (1760×1760) | 5.91 | 374 | 410 | 604 | 610 | _656_ | 1035 | 1944 | **3302** | 562 | 246 | 55 |
+| SC1 (2048×2487) | 9.71 | 375 | 405 | 587 | _588_ | 388 | 1017 | 1861 | **3279** | 401 | 229 | 39 |
+| XA1 (1024×1024) | 2.00 | 331 | 371 | _576_ | 575 | 459 | 928 | 1583 | **2493** | 419 | 204 | 48 |
 
 MIC-4state-C/SIMD and PICS-C require CGO (`-tags cgo_ojph`); MIC-Go, MIC-4state, and Wavelet+SIMD are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best PICS-C throughput per row. ⚠ MR (256×256) too small for PICS-C-8 — thread overhead dominates; PICS-C-4 is best. ⚠ On ARM64, `MIC-4state-SIMD` falls back to scalar C (`NO_SIMD_AVAILABLE`); numbers ≈ `MIC-4state-C`. PICS-C-8 beats HTJ2K on all 21 images; MIC-4state-SIMD beats HTJ2K on 17/21 images single-threaded.
 
@@ -370,7 +371,7 @@ Run with: `go test -benchmem -run=^$ -benchtime=30x -bench ^BenchmarkFSEDecompre
 
 ---
 
-**Decompression throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecs` (`-tags cgo_ojph`, C variants compiled with `-O3 -march=native`). Wavelet+SIMD from a separate `BenchmarkWaveletV2SIMDRLEFSECompress` run (pure Go). PICS-C-N uses C pthreads + SIMD auto-detect inner decoder with N concurrent threads. ⊕ Pure-Go `DecompressParallelStrips` (no CGO) achieves ~60–70% of PICS-C throughput.
+**Decompression throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecs` (`-tags cgo_ojph`, C variants compiled with `-O3 -march=native`). Wavelet+SIMD from a separate `BenchmarkWaveletV2SIMDRLEFSECompress` run (pure Go). PICS-C-N uses C pthreads + SIMD auto-detect inner decoder with N concurrent threads. ⊕ Pure-Go `DecompressParallelStrips` (no CGO) achieves ~60–70% of PICS-C throughput. JPEG-XL is omitted from the AMD64 tables — it was only benchmarked on the M2 Max reference machine; `BenchmarkAllCodecs` emits a `JXL` column on any platform with libjxl installed.
 
 | Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-4state-SIMD | Wavelet+SIMD | PICS-C-2 | PICS-C-4 | PICS-C-8 | HTJ2K | JPEG-LS |
 |-------|:--------:|:------:|:----------:|:------------:|:---------------:|:------------:|:--------:|:--------:|:--------:|:-----:|:-------:|
@@ -398,39 +399,39 @@ Run with: `go test -benchmem -run=^$ -benchtime=30x -bench ^BenchmarkFSEDecompre
 
 MIC-4state-C/SIMD and PICS-C require CGO (`-tags cgo_ojph`); MIC-Go, MIC-4state, and Wavelet+SIMD are pure Go. _Italic_ = best single-threaded throughput per row. **Bold** = best PICS-C throughput per row. ⚠ MR (256×256) is too small for multi-threading. PICS-C-8 shows diminishing returns for highly compressed (MG2, RG3) or small (0.5 MB) images — use PICS-C-4 instead. PICS-C uses C pthreads + SIMD auto-detecting inner decoder with only **1 output-buffer allocation** vs Go PICS which allocates per-strip intermediate buffers. Notable: with `-O3 -march=native`, MIC-4state-SIMD beats HTJ2K on 18/21 images single-threaded; PICS-C-8 beats HTJ2K on all 21 images.
 
-**Encoding (compression) throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecsEncode` (`-tags cgo_ojph`, `-benchtime=10x`). All codecs run in-process; no subprocess or file-I/O overhead. MIC-4state-C and MIC-C are C encoders via CGO; all others are pure Go.
+**Encoding (compression) throughput** (MB/s) — Apple M2 Max (ARM64), `BenchmarkAllCodecsEncode` (`-tags cgo_ojph`, `-benchtime=10x`). All codecs run in-process; no subprocess or file-I/O overhead. MIC-4state-C and MIC-C are C encoders via CGO; all others are pure Go. JPEG-XL (libjxl modular, effort 7) is far slower to encode than any MIC variant (~3–8 MB/s, i.e. 30–100× below MIC) — its analysis-heavy encoder is the trade-off for its leading compression ratio.
 
 ```
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecsEncode$ ./ojph/
 ```
 
-| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-C | Wavelet+SIMD | HTJ2K | JPEG-LS | PICS-2 | PICS-4 | PICS-8 |
-|-------|:--------:|:------:|:----------:|:------------:|:-----:|:------------:|:-----:|:-------:|:------:|:------:|:------:|
-| MR (256×256) | 0.13 | 121 | 132 | **290** | 273 | 85 | 177 | 71 | 217 | 186 | 128 |
-| CT (512×512) | 0.50 | 180 | 191 | **359** | 311 | 84 | 178 | 104 | 248 | 301 | 312 |
-| CR (2140×1760) | 7.18 | 233 | 235 | **461** | 423 | 120 | 193 | 89 | 412 | 732 | 1102 |
-| XR (2048×2577) | 10.1 | 254 | 254 | **550** | 519 | 127 | 214 | 95 | 447 | 775 | **1212** |
-| MG1 (2457×1996) | 9.35 | 380 | 381 | **861** | 820 | 155 | 508 | 239 | 698 | 1112 | **1651** |
-| MG2 (2457×1996) | 9.35 | 380 | 378 | **857** | 830 | 153 | 507 | 235 | 686 | 1119 | **1676** |
-| MG3 (4774×3064) | 27.3 | 256 | 257 | **556** | 514 | 97 | 202 | 109 | 465 | 832 | **1317** |
-| MG4 (4096×3328) | 26.0 | 336 | 340 | **738** | 710 | 107 | 354 | 162 | 619 | 1098 | **1901** |
-| CT1 (512×512) | 0.50 | 206 | 211 | **413** | 384 | 94 | 216 | 132 | 286 | 310 | 329 |
-| CT2 (512×512) | 0.50 | 192 | 197 | **371** | 340 | 89 | 194 | 132 | 294 | 320 | 294 |
-| MG-N (3064×4664) | 27.3 | 254 | 261 | **562** | 529 | 99 | 202 | 107 | 471 | 842 | **1353** |
-| MR1 (512×512) | 0.50 | 221 | 222 | **460** | 429 | 101 | 195 | 92 | 302 | 364 | 347 |
-| MR2 (1024×1024) | 2.00 | 275 | 263 | **566** | 532 | 107 | 230 | 102 | 455 | 643 | 857 |
-| MR3 (512×512) | 0.50 | 300 | 298 | **609** | 591 | 119 | 292 | 142 | 428 | 498 | 448 |
-| MR4 (512×512) | 0.50 | 249 | 251 | **494** | 451 | 108 | 226 | 142 | 333 | 370 | 368 |
-| NM1 (256×1024) | 0.50 | 237 | 240 | **467** | 444 | 117 | 242 | 132 | 353 | 360 | 302 |
-| RG1 (1841×1955) | 6.86 | 229 | 243 | **485** | 397 | 123 | 198 | 70 | 377 | 651 | 942 |
-| RG2 (1760×2140) | 7.18 | 280 | 277 | **582** | 488 | 125 | 254 | 112 | 499 | 842 | **1220** |
-| RG3 (1760×1760) | 5.91 | 275 | 271 | **550** | 512 | 128 | 273 | 143 | 503 | 863 | **1222** |
-| SC1 (2048×2487) | 9.71 | 286 | 293 | **577** | 551 | 83 | 235 | 169 | 528 | 924 | **1425** |
-| XA1 (1024×1024) | 2.00 | 242 | 246 | **496** | 471 | 101 | 219 | 114 | 419 | 616 | 832 |
+| Image | Raw (MB) | MIC-Go | MIC-4state | MIC-4state-C | MIC-C | Wavelet+SIMD | HTJ2K | JPEG-LS | JPEG-XL | PICS-2 | PICS-4 | PICS-8 |
+|-------|:--------:|:------:|:----------:|:------------:|:-----:|:------------:|:-----:|:-------:|:-------:|:------:|:------:|:------:|
+| MR (256×256) | 0.13 | 121 | 132 | **290** | 273 | 85 | 177 | 71 | 3 | 217 | 186 | 128 |
+| CT (512×512) | 0.50 | 180 | 191 | **359** | 311 | 84 | 178 | 104 | 4 | 248 | 301 | 312 |
+| CR (2140×1760) | 7.18 | 233 | 235 | **461** | 423 | 120 | 193 | 89 | 6 | 412 | 732 | 1102 |
+| XR (2048×2577) | 10.1 | 254 | 254 | **550** | 519 | 127 | 214 | 95 | 3 | 447 | 775 | **1212** |
+| MG1 (2457×1996) | 9.35 | 380 | 381 | **861** | 820 | 155 | 508 | 239 | 8 | 698 | 1112 | **1651** |
+| MG2 (2457×1996) | 9.35 | 380 | 378 | **857** | 830 | 153 | 507 | 235 | 8 | 686 | 1119 | **1676** |
+| MG3 (4774×3064) | 27.3 | 256 | 257 | **556** | 514 | 97 | 202 | 109 | 3 | 465 | 832 | **1317** |
+| MG4 (4096×3328) | 26.0 | 336 | 340 | **738** | 710 | 107 | 354 | 162 | 4 | 619 | 1098 | **1901** |
+| CT1 (512×512) | 0.50 | 206 | 211 | **413** | 384 | 94 | 216 | 132 | 5 | 286 | 310 | 329 |
+| CT2 (512×512) | 0.50 | 192 | 197 | **371** | 340 | 89 | 194 | 132 | 5 | 294 | 320 | 294 |
+| MG-N (3064×4664) | 27.3 | 254 | 261 | **562** | 529 | 99 | 202 | 107 | 3 | 471 | 842 | **1353** |
+| MR1 (512×512) | 0.50 | 221 | 222 | **460** | 429 | 101 | 195 | 92 | 4 | 302 | 364 | 347 |
+| MR2 (1024×1024) | 2.00 | 275 | 263 | **566** | 532 | 107 | 230 | 102 | 4 | 455 | 643 | 857 |
+| MR3 (512×512) | 0.50 | 300 | 298 | **609** | 591 | 119 | 292 | 142 | 6 | 428 | 498 | 448 |
+| MR4 (512×512) | 0.50 | 249 | 251 | **494** | 451 | 108 | 226 | 142 | 5 | 333 | 370 | 368 |
+| NM1 (256×1024) | 0.50 | 237 | 240 | **467** | 444 | 117 | 242 | 132 | 6 | 353 | 360 | 302 |
+| RG1 (1841×1955) | 6.86 | 229 | 243 | **485** | 397 | 123 | 198 | 70 | 3 | 377 | 651 | 942 |
+| RG2 (1760×2140) | 7.18 | 280 | 277 | **582** | 488 | 125 | 254 | 112 | 7 | 499 | 842 | **1220** |
+| RG3 (1760×1760) | 5.91 | 275 | 271 | **550** | 512 | 128 | 273 | 143 | 4 | 503 | 863 | **1222** |
+| SC1 (2048×2487) | 9.71 | 286 | 293 | **577** | 551 | 83 | 235 | 169 | 6 | 528 | 924 | **1425** |
+| XA1 (1024×1024) | 2.00 | 242 | 246 | **496** | 471 | 101 | 219 | 114 | 5 | 419 | 616 | 832 |
 
 MIC-4state-C and MIC-C require CGO (`-tags cgo_ojph`); MIC-Go and MIC-4state are pure Go. **Bold** = fastest per row. PICS-N uses Go goroutines encoding independent strips in parallel. Wavelet+SIMD encode is 2–4× slower than MIC-Go due to the multi-level forward transform; its compression advantage (see ratio column in decompression table) is the trade-off.
 
-**Encoding (compression) throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecsEncode` (`-tags cgo_ojph`, `-benchtime=10x`). C variants compiled with `-O3 -march=native`. PICS-N uses Go goroutines encoding independent strips in parallel.
+**Encoding (compression) throughput** (MB/s) — Intel Core Ultra 9 285K (AMD64, 24 P-cores), `BenchmarkAllCodecsEncode` (`-tags cgo_ojph`, `-benchtime=10x`). C variants compiled with `-O3 -march=native`. PICS-N uses Go goroutines encoding independent strips in parallel. JPEG-XL is omitted here for the same reason as the AMD64 decode table above (measured on the M2 Max reference machine only).
 
 ```
 go test -tags cgo_ojph -benchmem -run=^$ -benchtime=10x -bench ^BenchmarkAllCodecsEncode$ ./ojph/
@@ -496,7 +497,7 @@ Allocation cost scales with image area (pixel count × bytes/symbol), not bit-de
 - **Maximum compression ratio, speed secondary** → JPEG-LS: best ratios but 3–6× slower to decompress than MIC-4state-C.
 - **Interoperability with existing DICOM viewers** → HTJ2K: competitive ratios and speed on MG1/MG2, but 3–4× slower than PICS-C-8 on most modalities.
 
-For multi-core scaling detail and wavelet SIMD analysis, see [docs/benchmarks.md](./docs/benchmarks.md). For comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) and [docs/jpegls-comparison.md](./docs/jpegls-comparison.md).
+For multi-core scaling detail and wavelet SIMD analysis, see [docs/benchmarks.md](./docs/benchmarks.md). For comparison methodology, see [docs/htj2k-comparison.md](./docs/htj2k-comparison.md), [docs/jpegls-comparison.md](./docs/jpegls-comparison.md), and [docs/jxl-comparison.md](./docs/jxl-comparison.md).
 
 ---
 
@@ -677,6 +678,7 @@ streams).
 | [docs/compression-results.md](./docs/compression-results.md) | Compression ratios, predictor comparisons (MED, Zstandard), wavelet vs Delta+RLE+FSE |
 | [docs/htj2k-comparison.md](./docs/htj2k-comparison.md) | In-process comparison against HTJ2K (OpenJPH v0.15) — all MIC variants |
 | [docs/jpegls-comparison.md](./docs/jpegls-comparison.md) | In-process comparison against JPEG-LS (CharLS v2.4.2) |
+| [docs/jxl-comparison.md](./docs/jxl-comparison.md) | In-process comparison against JPEG XL (libjxl 0.11, modular lossless) |
 | [docs/native-optimizations.md](./docs/native-optimizations.md) | Two-state FSE, interleaved histogram assembly, CPUID dispatch (AMD64/ARM64) |
 | [docs/wavelet-simd.md](./docs/wavelet-simd.md) | SIMD-accelerated wavelet transform: blocked column pass + AVX2 kernels |
 | [docs/wavelet-fse-analysis.md](./docs/wavelet-fse-analysis.md) | 5/3 integer wavelet pipeline analysis: multi-level decomposition, 4-state FSE |

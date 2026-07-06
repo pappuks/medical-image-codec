@@ -137,6 +137,7 @@ Variants exercised:
 - `MIC-SIMD` — C 2-state decoder with SIMD
 - `HTJ2K` — OpenJPH in-process
 - `JPEGLS` — CharLS in-process
+- `JXL` — libjxl in-process (JPEG XL modular lossless, effort 7)
 - `PICS-N` for N ∈ {2, 4, 8} — Go strip decoder with N goroutines
 - `PICS-C-N` for N ∈ {2, 4, 8} — C strip decoder with N pthreads + per-strip SIMD
 
@@ -164,6 +165,22 @@ methodology (in-process CGO), narrower scope. Serial.
 
 Sanity cross-check for the JPEG-LS column. Also reports MIC, MIC-4state,
 MIC-4state-C, MIC-4state-SIMD side-by-side. Serial.
+
+### `BenchmarkJXLDecomp` / `BenchmarkJXLEncode` ([ojph/jxl_comparison_test.go](../ojph/jxl_comparison_test.go))
+
+In-process JPEG XL (libjxl, modular lossless, effort 7) compared against MIC and
+MIC-4state, mirroring the JPEG-LS framework. `BenchmarkJXLDecomp` measures
+decompression MB/s; `BenchmarkJXLEncode` measures libjxl encode MB/s (much
+slower than decode, so kept as a separate bench). `TestJXLComparison` prints the
+full ratio + decode-speed table with a mean-ratio row; `TestJXLRoundtrip`
+verifies lossless. Serial. Requires `brew install jpeg-xl`. Not a paper source
+yet — treat as an external-codec cross-check like HTJ2K/JPEG-LS.
+
+The wrapper pins libjxl to `JXL_BIT_DEPTH_FROM_CODESTREAM` on both encode
+(`JxlEncoderSetFrameBitDepth`) and decode (`JxlDecoderSetImageOutBitDepth`, which
+must be called *after* `JxlDecoderSetImageOutBuffer`). Without this, libjxl
+rescales sub-16-bit samples by `65535/((1<<depth)-1)` and the lossless roundtrip
+fails for <16-bit medical images (MR, MG, PET, etc.).
 
 ### `BenchmarkMICvsHTJ2K` ([htj2k_comparison_test.go:329](../htj2k_comparison_test.go#L329))
 
@@ -370,6 +387,8 @@ Sorted by file. P = parallel goroutines per iteration; S = serial loop.
 | htj2k_comparison_test.go | `BenchmarkMICvsHTJ2K` | S |
 | ojph/htj2k_fair_comparison_test.go | `BenchmarkHTJ2KFairDecomp` | S |
 | ojph/jpegls_comparison_test.go | `BenchmarkJPEGLSDecomp` | S |
+| ojph/jxl_comparison_test.go | `BenchmarkJXLDecomp` | S |
+| ojph/jxl_comparison_test.go | `BenchmarkJXLEncode` | S |
 | ojph/mic_c_test.go | `BenchmarkAllCodecs` | S |
 | ojph/mic_c_test.go | `BenchmarkAllCodecsEncode` | S |
 | ojph/mic_c_test.go | `BenchmarkMICFullCPipelineVsHTJ2K` | S |

@@ -8,7 +8,7 @@
 # Mapping of paper tables -> benchmarks driven here:
 #
 #   Table 1  (tab:ratios)            Lossless compression ratios
-#                                      BenchmarkAllCodecs              (MIC/HTJ2K/JPEG-LS/PICS ratios)
+#                                      BenchmarkAllCodecs              (MIC/HTJ2K/JPEG-LS/JPEG-XL/PICS ratios)
 #                                      BenchmarkMICCDeltaZstdDecomp    (Delta+Zstd-19 column, in-process libzstd)
 #                                      BenchmarkWaveletV2SIMDRLEFSECompress  (Wavelet column)
 #

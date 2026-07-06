@@ -440,8 +440,8 @@ func TestFourWayComparison(t *testing.T) {
 }
 
 // BenchmarkAllCodecs runs Go benchmarks for all decompressors: MIC-Go, MIC-4state,
-// MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K, JPEG-LS, and PICS-N
-// (parallel strips with N=2/4/8).
+// MIC-4state-C, MIC-4state-SIMD, MIC-C, MIC-SIMD, HTJ2K, JPEG-LS, JPEG-XL, and
+// PICS-N (parallel strips with N=2/4/8).
 func BenchmarkAllCodecs(b *testing.B) {
 	for _, ti := range testImages {
 		byteData, shortData, maxShort, cols, rows := loadTestImage(ti)
@@ -473,6 +473,8 @@ func BenchmarkAllCodecs(b *testing.B) {
 			continue
 		}
 
+		jxlComp, jxlErr := JXLCompressU16(shortData, cols, rows, bitDepth, JXLDefaultEffort)
+
 		micRatio := float64(origBytes) / float64(len(fseComp))
 		mic4Ratio := float64(origBytes) / float64(len(fse4Comp))
 		var mic8Ratio float64
@@ -481,6 +483,10 @@ func BenchmarkAllCodecs(b *testing.B) {
 		}
 		htj2kRatio := float64(origBytes) / float64(len(htj2kComp))
 		jplsRatio := float64(origBytes) / float64(len(jplsComp))
+		var jxlRatio float64
+		if jxlErr == nil {
+			jxlRatio = float64(origBytes) / float64(len(jxlComp))
+		}
 
 		b.Run("MIC-Go/"+ti.name, func(b *testing.B) {
 			b.SetBytes(int64(origBytes))
@@ -594,6 +600,17 @@ func BenchmarkAllCodecs(b *testing.B) {
 			b.ReportMetric(jplsRatio, "ratio")
 		})
 
+		if jxlErr == nil {
+			b.Run("JXL/"+ti.name, func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					JXLDecompressU16(jxlComp, cols, rows)
+				}
+				b.ReportMetric(jxlRatio, "ratio")
+			})
+		}
+
 		// PICS — Parallel Image Compressed Strips (2, 4, 8 strips)
 		// PICS-N:   Go goroutines + Go decoder
 		// PICS-C-N: C pthreads  + C SIMD auto-detect decoder (same blob)
@@ -634,6 +651,7 @@ func BenchmarkAllCodecs(b *testing.B) {
 //   - Wavelet+SIMD — 5/3 wavelet + RLE + FSE (SIMD column pass on AMD64)
 //   - HTJ2K        — OpenJPH in-process via CGO
 //   - JPEG-LS      — CharLS in-process via CGO
+//   - JPEG-XL      — libjxl in-process via CGO (modular lossless, effort 7)
 //   - PICS-N        — parallel strip encoder (Go goroutines, N=2/4/8)
 //
 // Command:
@@ -668,6 +686,7 @@ func BenchmarkAllCodecsEncode(b *testing.B) {
 			continue
 		}
 		jplsComp, _ := CharlsCompressU16(shortData, cols, rows, bitDepth)
+		jxlComp, jxlErr := JXLCompressU16(shortData, cols, rows, bitDepth, JXLDefaultEffort)
 		wavComp, _ := mic.WaveletV2SIMDRLEFSECompressU16(shortData, rows, cols, maxShort, 5)
 
 		b.Run("MIC-Go/"+ti.name, func(b *testing.B) {
@@ -764,6 +783,17 @@ func BenchmarkAllCodecsEncode(b *testing.B) {
 			}
 			b.ReportMetric(float64(origBytes)/float64(len(jplsComp)), "ratio")
 		})
+
+		if jxlErr == nil {
+			b.Run("JXL/"+ti.name, func(b *testing.B) {
+				b.SetBytes(int64(origBytes))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					JXLCompressU16(shortData, cols, rows, bitDepth, JXLDefaultEffort)
+				}
+				b.ReportMetric(float64(origBytes)/float64(len(jxlComp)), "ratio")
+			})
+		}
 
 		for _, strips := range []int{2, 4, 8} {
 			strips := strips
