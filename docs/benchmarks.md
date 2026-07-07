@@ -457,6 +457,77 @@ they are higher than the equivalent rows in the paper's `tab:decomp`.
 | MG3 | 121 | 3 468 MB/s |
 | MG4 | 182 | 4 964 MB/s |
 
+---
+
+## 12. Browser PACS web-viewer benchmark
+
+Distinct from the Go benchmarks above: this one runs **in a real browser** and
+measures the end-to-end experience of a browser-based PACS viewer — network
+transfer of the compressed bytes **plus live in-browser decode** — instead of
+decode alone. It lives in [`web/`](../web/), shares one model
+([`web/pacs-model.mjs`](../web/pacs-model.mjs)) between a Node console report and
+an interactive dashboard, and verifies every live decode bit-exact against a
+raw-pixel checksum manifest.
+
+### Runners
+
+| Runner | File | What it does |
+|---|---|---|
+| Node console report | [web/bench-pacs-viewer.mjs](../web/bench-pacs-viewer.mjs) | MIC + PICS live (pure-JS, `worker_threads`); HTJ2K/JPEG-LS/JPEG-XL informational. 8 network profiles + study-level sim. |
+| Interactive dashboard | [web/pacs-dashboard.html](../web/pacs-dashboard.html) | **12 codecs decoded live in-browser**, per-image tables, study sim, charts, optional pixel-correctness pass. Must be served with COOP/COEP (`web/serve.py`). |
+| Headless CI runner | [web/tests/pacs-bench.spec.mjs](../web/tests/pacs-bench.spec.mjs) | Playwright drives the dashboard in headless Chromium, asserts every live codec pixel-verifies, writes JSON to `web/results/`. |
+
+### Codec variants (dashboard, live in-browser)
+
+Every MIC/PICS row below decodes **identical `.mic` bytes**, so the differences
+are pure decoder-implementation cost. Reference codecs decode their own
+`.jph`/`.jls` files (generated + native-roundtrip-verified by
+[`cmd/mic-refgen`](../cmd/mic-refgen)).
+
+| Variant | Implementation | Loaded from |
+|---|---|---|
+| MIC-1/4/8-state | pure JS (`mic-decoder.js`) | — |
+| MIC-WASM (Go) | Go codec → WASM (`cmd/mic-wasm`) | `web/mic-decoder.wasm` (~2.9 MB) |
+| MIC-C-WASM (4/8-state) | pure C (`ojph/mic_decompress_c.c`) → WASM | `web/vendor/mic-c/` (~20 KB) |
+| MIC-PICS (4/8 strips) | pure JS, real Web Worker pool + SAB | `mic-decoder-parallel.js` |
+| MIC-C-WASM-PICS (8 strips) | pure C pthreads (`ojph/mic_parallel.c`) → WASM | `web/vendor/mic-pics/` (~30 KB) |
+| HTJ2K | OpenJPH WASM (vendored) | `web/vendor/openjph/` |
+| JPEG-LS | CharLS WASM (vendored) | `web/vendor/charls/` |
+| JPEG-XL | informational (no lossless-16-bit browser decoder) | `refcodecs-manifest.json` |
+
+### Representative decode times (CR, 1760×2140, 7.18 MB raw; Apple M2 Max, headless Chromium)
+
+Same 4-state stream unless noted; all pixel-verified bit-exact.
+
+| Variant | Decode | Notes |
+|---|---|---|
+| MIC-4state (JS) | ~140 ms | pure-JS baseline |
+| MIC-WASM (Go) | ~330 ms | *slower* than JS — Go runtime + GC overhead |
+| MIC-C-WASM (4-state) | ~17 ms | ~8× faster than JS, from a 20 KB binary |
+| MIC-PICS-8 (JS workers) | ~24 ms | 8 Web Workers, SharedArrayBuffer |
+| **MIC-C-WASM-PICS-8** | **~4 ms** | C pthreads → WASM; fastest path, ~6× the JS pool |
+| HTJ2K (OpenJPH WASM) | ~125 ms | reference codec, live |
+| JPEG-LS (CharLS WASM) | ~70 ms | reference codec, live |
+
+Headline: on fast networks decode dominates time-to-display (codec/threading
+choice matters most); on slow networks (broadband, cellular, 3G, satellite)
+transfer dominates by many multiples, so compression ratio matters more than
+decode speed. Full how-to (build steps for the Go/C WASM variants, Emscripten
+prereqs) is in the **[Web Decoder README](../web/README.md#pacs-web-viewer-benchmark)**.
+
+### Build prerequisites for the WASM variants
+
+```bash
+go run ./cmd/mic-compress -testdata            # MIC .mic + manifest.json (no cgo)
+go run -tags cgo_ojph ./cmd/mic-refgen         # HTJ2K/JPEG-LS/JPEG-XL reference files
+cd web && npm install && bash scripts/vendor-wasm.sh   # vendor OpenJPH + CharLS WASM
+GOOS=js GOARCH=wasm go build -o web/mic-decoder.wasm ./cmd/mic-wasm/  # MIC-WASM (Go)
+cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js
+bash web/wasm-c/build.sh                        # MIC-C-WASM (needs emscripten)
+bash web/wasm-c/build-pics.sh                   # MIC-C-WASM-PICS (C pthreads → WASM)
+cd web && npx playwright test                   # headless run + pixel-verify
+```
+
 **AWS c7g.8xlarge — ARM64 | 32 cores**
 
 | Modality | FPS | Aggregate Decomp |

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MIC PACS Web-Viewer Benchmark</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --border: #2a2f3a;
+      --fg: #e6e9ef; --muted: #9aa4b2; --accent: #4c8dff; --good: #3fb950;
+      --bad: #f85149; --warn: #d29922; --ref: #8b5cf6;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f7f9; --panel: #ffffff; --panel2: #f0f2f5; --border: #d8dde4;
+        --fg: #1b1f27; --muted: #5b6472; --accent: #1f6feb; --good: #1a7f37;
+        --bad: #cf222e; --warn: #9a6700; --ref: #6b3fd4;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    header { padding: 20px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    .sub { color: var(--muted); font-size: 13px; }
+    main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 18px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+    .ctl { display: flex; flex-direction: column; gap: 4px; }
+    .ctl label { font-size: 12px; color: var(--muted); }
+    select, input[type=number] {
+      background: var(--panel2); color: var(--fg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 8px; font: inherit;
+    }
+    button {
+      background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+      padding: 8px 16px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button.secondary { background: var(--panel2); color: var(--fg); border: 1px solid var(--border); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .chk { display: flex; gap: 6px; align-items: center; }
+    .env { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 20px; font-size: 13px; }
+    .env div span { color: var(--muted); }
+    .progress-wrap { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin-top: 10px; }
+    .progress-bar { height: 100%; width: 0; background: var(--accent); transition: width .1s linear; }
+    .status { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 18px; }
+    details { margin-bottom: 14px; }
+    details > summary { cursor: pointer; font-weight: 600; padding: 8px 0; font-size: 15px; }
+    .tbl-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    thead th { color: var(--muted); font-weight: 600; border-bottom: 2px solid var(--border); }
+    tr.ref td { color: var(--muted); }
+    .badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; vertical-align: middle; }
+    .badge.live { background: color-mix(in srgb, var(--good) 20%, transparent); color: var(--good); }
+    .badge.ref { background: color-mix(in srgb, var(--ref) 22%, transparent); color: var(--ref); }
+    .v-ok { color: var(--good); } .v-bad { color: var(--bad); font-weight: 700; }
+    .note { color: var(--muted); font-size: 11px; }
+    .charts { display: grid; grid-template-columns: 1fr; gap: 18px; }
+    @media (min-width: 900px) { .charts { grid-template-columns: 1fr 1fr; } }
+    .chart-card h3 { margin: 0 0 10px; font-size: 14px; }
+    canvas { width: 100%; height: auto; display: block; }
+    .foot { color: var(--muted); font-size: 12px; margin-top: 24px; }
+    code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MIC PACS Web-Viewer Benchmark</h1>
+    <div class="sub">Live in-browser decode + network-transfer simulation across every codec and network profile.
+      MIC (1/4/8-state, PICS), HTJ2K, JPEG-LS decode live; JPEG-XL is an informational reference row.</div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="controls">
+        <div class="ctl">
+          <label for="imageset">Image set</label>
+          <select id="imageset">
+            <option value="quick">Quick (MR, CT, CR)</option>
+            <option value="full" selected>Full (all 8)</option>
+          </select>
+        </div>
+        <div class="ctl">
+          <label for="iterations">Iterations</label>
+          <input type="number" id="iterations" value="15" min="1" max="100" style="width:80px">
+        </div>
+        <div class="ctl">
+          <label for="warmup">Warm-up</label>
+          <input type="number" id="warmup" value="3" min="0" max="20" style="width:80px">
+        </div>
+        <div class="ctl">
+          <label>&nbsp;</label>
+          <label class="chk"><input type="checkbox" id="verify"> Verify pixel correctness</label>
+        </div>
+        <div class="ctl">
+          <label>&nbsp;</label>
+          <label class="chk"><input type="checkbox" id="allprofiles"> Show all 8 network profiles</label>
+        </div>
+        <div class="ctl">
+          <label>&nbsp;</label>
+          <div style="display:flex; gap:8px">
+            <button id="start">Start benchmark</button>
+            <button id="cancel" class="secondary" disabled>Cancel</button>
+          </div>
+        </div>
+      </div>
+      <div class="progress-wrap"><div class="progress-bar" id="bar"></div></div>
+      <div class="status" id="status">Idle. Requires the page to be served (COOP/COEP) with testdata generated — see README.</div>
+    </section>
+
+    <section class="panel">
+      <h3 style="margin:0 0 10px; font-size:14px">Environment</h3>
+      <div class="env" id="env"></div>
+    </section>
+
+    <section id="results"></section>
+
+    <section class="panel" id="charts-panel" hidden>
+      <h3 style="margin:0 0 14px; font-size:14px">Charts</h3>
+      <div class="charts" id="charts"></div>
+    </section>
+
+    <div class="foot" id="foot"></div>
+  </main>
+
+  <script type="module" src="./pacs-dashboard.mjs"></script>
+</body>
+</html>

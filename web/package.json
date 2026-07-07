@@ -1,0 +1,19 @@
+{
+  "name": "mic-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser decoder + PACS benchmark dashboard for the MIC medical image codec.",
+  "scripts": {
+    "vendor": "bash scripts/vendor-wasm.sh",
+    "probe-codecs": "node scripts/probe-codecs.mjs",
+    "test": "playwright test",
+    "bench": "node bench-pacs-viewer.mjs"
+  },
+  "devDependencies": {
+    "@cornerstonejs/codec-openjph": "^2.4.7",
+    "@cornerstonejs/codec-charls": "^1.2.3",
+    "@jsquash/jxl": "^1.3.0",
+    "@playwright/test": "^1.48.0"
+  }
+}

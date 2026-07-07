@@ -27,7 +27,17 @@ Provides two decoder implementations — a pure JavaScript ES module and a Go We
 go run ./cmd/mic-compress/ -testdata
 ```
 
-This compresses the test images (MR, CT, CR, MG1-3, plus the DX_HAND and PET1 new-modality representatives) into single-frame `.mic` files and multi-frame DICOM images (MG_TOMO) into MIC2 `.mic` files under `web/testdata/`. Each grayscale image is emitted three times — 1-state (default), 4-state (`_4s.mic`), and 8-state (`_8s.mic`) FSE — plus PICS parallel-strip variants (`_pics4.mic`, `_pics8.mic`, `_pics4_8s.mic`, `_pics8_8s.mic`) so the JS decoder and benchmark can be exercised against every entropy-coder variant.
+This compresses the test images (MR, CT, CR, MG1-3, plus the DX_HAND and PET1 new-modality representatives) into single-frame `.mic` files and multi-frame DICOM images (MG_TOMO) into MIC2 `.mic` files under `web/testdata/`. Each grayscale image is emitted three times — 1-state (default), 4-state (`_4s.mic`), and 8-state (`_8s.mic`) FSE — plus PICS parallel-strip variants (`_pics4.mic`, `_pics8.mic`, `_pics4_8s.mic`, `_pics8_8s.mic`) so the JS decoder and benchmark can be exercised against every entropy-coder variant. It also writes `manifest.json` (a raw-pixel FNV-1a32 checksum per image) that the PACS dashboard uses to verify every codec's decoded output.
+
+For the [PACS dashboard](#pacs-web-viewer-benchmark) to compare against the reference codecs *live in the browser*, also generate their compressed files (requires the native libs libopenjph / libcharls / libjxl) and vendor their WASM decoders once:
+
+```bash
+# From the repo root:
+go run -tags cgo_ojph ./cmd/mic-refgen               # HTJ2K/.jph, JPEG-LS/.jls, JPEG-XL/.jxl + refcodecs-manifest.json
+cd web && npm install && bash scripts/vendor-wasm.sh # vendor OpenJPH + CharLS WASM into web/vendor/
+```
+
+`mic-refgen` round-trip-verifies every reference file natively before writing it, so a broken reference file can never reach `web/testdata/`.
 
 ### 2. Build the WASM decoder (optional)
 
@@ -661,7 +671,94 @@ Workers beyond the strip count are capped to the strip count by the pool. For la
 
 ## PACS Web Viewer Benchmark
 
-`bench-pacs-viewer.mjs` models the thing a radiologist actually experiences in a browser-based PACS viewer: click a study, wait for pixels. That wait has two stages — network transfer of the compressed bytes, then in-browser decompression — and this benchmark measures both together instead of decode alone.
+Two front-ends share one model (`pacs-model.mjs` — network profiles, image set,
+codec registry, and timing math), so the Node console report and the browser
+dashboard can never drift apart. Both model the thing a radiologist actually
+experiences in a browser-based PACS viewer: click a study, wait for pixels. That
+wait has two stages — network transfer of the compressed bytes, then in-browser
+decompression — and both are measured together instead of decode alone.
+
+### Interactive browser dashboard — `pacs-dashboard.html`
+
+The dashboard decodes **every codec live in a real browser** and simulates all
+eight network profiles. It must be *served* (not opened as `file://`) because it
+needs COOP/COEP headers for `SharedArrayBuffer` (PICS Web Workers), streams
+multi-MB WASM, and fetches the testdata blobs:
+
+```bash
+# From the repo root — generate MIC + reference-codec test files first:
+go run ./cmd/mic-compress -testdata                 # MIC/.mic + manifest.json (no cgo)
+go run -tags cgo_ojph ./cmd/mic-refgen              # HTJ2K/.jph, JPEG-LS/.jls, JPEG-XL/.jxl
+                                                    #   (needs libopenjph/libcharls/libjxl)
+cd web && npm install && bash scripts/vendor-wasm.sh # vendor the WASM decoders (one-time)
+python3 serve.py 8080                                # serve with COOP/COEP
+# open http://localhost:8080/pacs-dashboard.html
+```
+
+Which codecs decode **live** vs. **informational**:
+
+| Codec | Browser decode | How |
+|-------|----------------|-----|
+| MIC 1/4/8-state | ✅ live | pure-JS `MICDecoder` |
+| MIC-WASM (Go, 4-state) | ✅ live | the Go codec compiled to WASM (`cmd/mic-wasm` → `mic-decoder.wasm`), decoding the same 4-state stream as MIC-4state — a direct pure-JS vs Go/WASM comparison |
+| MIC-C-WASM (4/8-state) | ✅ live | the pure-C codec (`ojph/mic_decompress_c.c`) compiled to WASM with Emscripten (`web/wasm-c/build.sh` → `web/vendor/mic-c/`, ~20 KB, no runtime), decoding the same 4/8-state streams |
+| MIC-PICS 4/8 strips | ✅ live | `createPICSDecoder()` real Web Worker pool (SharedArrayBuffer) |
+| MIC-C-WASM-PICS (8 strips) | ✅ live | the pure-C PICS decoder (`ojph/mic_parallel.c`, pthreads) compiled to WASM with Emscripten pthreads (`web/wasm-c/build-pics.sh` → `web/vendor/mic-pics/`); runs in a Web Worker and fans out to pthread workers — the C scheduler + C inner decoder |
+| HTJ2K | ✅ live | vendored OpenJPH WASM (`@cornerstonejs/codec-openjph`) |
+| JPEG-LS | ✅ live | vendored CharLS WASM (`@cornerstonejs/codec-charls`) |
+| JPEG-XL | ℹ️ informational | see below |
+
+> **The three MIC WASM/JS builds decode identical bytes**, so the dashboard is a
+> clean head-to-head. A representative result (CR, 7.18 MB, this machine):
+> pure-JS MIC-4state ≈ 140 ms, **Go→WASM ≈ 330 ms** (Go runtime + GC overhead —
+> *slower* than JS), **C→WASM ≈ 17 ms** (~8× faster than JS, ~19× faster than
+> Go/WASM). The C→WASM binary is ~20 KB vs the Go build's ~2.9 MB. All three are
+> pixel-verified bit-exact.
+>
+> Parallel decode, same story (CR): the pure-JS **MIC-PICS-8** worker pool ≈ 24 ms,
+> while **MIC-C-WASM-PICS-8** — the C pthreads scheduler compiled to WASM, fanning
+> out to pthread Web Workers — decodes in ≈ 4 ms (the fastest path here; ~6× the
+> JS pool, ~4× single-thread C, confirming the pthread parallelism), from a 30 KB
+> wasm. Bit-exact.
+>
+> The WASM variants need a build step and are skipped (row omitted, rest of the
+> run unaffected) if their artifacts are absent:
+> - **MIC-WASM (Go)** — Quick Start step 2:
+>   `GOOS=js GOARCH=wasm go build -o web/mic-decoder.wasm ./cmd/mic-wasm/` + copy `wasm_exec.js`.
+> - **MIC-C-WASM** (single-thread 4/8-state) — needs Emscripten
+>   (`brew install emscripten` or emsdk), then `bash web/wasm-c/build.sh`
+>   (outputs the committed `web/vendor/mic-c/`).
+> - **MIC-C-WASM-PICS** (pthreads) — Emscripten, then `bash web/wasm-c/build-pics.sh`
+>   (outputs the committed `web/vendor/mic-pics/`). Needs the page served with
+>   COOP/COEP (`serve.py` sets them) so `SharedArrayBuffer`/pthreads work.
+
+**JPEG-XL is informational, and here's why** (recorded so it isn't re-litigated):
+the only mature browser JXL decoder, `@jsquash/jxl`, exposes a `decode()` that
+returns an 8-bit RGBA `ImageData`. That cannot represent lossless 16-bit
+grayscale medical pixels, so a live JXL row would be a lie about correctness.
+`scripts/probe-codecs.mjs` confirms this. JXL therefore shows its **real**
+compressed size (from the actual `.jxl` file `mic-refgen` produces and
+round-trip-verifies natively) plus a native-C reference decode throughput,
+clearly flagged. HTJ2K and JPEG-LS both round-trip 16-bit losslessly through
+their WASM decoders (also verified by the probe), so they decode live.
+
+The dashboard shows per-image tables (size, ratio, decode ms, time-to-display
+per network profile), a study-level simulation, an optional pixel-correctness
+pass (decoded pixels are checksummed against `manifest.json` — every live codec
+must match bit-for-bit), and charts (time-to-display stacked as network vs.
+decode, decode-time per codec, compression ratio per codec).
+
+### Headless CI runner — Playwright
+
+`tests/pacs-bench.spec.mjs` drives the dashboard in headless Chromium, asserts
+every live codec pixel-verifies, and writes the full result JSON to `results/`:
+
+```bash
+cd web && npx playwright install chromium   # one-time
+npx playwright test                          # auto-launches serve.py, runs the bench
+```
+
+### Node console report — `bench-pacs-viewer.mjs`
 
 ```bash
 cd web
@@ -670,11 +767,18 @@ node bench-pacs-viewer.mjs --iterations 30           # more iterations
 node bench-pacs-viewer.mjs --json results.json       # also write machine-readable results
 ```
 
-For each test image it reports, per codec, the compressed size, decode time, and total "time to display" under four simulated network profiles (Hospital LAN, Hospital Wi-Fi, Home Broadband, Cellular/4G), plus a study-level simulation (a 4-view mammography exam, a 10-image CR series, a 24-slice MRI sequence) comparing pipelined (Web Worker) vs blocking (main-thread) decode.
+The Node script measures MIC + PICS live (PICS via `worker_threads` as a
+stand-in for Web Workers) across all eight network profiles, and lists HTJ2K /
+JPEG-LS / JPEG-XL as informational rows (real `.jph/.jls/.jxl` sizes when
+`mic-refgen` has run, else the paper's ratio table; native-C reference decode
+times, flagged with `*`). Unlike the dashboard, the Node script does **not**
+load the WASM decoders — "live in the browser" is the dashboard's job.
 
-**What's real vs. approximated:** MIC decode times (1-state/4-state/8-state, and PICS parallel-strip via `worker_threads` as a stand-in for browser Web Workers) are live measurements using the actual JS decoder on whatever machine runs the script. HTJ2K and JPEG-LS are included for compressed-size comparison — compression ratio is platform-independent and pulled from the paper's benchmark data — but neither has a browser/WASM decoder in this repository, so their decode times are native C (CGO) numbers from the Apple M4 Pro reference run, shown only as an informational bound and flagged with `*` in the output. They are not a live measurement and not directly comparable to the MIC numbers on a different machine.
-
-The headline finding: on fast networks (hospital LAN/Wi-Fi) decode speed is the bottleneck and codec/threading choices matter most; on slow networks (home broadband, cellular remote reads) network transfer dominates by many multiples, so compression ratio matters far more than decode speed.
+The headline finding is the same in both: on fast networks (Gigabit/hospital
+LAN/Wi-Fi) decode speed is the bottleneck and codec/threading choices matter
+most; on slow networks (home broadband, cellular, 3G, satellite) network
+transfer dominates by many multiples, so compression ratio matters far more
+than decode speed.
 
 ## Troubleshooting
 

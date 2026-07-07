@@ -515,6 +515,28 @@ A browser-based decoder lives in [`web/`](./web/):
 
 See the **[Web Decoder README](./web/README.md)** for the full API reference and integration guide.
 
+### PACS web-viewer benchmark
+
+[`web/pacs-dashboard.html`](./web/pacs-dashboard.html) is an interactive, in-browser
+benchmark that models a radiologist's time-to-display in a PACS viewer: network
+transfer of the compressed bytes + live in-browser decode, across eight network
+profiles (Gigabit LAN → satellite). It decodes **12 codec variants live and
+verifies every one bit-exact** against the source pixels, including three ways to
+run the MIC codec on identical bytes and two parallel paths:
+
+| MIC decoder | CR (7.18 MB) decode | binary |
+|---|---|---|
+| Pure JS (4-state) | ~140 ms | 20 KB JS |
+| Go → WASM | ~330 ms | 2.9 MB |
+| **C → WASM** (`ojph/mic_decompress_c.c`) | **~17 ms** | **20 KB** |
+| JS PICS-8 (Web Worker pool) | ~24 ms | — |
+| **C PICS-8 → WASM** (pthreads, `ojph/mic_parallel.c`) | **~4 ms** | 30 KB |
+
+plus HTJ2K and JPEG-LS decoded live via vendored WASM (OpenJPH / CharLS), and
+JPEG-XL shown as an informational reference. A headless Playwright runner drives
+the same page for CI. See the **[Web Decoder README](./web/README.md#pacs-web-viewer-benchmark)**
+and **[benchmark docs](./docs/benchmarks.md#12-browser-pacs-web-viewer-benchmark)**.
+
 ---
 
 ## CLI Reference

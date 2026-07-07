@@ -9,3 +9,11 @@ testdata/
 
 # Node modules if any
 node_modules/
+
+# Playwright headless-runner output (ephemeral)
+test-results/
+results/
+playwright-report/
+
+# Vendored WASM decoders ARE committed (see vendor/VERSIONS.md) — do not ignore.
+

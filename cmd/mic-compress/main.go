@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -100,6 +101,74 @@ func compressImage4State(shortData []uint16, width, height int, maxValue uint16)
 
 func compressImage8State(shortData []uint16, width, height int, maxValue uint16) ([]byte, error) {
 	return mic.CompressSingleFrame8State(shortData, width, height, maxValue)
+}
+
+// fnv1a32LE computes the FNV-1a 32-bit hash over the little-endian byte
+// representation of a uint16 pixel buffer. This MUST stay bit-identical to the
+// JS implementation in web/pacs-model.mjs (fnv1a32), which hashes the decoded
+// Uint16Array's underlying little-endian bytes. The browser dashboard uses this
+// to verify decoded pixels against the manifest without shipping raw images.
+func fnv1a32LE(pixels []uint16) uint32 {
+	const (
+		offset = uint32(2166136261)
+		prime  = uint32(16777619)
+	)
+	h := offset
+	for _, p := range pixels {
+		h ^= uint32(p & 0xff)
+		h *= prime
+		h ^= uint32(p >> 8)
+		h *= prime
+	}
+	return h
+}
+
+// writeRawManifest writes web/testdata/manifest.json with a per-image raw-pixel
+// checksum so the browser can validate every codec's decoded output against the
+// ground-truth pixels without downloading multi-megabyte raw .bin files.
+func writeRawManifest(outDir string) {
+	type imgEntry struct {
+		Width    int    `json:"width"`
+		Height   int    `json:"height"`
+		Checksum string `json:"checksum"`
+	}
+	out := struct {
+		Images map[string]imgEntry `json:"images"`
+	}{Images: map[string]imgEntry{}}
+
+	for _, img := range testImages {
+		byteData, err := os.ReadFile(img.file)
+		if err != nil {
+			continue // already reported by the compression loops above
+		}
+		// Reconstruct the exact (possibly zero-padded) pixel buffer the decoder
+		// will produce, matching the compression loops' short-file tolerance.
+		shortData := make([]uint16, img.cols*img.rows)
+		n := len(byteData)
+		if max := img.cols * img.rows * 2; n > max {
+			n = max
+		}
+		for i := 0; i+1 < n; i += 2 {
+			shortData[i/2] = uint16(byteData[i]) | (uint16(byteData[i+1]) << 8)
+		}
+		out.Images[img.name] = imgEntry{
+			Width:    img.cols,
+			Height:   img.rows,
+			Checksum: fmt.Sprintf("fnv1a32:%08x", fnv1a32LE(shortData)),
+		}
+	}
+
+	blob, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  error marshaling manifest: %v\n", err)
+		return
+	}
+	p := filepath.Join(outDir, "manifest.json")
+	if err := os.WriteFile(p, blob, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", p, err)
+		return
+	}
+	fmt.Printf("Wrote %s (%d images)\n", p, len(out.Images))
 }
 
 // readDicomMultiFrame reads all frames from a multiframe DICOM file.
@@ -751,6 +820,10 @@ func main() {
 			fmt.Printf("  %s: %d bytes -> %d bytes (%.2f:1) -> %s\n",
 				img.name, len(byteData), len(compressed), ratio, outPath)
 		}
+
+		// Raw-pixel checksum manifest for the browser PACS benchmark's
+		// pixel-correctness pass (see web/pacs-model.mjs fnv1a32).
+		writeRawManifest(outDir)
 		return
 	}
 

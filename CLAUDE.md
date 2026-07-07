@@ -86,6 +86,27 @@ go test -tags cgo_ojph -run TestMICCorrectnessFourStateC -v ./ojph/
 
 # Run all benchmarks
 go test -bench=. -benchtime=10x
+
+# Generate browser testdata (MIC .mic variants + manifest.json checksums)
+go run ./cmd/mic-compress -testdata
+
+# Generate reference-codec browser test files (HTJ2K/.jph, JPEG-LS/.jls, JPEG-XL/.jxl)
+# for the PACS dashboard. Requires libopenjph/libcharls/libjxl; native round-trip
+# verified before each file is written.
+go run -tags cgo_ojph ./cmd/mic-refgen
+
+# PACS web-viewer benchmark (see web/README.md "PACS Web Viewer Benchmark"):
+#   - Node console report (MIC/PICS live; HTJ2K/JLS/JXL informational):
+cd web && node bench-pacs-viewer.mjs
+#   - Interactive browser dashboard (all codecs live except JPEG-XL; needs COOP/COEP):
+cd web && npm install && bash scripts/vendor-wasm.sh   # one-time: vendor OpenJPH+CharLS WASM
+GOOS=js GOARCH=wasm go build -o web/mic-decoder.wasm ./cmd/mic-wasm/  # for the MIC-WASM (Go) variant
+cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js
+bash web/wasm-c/build.sh                                 # for the MIC-C-WASM variant (needs emscripten/emcc)
+bash web/wasm-c/build-pics.sh                            # for the MIC-C-WASM-PICS variant (C pthreads → WASM)
+cd web && python3 serve.py 8080                         # open http://localhost:8080/pacs-dashboard.html
+#   - Headless CI runner (drives the dashboard, asserts pixel-correctness):
+cd web && npx playwright install chromium && npx playwright test
 ```
 
 ## Web / JavaScript Minification

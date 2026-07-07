@@ -28,6 +28,10 @@ import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { cpus } from 'node:os';
+import {
+  NETWORK_PROFILES, IMAGES, CODEC_REGISTRY, REFERENCE_NATIVE,
+  transferMs, simulateStudy, STUDIES, fmtMs, fmtKB,
+} from './pacs-model.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -41,63 +45,18 @@ const ITERATIONS = iterIdx !== -1 ? parseInt(args[iterIdx + 1], 10) : 15;
 const JSON_OUT = jsonIdx !== -1 ? args[jsonIdx + 1] : null;
 const WARMUP = 3;
 
-// ---------------------------------------------------------------------------
-// Network profiles — representative PACS deployment scenarios
-// ---------------------------------------------------------------------------
-const NETWORK_PROFILES = [
-  { name: 'Hospital LAN',      mbps: 100, rttMs: 2,  note: 'radiology workstation, wired' },
-  { name: 'Hospital Wi-Fi',    mbps: 20,  rttMs: 10, note: 'mobile cart / tablet on-site' },
-  { name: 'Home Broadband',    mbps: 25,  rttMs: 20, note: 'remote read, VPN' },
-  { name: 'Cellular (4G/LTE)', mbps: 5,   rttMs: 60, note: 'remote read, on-call physician' },
-];
+// NETWORK_PROFILES, transferMs, IMAGES, CODEC_REGISTRY, REFERENCE_NATIVE,
+// simulateStudy, STUDIES, fmtMs, fmtKB now come from ./pacs-model.mjs (the
+// single source of truth shared with the browser dashboard).
 
-function transferMs(bytes, mbps) {
-  return (bytes * 8) / (mbps * 1e6) * 1000;
+// Try to read real reference-codec sizes produced by `mic-refgen`; falls back
+// to the native ratio table when the manifest is absent (no cgo build run).
+function loadRefManifest() {
+  const p = resolve(__dir, 'testdata/refcodecs-manifest.json');
+  if (!existsSync(p)) return null;
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
 }
-
-// ---------------------------------------------------------------------------
-// Test images (single-frame grayscale, all present in web/testdata/)
-// ---------------------------------------------------------------------------
-const IMAGES = [
-  { name: 'MR',       modality: 'MRI',            w: 256,  h: 256 },
-  { name: 'CT',       modality: 'CT',              w: 512,  h: 512 },
-  { name: 'PET1',     modality: 'PET',             w: 256,  h: 256 },
-  { name: 'DX_HAND',  modality: 'Digital X-ray',   w: 1410, h: 1480 },
-  { name: 'CR',       modality: 'Computed Radiography', w: 1760, h: 2140 },
-  { name: 'MG1',      modality: 'Mammography',     w: 1996, h: 2457 },
-  { name: 'MG2',      modality: 'Mammography',     w: 1996, h: 2457 },
-  { name: 'MG3',      modality: 'Mammography (large)', w: 3064, h: 4774 },
-];
-
-// MIC codec variants, single-threaded. PICS (parallel) variants handled separately.
-const MIC_VARIANTS = [
-  { label: 'MIC-1state', suffix: '' },
-  { label: 'MIC-4state', suffix: '_4s' },
-  { label: 'MIC-8state', suffix: '_8s' },
-];
-
-// PICS parallel-strip variants (decoded across worker_threads, mirroring a
-// browser Web Worker pool). Only generated for some images by mic-compress -testdata.
-const PICS_VARIANTS = [
-  { label: 'MIC-PICS (4-state strips)', suffix: '_pics8', suffix4: '_pics4' },
-];
-
-// Reference codecs with no browser decoder in this repo. Ratios are
-// platform-independent (real). Decode throughput is native C (CGO) on the
-// paper's Apple M4 Pro reference machine — NOT a browser number.
-// Source: results/20260622-225015/paper-tables.txt (Table 1, Table 4/5).
-const REFERENCE_CODECS = {
-  HTJ2K: {
-    label: 'HTJ2K (native C, M4 Pro — no browser decoder)',
-    ratio: { MR: 2.38, CT: 1.77, CR: 3.77, MG1: 8.25, MG2: 8.24, MG3: 2.22, DX_HAND: 2.37, PET1: 3.02 },
-    decompMBps: { MR: 328, CT: 299, CR: 316, MG1: 612, MG2: 622, MG3: 314, DX_HAND: 316, PET1: 377 },
-  },
-  'JPEG-LS': {
-    label: 'JPEG-LS (native C, M4 Pro — no browser decoder)',
-    ratio: { MR: 2.52, CT: 2.68, CR: 3.96, MG1: 8.91, MG2: 8.90, MG3: 2.38, DX_HAND: 2.48, PET1: 3.21 },
-    decompMBps: { MR: 137, CT: 158, CR: 181, MG1: 481, MG2: 492, MG3: 175, DX_HAND: 147, PET1: 197 },
-  },
-};
+const REF_MANIFEST = loadRefManifest();
 
 // ---------------------------------------------------------------------------
 // Real decode timing (MIC, single-threaded)
@@ -191,36 +150,54 @@ async function collectCodecResults() {
     const rawBytes = img.w * img.h * 2;
     const codecs = [];
 
-    for (const variant of MIC_VARIANTS) {
-      const path = resolve(__dir, `testdata/${img.name}${variant.suffix}.mic`);
-      if (!existsSync(path)) continue;
-      const bytes = new Uint8Array(readFileSync(path));
-      const { medianMs } = timeDecode(bytes);
-      codecs.push({ label: variant.label, compressedBytes: bytes.length, decodeMs: medianMs, reference: false });
-    }
+    for (const codec of CODEC_REGISTRY) {
+      if (codec.kind === 'mic') {
+        const path = resolve(__dir, `testdata/${img.name}${codec.suffix}.mic`);
+        if (!existsSync(path)) continue;
+        const bytes = new Uint8Array(readFileSync(path));
+        const { medianMs } = timeDecode(bytes);
+        codecs.push({ label: codec.label, compressedBytes: bytes.length, decodeMs: medianMs, reference: false });
 
-    for (const variant of PICS_VARIANTS) {
-      let path = resolve(__dir, `testdata/${img.name}${variant.suffix}.mic`);
-      if (!existsSync(path)) path = resolve(__dir, `testdata/${img.name}${variant.suffix4}.mic`);
-      if (!existsSync(path)) continue;
-      const bytes = new Uint8Array(readFileSync(path));
-      const hdr = MICDecoder.parsePICSHeader(bytes);
-      const workers = Math.min(hdr.numStrips, availableWorkers);
-      const { medianMs } = await timePICSDecode(bytes, workers);
-      codecs.push({
-        label: `${variant.label} [${workers}w]`, compressedBytes: bytes.length,
-        decodeMs: medianMs, reference: false,
-      });
-    }
+      } else if (codec.kind === 'pics') {
+        // Load only this codec's own strip file (see candidatePaths in
+        // pacs-runner.mjs) — no cross-strip-count fallback.
+        const path = resolve(__dir, `testdata/${img.name}${codec.suffix}.mic`);
+        if (!existsSync(path)) continue;
+        const bytes = new Uint8Array(readFileSync(path));
+        const hdr = MICDecoder.parsePICSHeader(bytes);
+        const workers = Math.min(hdr.numStrips, availableWorkers);
+        const { medianMs } = await timePICSDecode(bytes, workers);
+        codecs.push({
+          label: `${codec.label} [${workers}w]`, compressedBytes: bytes.length,
+          decodeMs: medianMs, reference: false,
+        });
 
-    for (const [codecName, ref] of Object.entries(REFERENCE_CODECS)) {
-      const ratio = ref.ratio[img.name];
-      const mbps = ref.decompMBps[img.name];
-      if (ratio == null || mbps == null) continue;
-      const compressedBytes = Math.round(rawBytes / ratio);
-      const outputMB = rawBytes / (1024 * 1024);
-      const decodeMs = (outputMB / mbps) * 1000;
-      codecs.push({ label: ref.label, compressedBytes, decodeMs, reference: true });
+      } else if (codec.kind === 'wasm') {
+        // Reference codec: no browser/WASM decoder in the Node script (that's
+        // the dashboard's job). Prefer the real .jph/.jls/.jxl size measured by
+        // `mic-refgen` (refcodecs-manifest.json) when present; else fall back to
+        // the paper's native ratio table. Decode ms is always the native-C
+        // reference throughput (informational, not a live browser measurement).
+        const ref = REFERENCE_NATIVE[codec.manifestKey];
+        if (!ref) continue;
+        const mbps = ref.decompMBps[img.name];
+        if (mbps == null) continue;
+        const manifestEntry = REF_MANIFEST?.images?.[img.name]?.[codec.manifestKey];
+        let compressedBytes;
+        if (manifestEntry?.bytes != null) {
+          compressedBytes = manifestEntry.bytes;                 // real measured file
+        } else if (ref.ratio[img.name] != null) {
+          compressedBytes = Math.round(rawBytes / ref.ratio[img.name]); // fallback
+        } else {
+          continue;
+        }
+        const outputMB = rawBytes / (1024 * 1024);
+        const decodeMs = (outputMB / mbps) * 1000;
+        codecs.push({
+          label: `${codec.label} (native C, M4 Pro — no browser decoder)`,
+          compressedBytes, decodeMs, reference: true,
+        });
+      }
     }
 
     perImage[img.name] = { ...img, rawBytes, codecs };
@@ -229,12 +206,10 @@ async function collectCodecResults() {
 }
 
 // ---------------------------------------------------------------------------
-// Formatting
+// Formatting (fmtMs/fmtKB come from pacs-model.mjs; pad helpers are Node-only)
 // ---------------------------------------------------------------------------
 const pad = (s, w) => String(s).padStart(w);
 const padL = (s, w) => String(s).padEnd(w);
-const fmtMs = (ms) => (ms < 1000 ? `${ms.toFixed(1)} ms` : `${(ms / 1000).toFixed(2)} s`);
-const fmtKB = (b) => `${(b / 1024).toFixed(0)} KB`;
 
 function printImageReport(img) {
   console.log(`\n${img.name}  (${img.modality}, ${img.w}×${img.h}, raw ${(img.rawBytes / 1024 / 1024).toFixed(2)} MB)`);
@@ -284,23 +259,8 @@ function printImageReport(img) {
 //     Approximated here as rtt + totalTransfer + decode(last image only),
 //     which is accurate whenever decode-per-image << transfer-per-image
 //     (true for MIC on every profile below; network dominates).
+//     simulateStudy() and STUDIES now come from ./pacs-model.mjs.
 // ---------------------------------------------------------------------------
-function simulateStudy(imageBytesList, decodeMsList, mbps, rttMs) {
-  const totalBytes = imageBytesList.reduce((a, b) => a + b, 0);
-  const totalTransferMs = transferMs(totalBytes, mbps);
-  const totalDecodeMs = decodeMsList.reduce((a, b) => a + b, 0);
-  const firstImageMs = rttMs + transferMs(imageBytesList[0], mbps) + decodeMsList[0];
-  const worstCaseMs = rttMs + totalTransferMs + totalDecodeMs;
-  const pipelinedMs = rttMs + totalTransferMs + decodeMsList[decodeMsList.length - 1];
-  return { firstImageMs, worstCaseMs, pipelinedMs, totalBytes };
-}
-
-const STUDIES = [
-  { name: '4-view digital mammography (MG1×2 + MG2×2)', images: ['MG1', 'MG1', 'MG2', 'MG2'] },
-  { name: 'CR chest series (10 exposures)', images: Array(10).fill('CR') },
-  { name: 'MRI sequence (24 slices)', images: Array(24).fill('MR') },
-];
-
 function printStudyReport(perImage, codecLabel) {
   console.log(`\nStudy-load simulation — codec: ${codecLabel}`);
   console.log('='.repeat(100));
