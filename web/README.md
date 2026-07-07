@@ -697,12 +697,14 @@ python3 serve.py 8080                                # serve with COOP/COEP
 ```
 
 Beyond the single-frame images, the dashboard has a **cine / multi-frame** section
-over five public-domain studies (cardiac cine MR, XA angiography, nuclear-medicine
-gated heart, enhanced MR & CT). Every frame is emitted as an independent
+over seven studies (five public-domain fetched datasets — cardiac cine MR, XA
+angiography, nuclear-medicine gated heart, enhanced MR & CT — plus two reused from
+the whole-image demo corpus). Every frame is emitted as an independent
 single-frame image, so the full codec matrix runs per frame and the section
 reports full cine-loop decode time and frames/s. The `fetch-cine-sources.sh` step
-above downloads the source DICOMs (and transcodes the JPEG-Lossless XA sample to
-uncompressed); `mic-compress`/`mic-refgen` then emit the per-frame files. See
+above downloads the first five source DICOMs (and transcodes the JPEG-Lossless XA
+sample to uncompressed); `mic-compress`/`mic-refgen` then emit the per-frame files
+for all seven datasets. See
 [docs/benchmarks.md §12](../docs/benchmarks.md#12-browser-pacs-web-viewer-benchmark).
 
 Which codecs decode **live** vs. **informational**:

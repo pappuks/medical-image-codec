@@ -73,6 +73,8 @@ export const CINE_DATASETS = [
   { id: 'CINE_NM',     label: 'NM gated heart',      modality: 'Nuclear medicine', frames: 13, w: 64,  h: 64,  bits: 16, pics: 4 },
   { id: 'CINE_EMR',    label: 'Enhanced MR',         modality: 'MR (volumetric)',  frames: 10, w: 64,  h: 64,  bits: 16, pics: 4 },
   { id: 'CINE_ECT',    label: 'Enhanced CT',         modality: 'CT (volumetric)',  frames: 2,  w: 512, h: 512, bits: 16, pics: 4 },
+  { id: 'CINE_TOMO',    label: 'Breast tomosynthesis', modality: 'MG (tomosynthesis)', frames: 16, w: 1890, h: 2457, bits: 10, pics: 8 },
+  { id: 'CINE_CTMULTI', label: 'CT axial series',       modality: 'CT (series)',       frames: 16, w: 512,  h: 512,  bits: 12, pics: 8 },
 ];
 
 // A representative subset for quick cine smoke runs (headless CI). The cardiac

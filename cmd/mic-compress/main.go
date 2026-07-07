@@ -354,6 +354,24 @@ func readDicomSeries(seriesDir string) ([][]uint16, int, int, uint16, error) {
 	return frames, width, height, maxValue, nil
 }
 
+// cineSourcePath returns the on-disk path used for the existence check —
+// works uniformly for a single file or a directory (os.Stat handles both).
+func cineSourcePath(ds cineDataset) string {
+	if ds.dir != "" {
+		return ds.dir
+	}
+	return ds.file
+}
+
+// readCineFrames reads a cine dataset's frames from whichever source it
+// declares.
+func readCineFrames(ds cineDataset) ([][]uint16, int, int, uint16, error) {
+	if ds.dir != "" {
+		return readDicomSeries(ds.dir)
+	}
+	return readDicomMultiFrame(ds.file)
+}
+
 type testImage struct {
 	name string
 	file string
@@ -374,6 +392,11 @@ var testImages = []testImage{
 	{name: "PET1", file: "testdata/expanded/PET_NSCLC1_256_256_image.bin", cols: 256, rows: 256},
 }
 
+const (
+	mgTomoDICOMFile  = "testdata/Series 73200000 [MG - R CC Breast Tomosynthesis Image]/1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.647.0.dcm"
+	ctMultiSeriesDir = "testdata/0acbebb8d463b4b9ca88cf38431aac69"
+)
+
 // Multiframe DICOM test images (single multiframe DICOM file)
 var dicomTestImages = []struct {
 	name string
@@ -381,7 +404,7 @@ var dicomTestImages = []struct {
 }{
 	{
 		name: "MG_TOMO",
-		file: "testdata/Series 73200000 [MG - R CC Breast Tomosynthesis Image]/1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.647.0.dcm",
+		file: mgTomoDICOMFile,
 	},
 }
 
@@ -393,17 +416,25 @@ var dicomTestImages = []struct {
 // testdata/multiframe/fetch-cine-sources.sh. Keep in sync with the frame counts
 // declared in web/pacs-model.mjs CINE_DATASETS and the cine list in
 // cmd/mic-refgen/main.go.
-var cineDatasets = []struct {
+type cineDataset struct {
 	id         string
-	file       string
-	maxFrames  int // 0 = all frames
-	picsStrips int // 0 = no PICS variant
-}{
+	file       string // set for single multi-frame DICOM file sources (readDicomMultiFrame)
+	dir        string // set for DICOM series directory sources (readDicomSeries); mutually exclusive with file
+	maxFrames  int    // 0 = all frames
+	picsStrips int    // 0 = no PICS variant
+}
+
+var cineDatasets = []cineDataset{
 	{id: "CINE_MRCARD", file: "testdata/multiframe/MR-MONO2-8-16x-heart.dcm", picsStrips: 4}, // cardiac cine MR, 16f 256x256 8b
 	{id: "CINE_XA", file: "testdata/multiframe/XA-MONO2-8-12x-catheter.dcm", picsStrips: 8},  // XA coronary angiography, 12f 512x512 8b
 	{id: "CINE_NM", file: "testdata/multiframe/NM-MONO2-16-13x-heart.dcm", picsStrips: 4},    // nuclear medicine gated heart, 13f 64x64 16b
 	{id: "CINE_EMR", file: "testdata/multiframe/emri_small.dcm", picsStrips: 4},              // enhanced/volumetric MR, 10f 64x64 16b
 	{id: "CINE_ECT", file: "testdata/multiframe/eCT_Supplemental.dcm", picsStrips: 4},        // enhanced CT, 2f 512x512 16b
+	// Reuse the existing MG_TOMO/CT_MULTI DICOM sources (already in testdata/ for
+	// the whole-image demo tables) as per-frame cine datasets, capped to 16 frames
+	// to bound full-run wall-clock time (native: 69f / 203f respectively).
+	{id: "CINE_TOMO", file: mgTomoDICOMFile, maxFrames: 16, picsStrips: 8},    // breast tomosynthesis DBT, 1890x2457 10b
+	{id: "CINE_CTMULTI", dir: ctMultiSeriesDir, maxFrames: 16, picsStrips: 8}, // CT axial series, 512x512
 }
 
 // Multiframe DICOM series (directory of individual DICOM files)
@@ -413,7 +444,7 @@ var dicomSeriesImages = []struct {
 }{
 	{
 		name: "CT_MULTI",
-		dir:  "testdata/0acbebb8d463b4b9ca88cf38431aac69",
+		dir:  ctMultiSeriesDir,
 	},
 }
 
@@ -553,6 +584,43 @@ func readTIFFRGB(fileName string) ([]byte, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("unexpected RGB size: got %d, want %d", len(rgb), width*height*3)
 	}
 	return rgb, width, height, nil
+}
+
+// emitCineDataset compresses every frame (capped at ds.maxFrames, 0 = all) of
+// one cine dataset across the full MIC/PICS variant matrix and records a
+// per-frame checksum into cineEntries. Errors are logged and skip the
+// offending frame/dataset — they never abort the -testdata run.
+func emitCineDataset(outDir string, ds cineDataset, cineEntries map[string]rawManifestEntry) {
+	src := cineSourcePath(ds)
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "  skip cine %s: %s not found (run testdata/multiframe/fetch-cine-sources.sh)\n", ds.id, src)
+		return
+	}
+	frames, w, h, _, err := readCineFrames(ds)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  error reading cine %s: %v\n", ds.id, err)
+		return
+	}
+	n := len(frames)
+	if ds.maxFrames > 0 && n > ds.maxFrames {
+		n = ds.maxFrames
+	}
+	fmt.Printf("Compressing cine %s: %d frames %dx%d (pics=%d)...\n", ds.id, n, w, h, ds.picsStrips)
+	for f := 0; f < n; f++ {
+		px := frames[f]
+		var mv uint16
+		for _, v := range px {
+			if v > mv {
+				mv = v
+			}
+		}
+		name := fmt.Sprintf("%s_f%03d", ds.id, f)
+		if err := writeMICVariants(outDir, name, px, w, h, mv, ds.picsStrips); err != nil {
+			fmt.Fprintf(os.Stderr, "  error compressing cine %s: %v\n", name, err)
+			continue
+		}
+		cineEntries[name] = rawManifestEntry{Width: w, Height: h, Checksum: fmt.Sprintf("fnv1a32:%08x", fnv1a32LE(px))}
+	}
 }
 
 func main() {
@@ -901,39 +969,7 @@ func main() {
 		// matrix, plus a per-frame checksum for the browser verify pass.
 		cineEntries := map[string]rawManifestEntry{}
 		for _, ds := range cineDatasets {
-			if _, err := os.Stat(ds.file); os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "  skip cine %s: %s not found (run testdata/multiframe/fetch-cine-sources.sh)\n", ds.id, ds.file)
-				continue
-			}
-			frames, w, h, _, err := readDicomMultiFrame(ds.file)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  error reading cine %s: %v\n", ds.id, err)
-				continue
-			}
-			n := len(frames)
-			if ds.maxFrames > 0 && n > ds.maxFrames {
-				n = ds.maxFrames
-			}
-			fmt.Printf("Compressing cine %s: %d frames %dx%d (pics=%d)...\n", ds.id, n, w, h, ds.picsStrips)
-			for f := 0; f < n; f++ {
-				px := frames[f]
-				var mv uint16
-				for _, v := range px {
-					if v > mv {
-						mv = v
-					}
-				}
-				name := fmt.Sprintf("%s_f%03d", ds.id, f)
-				if err := writeMICVariants(outDir, name, px, w, h, mv, ds.picsStrips); err != nil {
-					fmt.Fprintf(os.Stderr, "  error compressing cine %s: %v\n", name, err)
-					continue
-				}
-				cineEntries[name] = rawManifestEntry{
-					Width:    w,
-					Height:   h,
-					Checksum: fmt.Sprintf("fnv1a32:%08x", fnv1a32LE(px)),
-				}
-			}
+			emitCineDataset(outDir, ds, cineEntries)
 		}
 
 		// Raw-pixel checksum manifest for the browser PACS benchmark's

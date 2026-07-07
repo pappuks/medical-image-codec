@@ -9,7 +9,7 @@
 //   2. Decode time per codec (single-hue magnitude bars).
 //   3. Compression ratio per codec (single-hue magnitude bars).
 
-import { transferMs, fmtMs, fmtRatio, fmtKB } from './pacs-model.mjs';
+import { transferMs, fmtMs, fmtRatio, fmtKB, CINE_DATASETS } from './pacs-model.mjs';
 
 const PALETTE = {
   light: {
@@ -149,13 +149,26 @@ export function renderCharts(container, result, { profiles }) {
 
   // Image + profile pickers driving all three charts.
   const images = [...new Set(result.records.filter((r) => r.compressedBytes != null).map((r) => r.image))];
-  const bigDefault = images.includes('CR') ? 'CR' : (images.includes('MG1') ? 'MG1' : images[images.length - 1]);
+  const cineIds = [...new Set((result.cineRecords || [])
+    .filter((r) => r.compressedBytesTotal != null).map((r) => r.cine))];
+  const cineLabel = (id) => CINE_DATASETS.find((d) => d.id === id)?.label ?? id;
+
+  const bigDefault = images.includes('CR') ? 'img:CR'
+    : images.includes('MG1') ? 'img:MG1'
+    : images.length ? `img:${images[images.length - 1]}`
+    : cineIds.length ? `cine:${cineIds[0]}`
+    : null;
+
+  const chartImageOptions = [
+    ...images.map((n) => ({ value: `img:${n}`, text: n })),
+    ...cineIds.map((id) => ({ value: `cine:${id}`, text: `${cineLabel(id)} (cine)` })),
+  ];
 
   const controls = document.createElement('div');
   controls.style.cssText = 'grid-column:1/-1; display:flex; gap:16px; flex-wrap:wrap; align-items:end;';
   controls.innerHTML = `
     <div class="ctl"><label>Chart image</label>
-      <select id="chart-image">${images.map((n) => `<option ${n === bigDefault ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <select id="chart-image">${chartImageOptions.map((o) => `<option value="${o.value}" ${o.value === bigDefault ? 'selected' : ''}>${o.text}</option>`).join('')}</select></div>
     <div class="ctl"><label>Network profile</label>
       <select id="chart-profile">${profiles.map((p, i) => `<option value="${i}" ${p.name === 'Cellular (4G/LTE)' ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div>`;
   container.appendChild(controls);
@@ -168,10 +181,21 @@ export function renderCharts(container, result, { profiles }) {
   const p = palette();
   const draw = () => {
     mount.innerHTML = '';
-    const imgName = container.querySelector('#chart-image').value;
+    const [kind, key] = container.querySelector('#chart-image').value.split(':');
+    const isCine = kind === 'cine';
     const profIdx = parseInt(container.querySelector('#chart-profile').value, 10) || 0;
     const profile = profiles[profIdx];
-    const recs = result.records.filter((r) => r.image === imgName && r.compressedBytes != null && r.decodeMs != null);
+
+    const recs = isCine
+      ? (result.cineRecords || [])
+          .filter((r) => r.cine === key && r.compressedBytesTotal != null && r.loopMs != null)
+          .map((r) => ({ label: r.label, liveDecode: r.liveDecode,
+                          compressedBytes: r.compressedBytesTotal, decodeMs: r.loopMs, ratio: r.ratio }))
+      : result.records
+          .filter((r) => r.image === key && r.compressedBytes != null && r.decodeMs != null)
+          .map((r) => ({ label: r.label, liveDecode: r.liveDecode,
+                          compressedBytes: r.compressedBytes, decodeMs: r.decodeMs, ratio: r.ratio }));
+    const subject = isCine ? `${cineLabel(key)} (cine)` : key;
 
     // 1. Time-to-display stacked (network = rtt + transfer, decode)
     const ttdRows = recs.map((r) => {
@@ -185,7 +209,7 @@ export function renderCharts(container, result, { profiles }) {
         ],
       };
     });
-    const c1 = card(`Time to display — ${imgName} over ${profile.name}`,
+    const c1 = card(`Time to display — ${subject} over ${profile.name}`,
       `${profile.mbps} Mbps, ${profile.rttMs} ms RTT. Stacked: network transfer+RTT vs. decode.`,
       [{ name: 'Network (transfer+RTT)', color: p.network }, { name: 'Decode', color: p.decode }]);
     c1.appendChild(barChart('Time to display', ttdRows, { tickFmt: (v) => (v >= 1000 ? (v / 1000).toFixed(1) + 's' : Math.round(v) + 'ms') }));
@@ -196,7 +220,10 @@ export function renderCharts(container, result, { profiles }) {
       label: r.label, value: r.decodeMs, valueText: fmtMs(r.decodeMs),
       color: r.liveDecode ? p.mag : p.ref,
     }));
-    const c2 = card(`Decode time — ${imgName}`, 'Live browser decode (blue) vs. informational native-C reference (grey).');
+    const c2 = card(`Decode time — ${subject}`,
+      isCine
+        ? 'Live browser decode (blue) vs. informational native-C reference (grey). Cine: total loop time for all frames, not per-frame.'
+        : 'Live browser decode (blue) vs. informational native-C reference (grey).');
     c2.appendChild(barChart('Decode time', decRows, { tickFmt: (v) => (v >= 1000 ? (v / 1000).toFixed(1) + 's' : Math.round(v) + 'ms') }));
     mount.appendChild(c2);
 
@@ -205,7 +232,7 @@ export function renderCharts(container, result, { profiles }) {
       label: r.label, value: r.ratio, valueText: fmtRatio(r.ratio) + '  ' + fmtKB(r.compressedBytes),
       color: p.mag2,
     }));
-    const c3 = card(`Compression ratio — ${imgName}`, 'Higher is smaller on the wire.');
+    const c3 = card(`Compression ratio — ${subject}`, 'Higher is smaller on the wire.');
     c3.appendChild(barChart('Compression ratio', ratioRows, { tickFmt: (v) => v.toFixed(1) + 'x' }));
     mount.appendChild(c3);
   };

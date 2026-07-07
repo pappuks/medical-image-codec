@@ -517,14 +517,16 @@ prereqs) is in the **[Web Decoder README](../web/README.md#pacs-web-viewer-bench
 
 ### Cine / multi-frame datasets
 
-Both runners include a cine section over five public-domain multi-frame studies.
-Each is a real, uncompressed (native) multi-frame DICOM whose **every frame is
-emitted as an independent single-frame image** (`<id>_f<NNN>`) by
-`mic-compress -testdata` and `mic-refgen`. Because each frame is a normal
-single-frame file, the *entire* codec matrix (MIC 1/4/8-state, PICS, HTJ2K,
-JPEG-LS, JPEG-XL) runs per frame exactly as in the single-frame tables; the
-benchmark fetches and decodes each frame independently and aggregates to a full
-cine-loop decode time and frames/s — the way a PACS viewer streams a cine loop.
+Both runners include a cine section over seven multi-frame studies (five
+fetched via `testdata/multiframe/fetch-cine-sources.sh` and two reused from
+the whole-image demo corpus). Each is a real, uncompressed (native) multi-frame
+DICOM whose **every frame is emitted as an independent single-frame image**
+(`<id>_f<NNN>`) by `mic-compress -testdata` and `mic-refgen`. Because each frame
+is a normal single-frame file, the *entire* codec matrix (MIC 1/4/8-state, PICS,
+HTJ2K, JPEG-LS, JPEG-XL) runs per frame exactly as in the single-frame tables;
+the benchmark fetches and decodes each frame independently and aggregates to a
+full cine-loop decode time and frames/s — the way a PACS viewer streams a cine
+loop.
 
 | Dataset | Modality | Frames | Dims | Depth | Source |
 |---|---|---|---|---|---|
@@ -533,11 +535,15 @@ cine-loop decode time and frames/s — the way a PACS viewer streams a cine loop
 | `CINE_NM` | Nuclear-medicine gated heart | 13 | 64×64 | 16-bit | `NM-MONO2-16-13x-heart` |
 | `CINE_EMR` | Enhanced / volumetric MR | 10 | 64×64 | 16-bit | `emri_small` |
 | `CINE_ECT` | Enhanced CT | 2 | 512×512 | 16-bit | `eCT_Supplemental` |
+| `CINE_TOMO` | Breast tomosynthesis DBT | 16 (capped) | 1890×2457 | 10-bit | MG_TOMO whole-image source (native: 69f) |
+| `CINE_CTMULTI` | CT axial series | 16 (capped) | 512×512 | 12-bit | CT_MULTI whole-image source (native: 203f) |
 
-Sources are fetched and prepared by
+The first five sources are fetched and prepared by
 [`testdata/multiframe/fetch-cine-sources.sh`](../testdata/multiframe/fetch-cine-sources.sh)
 (public-domain Barre / pydicom-data samples; the JPEG-Lossless XA is transcoded
-to uncompressed once via the project `.venv`). Because the 8-bit cardiac/XA/NM
+to uncompressed once via the project `.venv`). The last two reuse existing
+testdata sources already present for the whole-image demo tables, capped to 16
+frames to keep the benchmark wall-clock time bounded. Because the 8-bit cardiac/XA/NM
 frames trip CharLS's 1-byte sample packing and libjxl's UINT16-at-8-bit path,
 `mic-refgen` floors the *reference-codec* declared bit depth at 9 (still bit-exact
 lossless). Representative cine throughput (Apple M2 Max, MIC decode live):
@@ -547,6 +553,14 @@ lossless). Representative cine throughput (Apple M2 Max, MIC decode live):
 | Cardiac cine MR (16f) | ~460 fps | ~650 fps (4 strips) |
 | XA angiography (12f) | ~140 fps | ~290 fps (8 strips) |
 | Enhanced CT (2f, 512²) | ~210 fps | ~440 fps (4 strips) |
+| Breast tomosynthesis (16f, 1890×2457) | ~17 fps | ~51 fps (8 strips) |
+| CT axial series (16f, 512²) | ~86 fps | ~218 fps (8 strips) |
+
+`CINE_TOMO`'s per-frame raw size (~9.3 MB, comparable to a full CR/MG image) makes
+it the heaviest cine dataset by far — single-threaded MIC decode throughput drops
+to ~17 fps accordingly, while 8-strip PICS recovers ~3× to ~51 fps. `CINE_CTMULTI`
+frames are 512×512 like `CINE_XA` but 12-bit instead of 8-bit and unpadded, giving
+a lower ~2.4x compression ratio than the smaller cine datasets.
 
 ### Build prerequisites for the WASM variants
 

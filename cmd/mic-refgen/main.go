@@ -30,6 +30,8 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/suyashkumar/dicom"
@@ -69,6 +71,7 @@ var testImages = []testImage{
 type cineDataset struct {
 	id        string
 	file      string
+	dir       string
 	maxFrames int // 0 = all frames
 }
 
@@ -78,6 +81,8 @@ var cineDatasets = []cineDataset{
 	{id: "CINE_NM", file: "testdata/multiframe/NM-MONO2-16-13x-heart.dcm"},    // nuclear medicine gated heart, 13f
 	{id: "CINE_EMR", file: "testdata/multiframe/emri_small.dcm"},              // enhanced/volumetric MR, 10f
 	{id: "CINE_ECT", file: "testdata/multiframe/eCT_Supplemental.dcm"},        // enhanced CT, 2f
+	{id: "CINE_TOMO", file: "testdata/Series 73200000 [MG - R CC Breast Tomosynthesis Image]/1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.647.0.dcm", maxFrames: 16},
+	{id: "CINE_CTMULTI", dir: "testdata/0acbebb8d463b4b9ca88cf38431aac69", maxFrames: 16},
 }
 
 // readDicomFrames extracts every native (uncompressed) frame from a multi-frame
@@ -114,6 +119,99 @@ func readDicomFrames(fileName string) ([][]uint16, int, int, error) {
 		frames[i] = px
 	}
 	return frames, w, h, nil
+}
+
+// readDicomSeries reads all single-frame DICOM files from a directory, ordered
+// by InstanceNumber. Mirrors cmd/mic-compress/main.go's readDicomSeries
+// (duplicated on purpose — see the package doc comment above).
+func readDicomSeries(seriesDir string) ([][]uint16, int, int, error) {
+	entries, err := os.ReadDir(seriesDir)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("read directory: %w", err)
+	}
+
+	type dicomEntry struct {
+		path           string
+		instanceNumber int
+	}
+	var dcmFiles []dicomEntry
+
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".dcm" {
+			continue
+		}
+		fpath := filepath.Join(seriesDir, e.Name())
+		dataset, err := dicom.ParseFile(fpath, nil)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("parse %s: %w", e.Name(), err)
+		}
+		el, err := dataset.FindElementByTag(tag.InstanceNumber)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("no InstanceNumber in %s: %w", e.Name(), err)
+		}
+		instNum, err := strconv.Atoi(fmt.Sprintf("%v", el.Value.GetValue().([]string)[0]))
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("parse InstanceNumber in %s: %w", e.Name(), err)
+		}
+		dcmFiles = append(dcmFiles, dicomEntry{path: fpath, instanceNumber: instNum})
+	}
+
+	if len(dcmFiles) == 0 {
+		return nil, 0, 0, fmt.Errorf("no .dcm files in %s", seriesDir)
+	}
+
+	sort.Slice(dcmFiles, func(i, j int) bool {
+		return dcmFiles[i].instanceNumber < dcmFiles[j].instanceNumber
+	})
+
+	var width, height int
+	frames := make([][]uint16, len(dcmFiles))
+
+	for f, de := range dcmFiles {
+		dataset, err := dicom.ParseFile(de.path, nil)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("parse frame %d: %w", f, err)
+		}
+		pixelDataElement, err := dataset.FindElementByTag(tag.PixelData)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("no pixel data in frame %d: %w", f, err)
+		}
+		pixelDataInfo := dicom.MustGetPixelDataInfo(pixelDataElement.Value)
+		nativeFrame, err := pixelDataInfo.Frames[0].GetNativeFrame()
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("get native frame %d: %w", f, err)
+		}
+
+		if f == 0 {
+			width = nativeFrame.Cols
+			height = nativeFrame.Rows
+		} else if nativeFrame.Cols != width || nativeFrame.Rows != height {
+			return nil, 0, 0, fmt.Errorf("frame %d dimension mismatch: %dx%d vs %dx%d",
+				f, nativeFrame.Cols, nativeFrame.Rows, width, height)
+		}
+
+		pixels := make([]uint16, width*height)
+		for j := 0; j < len(nativeFrame.Data); j++ {
+			pixels[j] = uint16(nativeFrame.Data[j][0])
+		}
+		frames[f] = pixels
+	}
+
+	return frames, width, height, nil
+}
+
+func cineSourcePath(ds cineDataset) string {
+	if ds.dir != "" {
+		return ds.dir
+	}
+	return ds.file
+}
+
+func readCineFrames(ds cineDataset) ([][]uint16, int, int, error) {
+	if ds.dir != "" {
+		return readDicomSeries(ds.dir)
+	}
+	return readDicomFrames(ds.file)
 }
 
 const outDir = "web/testdata"
@@ -313,11 +411,12 @@ func main() {
 	// an independent single-frame image (<id>_f<NNN>), so the browser benchmark
 	// can decode HTJ2K/JPEG-LS live per frame alongside MIC (JXL informational).
 	for _, ds := range cineDatasets {
-		if _, err := os.Stat(ds.file); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  skip cine %s: %s not found (run testdata/multiframe/fetch-cine-sources.sh)\n", ds.id, ds.file)
+		src := cineSourcePath(ds)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  skip cine %s: %s not found (run testdata/multiframe/fetch-cine-sources.sh)\n", ds.id, src)
 			continue
 		}
-		frames, w, h, err := readDicomFrames(ds.file)
+		frames, w, h, err := readCineFrames(ds)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  error reading cine %s: %v\n", ds.id, err)
 			continue

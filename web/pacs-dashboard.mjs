@@ -21,13 +21,13 @@ const HEADLESS = params.get('headless') === '1';
 function readOpts() {
   const imgSet = $('imageset').value;
   const quick = imgSet === 'quick';
-  const images = quick
-    ? IMAGES.filter((i) => QUICK_IMAGE_NAMES.includes(i.name))
-    : IMAGES;
-  // In quick mode, run only a representative cine dataset to keep the run fast.
+  const cineOnly = imgSet === 'cine';
+  const images = cineOnly
+    ? []
+    : (quick ? IMAGES.filter((i) => QUICK_IMAGE_NAMES.includes(i.name)) : IMAGES);
   const cine = quick
     ? CINE_DATASETS.filter((d) => QUICK_CINE_IDS.includes(d.id))
-    : CINE_DATASETS;
+    : CINE_DATASETS; // 'full' and 'cine' both run every cine dataset
   return {
     images,
     cine,
@@ -309,7 +309,7 @@ $('cancel').addEventListener('click', () => { location.reload(); });
 // Reflect URL params into controls (headless + shareable links).
 if (params.has('iterations')) $('iterations').value = params.get('iterations');
 if (params.has('warmup')) $('warmup').value = params.get('warmup');
-if (params.get('images') === 'quick' || params.get('images') === 'full') $('imageset').value = params.get('images');
+if (['quick', 'full', 'cine'].includes(params.get('images'))) $('imageset').value = params.get('images');
 if (params.get('verify') === '1') $('verify').checked = true;
 if (params.get('allprofiles') === '1') $('allprofiles').checked = true;
 
