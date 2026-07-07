@@ -659,6 +659,23 @@ PICS files encode an image as independent strips, enabling parallel decoding acr
 
 Workers beyond the strip count are capped to the strip count by the pool. For large images (CR, MG1) the 8-strip layout scales to roughly 4.5–6.7× speedup and pushes throughput to **230–560 MB/s** — well into real-time territory for diagnostic workloads. The 4- and 8-state strip variants are within a few percent of each other; 4-state is the practical default, with 8-state occasionally ahead on the longer-strip images (MG1) where V8 has time to amortise the wider state-init cost over more symbols.
 
+## PACS Web Viewer Benchmark
+
+`bench-pacs-viewer.mjs` models the thing a radiologist actually experiences in a browser-based PACS viewer: click a study, wait for pixels. That wait has two stages — network transfer of the compressed bytes, then in-browser decompression — and this benchmark measures both together instead of decode alone.
+
+```bash
+cd web
+node bench-pacs-viewer.mjs                          # 15 iterations per codec/image
+node bench-pacs-viewer.mjs --iterations 30           # more iterations
+node bench-pacs-viewer.mjs --json results.json       # also write machine-readable results
+```
+
+For each test image it reports, per codec, the compressed size, decode time, and total "time to display" under four simulated network profiles (Hospital LAN, Hospital Wi-Fi, Home Broadband, Cellular/4G), plus a study-level simulation (a 4-view mammography exam, a 10-image CR series, a 24-slice MRI sequence) comparing pipelined (Web Worker) vs blocking (main-thread) decode.
+
+**What's real vs. approximated:** MIC decode times (1-state/4-state/8-state, and PICS parallel-strip via `worker_threads` as a stand-in for browser Web Workers) are live measurements using the actual JS decoder on whatever machine runs the script. HTJ2K and JPEG-LS are included for compressed-size comparison — compression ratio is platform-independent and pulled from the paper's benchmark data — but neither has a browser/WASM decoder in this repository, so their decode times are native C (CGO) numbers from the Apple M4 Pro reference run, shown only as an informational bound and flagged with `*` in the output. They are not a live measurement and not directly comparable to the MIC numbers on a different machine.
+
+The headline finding: on fast networks (hospital LAN/Wi-Fi) decode speed is the bottleneck and codec/threading choices matter most; on slow networks (home broadband, cellular remote reads) network transfer dominates by many multiples, so compression ratio matters far more than decode speed.
+
 ## Troubleshooting
 
 ### "corrupt stream: too short" or "did not find end of stream"
@@ -704,6 +721,7 @@ web/
 ├── test-decoder.mjs           # Node.js pixel-perfect verification test
 ├── bench-decoder.mjs          # Node.js throughput benchmark (single-threaded + worker_threads)
 ├── bench-worker.mjs           # worker_threads worker used by bench-decoder.mjs
+├── bench-pacs-viewer.mjs      # End-to-end PACS viewer simulation (network transfer + decode, see below)
 ├── README.md                  # This file
 ├── .gitignore                 # Ignores generated files below
 ├── mic-decoder.wasm           # [generated] Go WASM binary (~2.5 MB)
