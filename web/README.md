@@ -687,6 +687,7 @@ multi-MB WASM, and fetches the testdata blobs:
 
 ```bash
 # From the repo root — generate MIC + reference-codec test files first:
+bash testdata/multiframe/fetch-cine-sources.sh      # cine source DICOMs (one-time; needs .venv)
 go run ./cmd/mic-compress -testdata                 # MIC/.mic + manifest.json (no cgo)
 go run -tags cgo_ojph ./cmd/mic-refgen              # HTJ2K/.jph, JPEG-LS/.jls, JPEG-XL/.jxl
                                                     #   (needs libopenjph/libcharls/libjxl)
@@ -694,6 +695,15 @@ cd web && npm install && bash scripts/vendor-wasm.sh # vendor the WASM decoders 
 python3 serve.py 8080                                # serve with COOP/COEP
 # open http://localhost:8080/pacs-dashboard.html
 ```
+
+Beyond the single-frame images, the dashboard has a **cine / multi-frame** section
+over five public-domain studies (cardiac cine MR, XA angiography, nuclear-medicine
+gated heart, enhanced MR & CT). Every frame is emitted as an independent
+single-frame image, so the full codec matrix runs per frame and the section
+reports full cine-loop decode time and frames/s. The `fetch-cine-sources.sh` step
+above downloads the source DICOMs (and transcodes the JPEG-Lossless XA sample to
+uncompressed); `mic-compress`/`mic-refgen` then emit the per-frame files. See
+[docs/benchmarks.md §12](../docs/benchmarks.md#12-browser-pacs-web-viewer-benchmark).
 
 Which codecs decode **live** vs. **informational**:
 

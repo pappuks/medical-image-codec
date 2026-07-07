@@ -55,6 +55,48 @@ export const IMAGES = [
 export const QUICK_IMAGE_NAMES = ['MR', 'CT', 'CR'];
 
 // ---------------------------------------------------------------------------
+// Cine / multi-frame datasets. Each is a real, public-domain multi-frame DICOM
+// whose EVERY frame is emitted as an INDEPENDENT single-frame image
+// (<id>_f<NNN>) by `mic-compress -testdata` and `mic-refgen`. Treating each
+// frame as its own image lets the full single-frame codec matrix (MIC 1/4/8
+// -state, PICS, HTJ2K, JPEG-LS, JPEG-XL) run per frame, so the benchmark reports
+// cine decode throughput (full-loop ms + frames/s) by fetching and decoding each
+// frame independently — exactly how a PACS viewer streams a cine loop.
+//
+// frames/w/h/bits/pics MUST match cmd/mic-compress/main.go `cineDatasets` output
+// (frame counts come straight from the source DICOMs). Sources are fetched by
+// testdata/multiframe/fetch-cine-sources.sh.
+// ---------------------------------------------------------------------------
+export const CINE_DATASETS = [
+  { id: 'CINE_MRCARD', label: 'Cardiac cine MR',     modality: 'MR (cine)',        frames: 16, w: 256, h: 256, bits: 8,  pics: 4 },
+  { id: 'CINE_XA',     label: 'XA coronary angio',   modality: 'XA (cine)',        frames: 12, w: 512, h: 512, bits: 8,  pics: 8 },
+  { id: 'CINE_NM',     label: 'NM gated heart',      modality: 'Nuclear medicine', frames: 13, w: 64,  h: 64,  bits: 16, pics: 4 },
+  { id: 'CINE_EMR',    label: 'Enhanced MR',         modality: 'MR (volumetric)',  frames: 10, w: 64,  h: 64,  bits: 16, pics: 4 },
+  { id: 'CINE_ECT',    label: 'Enhanced CT',         modality: 'CT (volumetric)',  frames: 2,  w: 512, h: 512, bits: 16, pics: 4 },
+];
+
+// A representative subset for quick cine smoke runs (headless CI). The cardiac
+// cine (16 frames, 256×256) is the meatiest small dataset.
+export const QUICK_CINE_IDS = ['CINE_MRCARD'];
+
+// Frame image name for a cine dataset frame — MUST match the <id>_f%03d naming
+// used by cmd/mic-compress and cmd/mic-refgen.
+export const cineFrameName = (id, i) => `${id}_f${String(i).padStart(3, '0')}`;
+
+// Expand a cine dataset into its per-frame single-frame image descriptors (same
+// shape as IMAGES entries) so the runner can treat each frame as an image.
+export function cineFrameImages(ds) {
+  return Array.from({ length: ds.frames }, (_, i) => ({
+    name: cineFrameName(ds.id, i),
+    modality: ds.modality,
+    w: ds.w,
+    h: ds.h,
+    cine: ds.id,
+    frameIndex: i,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Codec registry — declarative descriptor per codec column. Single source of
 // truth shared by the Node script and the dashboard so a codec added in one
 // place cannot silently be missing from the other.

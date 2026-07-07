@@ -32,6 +32,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/suyashkumar/dicom"
+	"github.com/suyashkumar/dicom/pkg/tag"
+
 	"mic/ojph"
 )
 
@@ -57,6 +60,60 @@ var testImages = []testImage{
 	{name: "MG3", file: "testdata/MG1.RAW", cols: 3064, rows: 4774},
 	{name: "DX_HAND", file: "testdata/expanded/DX_HAND_1410_1480_image.bin", cols: 1410, rows: 1480},
 	{name: "PET1", file: "testdata/expanded/PET_NSCLC1_256_256_image.bin", cols: 256, rows: 256},
+}
+
+// cineDataset mirrors cmd/mic-compress/main.go's cineDatasets: multi-frame DICOM
+// sources whose every frame is reference-encoded as an independent single-frame
+// image (<id>_f<NNN>.{jph,jls,jxl}). Duplicated on purpose to keep this
+// cgo-tagged command decoupled from mic-compress (same rationale as testImages).
+type cineDataset struct {
+	id        string
+	file      string
+	maxFrames int // 0 = all frames
+}
+
+var cineDatasets = []cineDataset{
+	{id: "CINE_MRCARD", file: "testdata/multiframe/MR-MONO2-8-16x-heart.dcm"}, // cardiac cine MR, 16f
+	{id: "CINE_XA", file: "testdata/multiframe/XA-MONO2-8-12x-catheter.dcm"},  // XA coronary angiography, 12f
+	{id: "CINE_NM", file: "testdata/multiframe/NM-MONO2-16-13x-heart.dcm"},    // nuclear medicine gated heart, 13f
+	{id: "CINE_EMR", file: "testdata/multiframe/emri_small.dcm"},              // enhanced/volumetric MR, 10f
+	{id: "CINE_ECT", file: "testdata/multiframe/eCT_Supplemental.dcm"},        // enhanced CT, 2f
+}
+
+// readDicomFrames extracts every native (uncompressed) frame from a multi-frame
+// DICOM as little-endian uint16 pixels. Mirrors readDicomMultiFrame in
+// cmd/mic-compress/main.go.
+func readDicomFrames(fileName string) ([][]uint16, int, int, error) {
+	ds, err := dicom.ParseFile(fileName, nil)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("parse DICOM: %w", err)
+	}
+	pde, err := ds.FindElementByTag(tag.PixelData)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("find pixel data: %w", err)
+	}
+	info := dicom.MustGetPixelDataInfo(pde.Value)
+	if len(info.Frames) == 0 {
+		return nil, 0, 0, fmt.Errorf("no frames")
+	}
+	f0, err := info.Frames[0].GetNativeFrame()
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("frame 0: %w", err)
+	}
+	w, h := f0.Cols, f0.Rows
+	frames := make([][]uint16, len(info.Frames))
+	for i, fr := range info.Frames {
+		nf, err := fr.GetNativeFrame()
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("frame %d: %w", i, err)
+		}
+		px := make([]uint16, w*h)
+		for j := 0; j < len(nf.Data); j++ {
+			px[j] = uint16(nf.Data[j][0])
+		}
+		frames[i] = px
+	}
+	return frames, w, h, nil
 }
 
 const outDir = "web/testdata"
@@ -157,6 +214,71 @@ func encodeVerifyWrite(
 	}, nil
 }
 
+// encodeImageRefs reference-encodes one image/frame with all three codecs,
+// natively roundtrip-verifying each before writing <name>.{jph,jls,jxl}. Returns
+// the manifest record and the number of codec failures encountered.
+func encodeImageRefs(name string, pixels []uint16, cols, rows int) (imageManifest, int) {
+	bitDepth := bits.Len16(maxU16(pixels))
+	// Floor the declared depth at 9 bits. CharLS packs <=8-bit samples as one
+	// byte while our wrapper feeds uint16 (→ roundtrip mismatch), and libjxl
+	// rejects bits_per_sample=8 with UINT16 input (→ encode rc=-1). The 8-bit
+	// cine frames (cardiac MR, XA, NM) have values that fit in 9 bits, so
+	// declaring 9-bit keeps every reference codestream bit-exact lossless. The
+	// single-frame corpus is all >=12-bit, so this is a no-op there.
+	if bitDepth < 9 {
+		bitDepth = 9
+	}
+	rec := imageManifest{Width: cols, Height: rows, BitDepth: bitDepth}
+	failures := 0
+
+	if e, err := encodeVerifyWrite("HTJ2K", filepath.Join(outDir, name+".jph"), pixels, cols, rows,
+		func() ([]byte, error) { return ojph.CompressU16(pixels, cols, rows, bitDepth) },
+		func(c []byte) ([]uint16, error) { return ojph.DecompressU16(c, cols, rows) },
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "  %v\n", err)
+		failures++
+	} else {
+		rec.HTJ2K = e
+		fmt.Printf("  HTJ2K:   %7d bytes -> %s.jph\n", e.Bytes, name)
+	}
+
+	if e, err := encodeVerifyWrite("JPEG-LS", filepath.Join(outDir, name+".jls"), pixels, cols, rows,
+		func() ([]byte, error) { return ojph.CharlsCompressU16(pixels, cols, rows, bitDepth) },
+		func(c []byte) ([]uint16, error) { return ojph.CharlsDecompressU16(c, cols, rows) },
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "  %v\n", err)
+		failures++
+	} else {
+		rec.JPEGLS = e
+		fmt.Printf("  JPEG-LS: %7d bytes -> %s.jls\n", e.Bytes, name)
+	}
+
+	if e, err := encodeVerifyWrite("JPEG-XL", filepath.Join(outDir, name+".jxl"), pixels, cols, rows,
+		func() ([]byte, error) {
+			return ojph.JXLCompressU16(pixels, cols, rows, bitDepth, ojph.JXLDefaultEffort)
+		},
+		func(c []byte) ([]uint16, error) { return ojph.JXLDecompressU16(c, cols, rows) },
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "  %v\n", err)
+		failures++
+	} else {
+		rec.JXL = e
+		fmt.Printf("  JPEG-XL: %7d bytes -> %s.jxl\n", e.Bytes, name)
+	}
+
+	return rec, failures
+}
+
+func maxU16(px []uint16) uint16 {
+	var m uint16
+	for _, v := range px {
+		if v > m {
+			m = v
+		}
+	}
+	return m
+}
+
 func main() {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir %s: %v\n", outDir, err)
@@ -182,47 +304,35 @@ func main() {
 		}
 		fmt.Printf("Reference-encoding %s (%dx%d, %d-bit)...\n", img.name, img.cols, img.rows, bitDepth)
 
-		rec := imageManifest{Width: img.cols, Height: img.rows, BitDepth: bitDepth}
-
-		// HTJ2K (.jph)
-		if e, err := encodeVerifyWrite("HTJ2K", filepath.Join(outDir, img.name+".jph"), pixels, img.cols, img.rows,
-			func() ([]byte, error) { return ojph.CompressU16(pixels, img.cols, img.rows, bitDepth) },
-			func(c []byte) ([]uint16, error) { return ojph.DecompressU16(c, img.cols, img.rows) },
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "  %v\n", err)
-			failures++
-		} else {
-			rec.HTJ2K = e
-			fmt.Printf("  HTJ2K:   %7d bytes -> %s.jph\n", e.Bytes, img.name)
-		}
-
-		// JPEG-LS (.jls)
-		if e, err := encodeVerifyWrite("JPEG-LS", filepath.Join(outDir, img.name+".jls"), pixels, img.cols, img.rows,
-			func() ([]byte, error) { return ojph.CharlsCompressU16(pixels, img.cols, img.rows, bitDepth) },
-			func(c []byte) ([]uint16, error) { return ojph.CharlsDecompressU16(c, img.cols, img.rows) },
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "  %v\n", err)
-			failures++
-		} else {
-			rec.JPEGLS = e
-			fmt.Printf("  JPEG-LS: %7d bytes -> %s.jls\n", e.Bytes, img.name)
-		}
-
-		// JPEG-XL (.jxl)
-		if e, err := encodeVerifyWrite("JPEG-XL", filepath.Join(outDir, img.name+".jxl"), pixels, img.cols, img.rows,
-			func() ([]byte, error) {
-				return ojph.JXLCompressU16(pixels, img.cols, img.rows, bitDepth, ojph.JXLDefaultEffort)
-			},
-			func(c []byte) ([]uint16, error) { return ojph.JXLDecompressU16(c, img.cols, img.rows) },
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "  %v\n", err)
-			failures++
-		} else {
-			rec.JXL = e
-			fmt.Printf("  JPEG-XL: %7d bytes -> %s.jxl\n", e.Bytes, img.name)
-		}
-
+		rec, f := encodeImageRefs(img.name, pixels, img.cols, img.rows)
+		failures += f
 		m.Images[img.name] = rec
+	}
+
+	// Cine datasets: reference-encode every frame of each multi-frame DICOM as
+	// an independent single-frame image (<id>_f<NNN>), so the browser benchmark
+	// can decode HTJ2K/JPEG-LS live per frame alongside MIC (JXL informational).
+	for _, ds := range cineDatasets {
+		if _, err := os.Stat(ds.file); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  skip cine %s: %s not found (run testdata/multiframe/fetch-cine-sources.sh)\n", ds.id, ds.file)
+			continue
+		}
+		frames, w, h, err := readDicomFrames(ds.file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  error reading cine %s: %v\n", ds.id, err)
+			continue
+		}
+		n := len(frames)
+		if ds.maxFrames > 0 && n > ds.maxFrames {
+			n = ds.maxFrames
+		}
+		fmt.Printf("Reference-encoding cine %s: %d frames %dx%d...\n", ds.id, n, w, h)
+		for i := 0; i < n; i++ {
+			name := fmt.Sprintf("%s_f%03d", ds.id, i)
+			rec, f := encodeImageRefs(name, frames[i], w, h)
+			failures += f
+			m.Images[name] = rec
+		}
 	}
 
 	manifestPath := filepath.Join(outDir, "refcodecs-manifest.json")

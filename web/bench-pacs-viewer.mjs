@@ -30,6 +30,7 @@ import { resolve, dirname } from 'node:path';
 import { cpus } from 'node:os';
 import {
   NETWORK_PROFILES, IMAGES, CODEC_REGISTRY, REFERENCE_NATIVE,
+  CINE_DATASETS, cineFrameImages, cineFrameName,
   transferMs, simulateStudy, STUDIES, fmtMs, fmtKB,
 } from './pacs-model.mjs';
 
@@ -206,6 +207,107 @@ async function collectCodecResults() {
 }
 
 // ---------------------------------------------------------------------------
+// Cine / multi-frame: decode EVERY frame of each dataset independently (each
+// frame is its own single-frame file) and aggregate to a full-loop time and
+// frames/s. MIC variants (1/4/8-state, PICS) are live-measured; reference codecs
+// are informational (native-C throughput; cine frames aren't in the per-image
+// throughput table, so their corpus-average MB/s is used as a stand-in).
+// ---------------------------------------------------------------------------
+function refAvgMBps(key) {
+  const ref = REFERENCE_NATIVE[key];
+  if (!ref) return null;
+  const vals = Object.values(ref.decompMBps || {});
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+async function collectCineResults() {
+  const availableWorkers = Math.min(cpus().length, 8);
+  const perCine = {};
+
+  for (const ds of CINE_DATASETS) {
+    const frames = cineFrameImages(ds);
+    const rawPerFrame = ds.w * ds.h * 2;
+    const codecs = [];
+
+    for (const codec of CODEC_REGISTRY) {
+      let comp = 0, dec = 0, measured = 0, reference = false, label = codec.label;
+
+      if (codec.kind === 'mic') {
+        for (let i = 0; i < ds.frames; i++) {
+          const path = resolve(__dir, `testdata/${cineFrameName(ds.id, i)}${codec.suffix}.mic`);
+          if (!existsSync(path)) continue;
+          const bytes = new Uint8Array(readFileSync(path));
+          comp += bytes.length;
+          dec += timeDecode(bytes).medianMs;
+          measured++;
+        }
+      } else if (codec.kind === 'pics') {
+        let workers = 0;
+        for (let i = 0; i < ds.frames; i++) {
+          const path = resolve(__dir, `testdata/${cineFrameName(ds.id, i)}${codec.suffix}.mic`);
+          if (!existsSync(path)) continue;
+          const bytes = new Uint8Array(readFileSync(path));
+          const hdr = MICDecoder.parsePICSHeader(bytes);
+          workers = Math.min(hdr.numStrips, availableWorkers);
+          comp += bytes.length;
+          dec += (await timePICSDecode(bytes, workers)).medianMs;
+          measured++;
+        }
+        if (workers) label = `${codec.label} [${workers}w]`;
+      } else if (codec.kind === 'wasm') {
+        reference = true;
+        const mbps = refAvgMBps(codec.manifestKey);
+        if (mbps == null) continue;
+        for (let i = 0; i < ds.frames; i++) {
+          const entry = REF_MANIFEST?.images?.[cineFrameName(ds.id, i)]?.[codec.manifestKey];
+          if (entry?.bytes == null) continue;
+          comp += entry.bytes;
+          dec += (rawPerFrame / (1024 * 1024)) / mbps * 1000;
+          measured++;
+        }
+        label = `${codec.label} (native C, informational)`;
+      } else {
+        continue; // browser-only kinds (micwasm/miccwasm/picscwasm) — dashboard decodes these
+      }
+
+      if (measured > 0) {
+        codecs.push({
+          label, compressedBytes: comp, loopMs: dec,
+          msPerFrame: dec / measured, fps: 1000 / (dec / measured),
+          framesMeasured: measured, reference,
+        });
+      }
+    }
+    perCine[ds.id] = { ...ds, rawBytesTotal: rawPerFrame * ds.frames, codecs };
+  }
+  return perCine;
+}
+
+function printCineReport(ds) {
+  console.log(`\n${ds.label}  (${ds.modality}, ${ds.frames} frames × ${ds.w}×${ds.h}, ${ds.bits}-bit, raw ${(ds.rawBytesTotal / 1024 / 1024).toFixed(2)} MB)`);
+  console.log('='.repeat(100));
+  const W = { codec: 40, size: 10, loop: 10, fps: 9 };
+  console.log(
+    padL('Codec', W.codec) + ' | ' + pad('Comp.', W.size) + ' | ' +
+    pad('Loop', W.loop) + ' | ' + pad('Frames/s', W.fps) + ' | Full-loop time to display, by network'
+  );
+  console.log('-'.repeat(100));
+  for (const c of ds.codecs) {
+    const netTimes = NETWORK_PROFILES.map((p) => {
+      const total = p.rttMs + transferMs(c.compressedBytes, p.mbps) + c.loopMs;
+      return padL(fmtMs(total), 16);
+    });
+    const flag = c.reference ? '*' : ' ';
+    console.log(
+      padL(c.label + flag, W.codec) + ' | ' + pad(fmtKB(c.compressedBytes), W.size) + ' | ' +
+      pad(fmtMs(c.loopMs), W.loop) + ' | ' + pad(c.fps.toFixed(c.fps >= 10 ? 0 : 1), W.fps) + ' | ' +
+      netTimes.join('')
+    );
+  }
+  console.log('* = reference codec, informational native-C decode (no Node/WASM decoder in this script)');
+}
+
+// ---------------------------------------------------------------------------
 // Formatting (fmtMs/fmtKB come from pacs-model.mjs; pad helpers are Node-only)
 // ---------------------------------------------------------------------------
 const pad = (s, w) => String(s).padStart(w);
@@ -306,6 +408,12 @@ for (const img of IMAGES) {
   if (perImage[img.name].codecs.length > 0) printImageReport(perImage[img.name]);
 }
 
+const perCine = await collectCineResults();
+console.log('\n\n########## Cine / multi-frame (every frame decoded independently) ##########');
+for (const ds of CINE_DATASETS) {
+  if (perCine[ds.id].codecs.length > 0) printCineReport(perCine[ds.id]);
+}
+
 printStudyReport(perImage, 'MIC-4state');
 printStudyReport(perImage, 'MIC-8state');
 
@@ -318,6 +426,6 @@ console.log('  - PICS (Web Worker parallel decode) mainly helps large images (CR
 console.log('    networks, where decode time would otherwise be the bottleneck.');
 
 if (JSON_OUT) {
-  writeFileSync(JSON_OUT, JSON.stringify({ generatedAt: new Date().toISOString(), networkProfiles: NETWORK_PROFILES, images: perImage }, null, 2));
+  writeFileSync(JSON_OUT, JSON.stringify({ generatedAt: new Date().toISOString(), networkProfiles: NETWORK_PROFILES, images: perImage, cine: perCine }, null, 2));
   console.log(`\nWrote JSON results to ${JSON_OUT}`);
 }

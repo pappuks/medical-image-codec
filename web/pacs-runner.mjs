@@ -5,7 +5,7 @@
 // headless runner asserts on. No DOM here — this is drivable from a test.
 
 import {
-  IMAGES, CODEC_REGISTRY, REFERENCE_NATIVE, fnv1a32Hex,
+  IMAGES, CODEC_REGISTRY, REFERENCE_NATIVE, CINE_DATASETS, cineFrameImages, fnv1a32Hex,
 } from './pacs-model.mjs';
 import { makeAdapter } from './codecs/index.mjs';
 
@@ -69,16 +69,68 @@ async function timeMedian(adapter, bytes, iterations, warmup) {
   return times[Math.floor(times.length / 2)];
 }
 
-// Informational (non-live) decode time from the native-C reference table.
+// Informational (non-live) decode time from the native-C reference table. For
+// cine frames (image names like CINE_XA_f003, absent from the per-image table)
+// it falls back to the codec's corpus-average decode throughput so JXL still
+// gets a plausible informational number in the cine section.
 function informationalDecodeMs(manifestKey, imgName, rawBytes) {
   const ref = REFERENCE_NATIVE[manifestKey];
-  const mbps = ref?.decompMBps?.[imgName];
-  if (mbps == null) return null;
+  if (!ref) return null;
+  let mbps = ref.decompMBps?.[imgName];
+  if (mbps == null) {
+    const vals = Object.values(ref.decompMBps || {});
+    if (!vals.length) return null;
+    mbps = vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
   return (rawBytes / (1024 * 1024)) / mbps * 1000;
+}
+
+// Measure one codec on one image/frame: fetch the compressed file, time the
+// live decode (warmup + median) and optionally verify pixels, OR fall back to
+// the informational native-C reference. Returns a flat core measurement reused
+// by both the per-image loop and the per-frame cine loop.
+async function measureOne(adapter, codec, img, ctx) {
+  const rawBytes = img.w * img.h * 2;
+  const out = {
+    liveDecode: adapter.liveDecodeSupported, compressedBytes: null,
+    decodeMs: null, ratio: null, pixelsVerified: null, note: null,
+  };
+  if (adapter.liveDecodeSupported) {
+    let bytes = null;
+    for (const p of candidatePaths(codec, img.name)) {
+      bytes = await fetchBytes(ctx.baseUrl, p, ctx.fetchFn);
+      if (bytes) break;
+    }
+    if (!bytes) { out.note = 'file missing'; return out; }
+    out.compressedBytes = bytes.length;
+    out.ratio = rawBytes / bytes.length;
+    out.decodeMs = await timeMedian(adapter, bytes, ctx.iterations, ctx.warmup);
+    if (ctx.verify && ctx.rawManifest) {
+      const want = ctx.rawManifest.images?.[img.name]?.checksum;
+      const { pixels } = await adapter.decode(bytes);
+      const got = checksumOfPixels(pixels);
+      out.pixelsVerified = want != null ? (got === want) : null;
+      if (want != null && got !== want) out.note = `checksum ${got} != ${want}`;
+    }
+  } else {
+    const refEntry = ctx.refManifest?.images?.[img.name]?.[codec.manifestKey];
+    if (refEntry?.bytes != null) {
+      out.compressedBytes = refEntry.bytes;
+    } else {
+      const ratio = REFERENCE_NATIVE[codec.manifestKey]?.ratio?.[img.name];
+      if (ratio != null) out.compressedBytes = Math.round(rawBytes / ratio);
+    }
+    if (out.compressedBytes != null) out.ratio = rawBytes / out.compressedBytes;
+    out.decodeMs = informationalDecodeMs(codec.manifestKey, img.name, rawBytes);
+    out.note = 'native-C reference (no browser decoder)';
+    if (out.compressedBytes == null || out.decodeMs == null) out.note = 'no reference data';
+  }
+  return out;
 }
 
 // runBenchmark — main entry.
 //   opts.images       : subset of IMAGES to run (default all)
+//   opts.cine         : subset of CINE_DATASETS to run (default all; [] to skip)
 //   opts.codecs       : subset of CODEC_REGISTRY (default all)
 //   opts.iterations   : timed iterations per codec/image
 //   opts.warmup       : warmup decodes
@@ -89,6 +141,7 @@ function informationalDecodeMs(manifestKey, imgName, rawBytes) {
 // Returns { generatedAt, env, records, manifestPresent, refManifestPresent }.
 export async function runBenchmark(opts = {}) {
   const images = opts.images ?? IMAGES;
+  const cineDatasets = opts.cine ?? CINE_DATASETS;
   const codecs = opts.codecs ?? CODEC_REGISTRY;
   const iterations = opts.iterations ?? DEFAULT_ITERATIONS;
   const warmup = opts.warmup ?? DEFAULT_WARMUP;
@@ -116,75 +169,94 @@ export async function runBenchmark(opts = {}) {
     throw e;
   }
 
+  const ctx = { baseUrl, fetchFn, iterations, warmup, verify, rawManifest, refManifest };
+
   const records = [];
-  const total = images.length * codecs.length;
+  const cineRecords = [];
+  const total = (images.length + cineDatasets.length) * codecs.length;
   let done = 0;
 
   for (const img of images) {
     const rawBytes = img.w * img.h * 2;
     for (const codec of codecs) {
       const adapter = adapters.get(codec.id);
-      const label = codec.label;
-      onProgress({ done, total, label: `${img.name} / ${label}` });
+      onProgress({ done, total, label: `${img.name} / ${codec.label}` });
 
       const rec = {
         image: img.name, modality: img.modality, width: img.w, height: img.h,
-        rawBytes, codecId: codec.id, label, kind: codec.kind,
+        rawBytes, codecId: codec.id, label: codec.label, kind: codec.kind,
         liveDecode: adapter.liveDecodeSupported, compressedBytes: null,
         decodeMs: null, ratio: null, pixelsVerified: null, note: null,
       };
-
       try {
-        if (adapter.liveDecodeSupported) {
-          // Fetch the compressed file (first existing candidate).
-          let bytes = null;
-          for (const p of candidatePaths(codec, img.name)) {
-            bytes = await fetchBytes(baseUrl, p, fetchFn);
-            if (bytes) break;
-          }
-          if (!bytes) { rec.note = 'file missing'; done++; records.push(rec); continue; }
-          rec.compressedBytes = bytes.length;
-          rec.ratio = rawBytes / bytes.length;
-          rec.decodeMs = await timeMedian(adapter, bytes, iterations, warmup);
-
-          if (verify && rawManifest) {
-            const want = rawManifest.images?.[img.name]?.checksum;
-            const { pixels } = await adapter.decode(bytes);
-            const got = checksumOfPixels(pixels);
-            rec.pixelsVerified = want != null ? (got === want) : null;
-            if (want != null && got !== want) rec.note = `checksum ${got} != ${want}`;
-          }
-        } else {
-          // Informational codec: real size from refcodecs-manifest.json when
-          // present, native-C reference decode throughput either way.
-          const refEntry = refManifest?.images?.[img.name]?.[codec.manifestKey];
-          if (refEntry?.bytes != null) {
-            rec.compressedBytes = refEntry.bytes;
-          } else {
-            const ratio = REFERENCE_NATIVE[codec.manifestKey]?.ratio?.[img.name];
-            if (ratio != null) rec.compressedBytes = Math.round(rawBytes / ratio);
-          }
-          if (rec.compressedBytes != null) rec.ratio = rawBytes / rec.compressedBytes;
-          rec.decodeMs = informationalDecodeMs(codec.manifestKey, img.name, rawBytes);
-          rec.note = 'native-C reference (no browser decoder)';
-          if (rec.compressedBytes == null || rec.decodeMs == null) rec.note = 'no reference data';
-        }
+        Object.assign(rec, await measureOne(adapter, codec, img, ctx));
       } catch (e) {
         rec.note = `error: ${e.message}`;
       }
-
       done++;
       records.push(rec);
     }
   }
 
+  // Cine / multi-frame section: decode every frame of each dataset independently
+  // and aggregate to a full-loop time and frames/s, per (dataset, codec).
+  for (const ds of cineDatasets) {
+    const frames = cineFrameImages(ds);
+    const rawPerFrame = ds.w * ds.h * 2;
+    for (const codec of codecs) {
+      const adapter = adapters.get(codec.id);
+      onProgress({ done, total, label: `${ds.id} (cine) / ${codec.label}` });
+
+      const rec = {
+        cine: ds.id, datasetLabel: ds.label, modality: ds.modality,
+        width: ds.w, height: ds.h, bits: ds.bits, frames: ds.frames,
+        codecId: codec.id, label: codec.label, kind: codec.kind,
+        liveDecode: adapter.liveDecodeSupported,
+        framesMeasured: 0, rawBytesTotal: rawPerFrame * ds.frames,
+        compressedBytesTotal: null, ratio: null,
+        loopMs: null, msPerFrame: null, fps: null,
+        pixelsVerified: null, note: null,
+      };
+      try {
+        let comp = 0, dec = 0, verifiedSeen = false, allVerified = true;
+        for (const fr of frames) {
+          const m = await measureOne(adapter, codec, fr, ctx);
+          if (m.compressedBytes == null && m.decodeMs == null) {
+            if (!rec.note) rec.note = m.note; // e.g. 'file missing'
+            continue;
+          }
+          rec.framesMeasured++;
+          if (m.compressedBytes != null) comp += m.compressedBytes;
+          if (m.decodeMs != null) dec += m.decodeMs;
+          if (m.pixelsVerified === true) verifiedSeen = true;
+          else if (m.pixelsVerified === false) { verifiedSeen = true; allVerified = false; if (!rec.note) rec.note = m.note; }
+        }
+        if (rec.framesMeasured > 0) {
+          rec.compressedBytesTotal = comp || null;
+          rec.ratio = comp ? rec.rawBytesTotal / comp : null;
+          rec.loopMs = dec || null;
+          rec.msPerFrame = dec ? dec / rec.framesMeasured : null;
+          rec.fps = dec ? 1000 / (dec / rec.framesMeasured) : null;
+          rec.pixelsVerified = verifiedSeen ? allVerified : null;
+          if (!rec.liveDecode && !rec.note) rec.note = 'native-C reference (no browser decoder)';
+        } else if (!rec.note) {
+          rec.note = 'no frames';
+        }
+      } catch (e) {
+        rec.note = `error: ${e.message}`;
+      }
+      done++;
+      cineRecords.push(rec);
+    }
+  }
+
   onProgress({ done: total, total, label: 'complete' });
 
-  for (const a of adapters.values()) if (typeof a.dispose === 'function') a.dispose();
-
   const env = collectEnv();
-  // Surface the PICS SAB mode if a PICS adapter ran.
+  // Surface the PICS SAB mode if a PICS adapter ran (before disposing them).
   for (const a of adapters.values()) if (a.sabMode != null) env.picsSabMode = a.sabMode;
+
+  for (const a of adapters.values()) if (typeof a.dispose === 'function') a.dispose();
 
   return {
     generatedAt: new Date().toISOString(),
@@ -193,6 +265,7 @@ export async function runBenchmark(opts = {}) {
     refManifestPresent: !!refManifest,
     env,
     records,
+    cineRecords,
   };
 }
 

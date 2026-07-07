@@ -87,7 +87,12 @@ go test -tags cgo_ojph -run TestMICCorrectnessFourStateC -v ./ojph/
 # Run all benchmarks
 go test -bench=. -benchtime=10x
 
-# Generate browser testdata (MIC .mic variants + manifest.json checksums)
+# Fetch cine / multi-frame source DICOMs (one-time; public-domain samples,
+# transcodes the JPEG-Lossless XA to uncompressed via the project .venv)
+bash testdata/multiframe/fetch-cine-sources.sh
+
+# Generate browser testdata (MIC .mic variants + manifest.json checksums;
+# includes per-frame cine files <id>_f<NNN>*.mic for the multi-frame section)
 go run ./cmd/mic-compress -testdata
 
 # Generate reference-codec browser test files (HTJ2K/.jph, JPEG-LS/.jls, JPEG-XL/.jxl)

@@ -103,6 +103,53 @@ func compressImage8State(shortData []uint16, width, height int, maxValue uint16)
 	return mic.CompressSingleFrame8State(shortData, width, height, maxValue)
 }
 
+// writeMICVariants writes the full single-frame MIC output set for one image or
+// cine frame: MIC1 1/4/8-state (with the MIC1 header) plus, when picsStrips > 0,
+// the PICS 4-state and 8-state strip variants (raw, no MIC1 header — the PICS
+// container carries its own header). File names mirror the single-frame testdata
+// loops: <name>.mic, <name>_4s.mic, <name>_8s.mic, <name>_pics<N>.mic,
+// <name>_pics<N>_8s.mic.
+func writeMICVariants(outDir, name string, pixels []uint16, width, height int, maxValue uint16, picsStrips int) error {
+	b, err := compressImage(pixels, width, height, maxValue)
+	if err != nil {
+		return fmt.Errorf("1-state: %w", err)
+	}
+	if err := writeMicFile(filepath.Join(outDir, name+".mic"), width, height, b); err != nil {
+		return err
+	}
+	b4, err := compressImage4State(pixels, width, height, maxValue)
+	if err != nil {
+		return fmt.Errorf("4-state: %w", err)
+	}
+	if err := writeMicFile(filepath.Join(outDir, name+"_4s.mic"), width, height, b4); err != nil {
+		return err
+	}
+	b8, err := compressImage8State(pixels, width, height, maxValue)
+	if err != nil {
+		return fmt.Errorf("8-state: %w", err)
+	}
+	if err := writeMicFile(filepath.Join(outDir, name+"_8s.mic"), width, height, b8); err != nil {
+		return err
+	}
+	if picsStrips > 0 {
+		p4, err := mic.CompressParallelStrips4State(pixels, width, height, maxValue, picsStrips)
+		if err != nil {
+			return fmt.Errorf("pics%d 4-state: %w", picsStrips, err)
+		}
+		if err := os.WriteFile(filepath.Join(outDir, fmt.Sprintf("%s_pics%d.mic", name, picsStrips)), p4, 0644); err != nil {
+			return err
+		}
+		p8, err := mic.CompressParallelStrips8State(pixels, width, height, maxValue, picsStrips)
+		if err != nil {
+			return fmt.Errorf("pics%d 8-state: %w", picsStrips, err)
+		}
+		if err := os.WriteFile(filepath.Join(outDir, fmt.Sprintf("%s_pics%d_8s.mic", name, picsStrips)), p8, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // fnv1a32LE computes the FNV-1a 32-bit hash over the little-endian byte
 // representation of a uint16 pixel buffer. This MUST stay bit-identical to the
 // JS implementation in web/pacs-model.mjs (fnv1a32), which hashes the decoded
@@ -123,18 +170,22 @@ func fnv1a32LE(pixels []uint16) uint32 {
 	return h
 }
 
+// rawManifestEntry is one image's (or one cine frame's) ground-truth record in
+// web/testdata/manifest.json.
+type rawManifestEntry struct {
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Checksum string `json:"checksum"`
+}
+
 // writeRawManifest writes web/testdata/manifest.json with a per-image raw-pixel
 // checksum so the browser can validate every codec's decoded output against the
-// ground-truth pixels without downloading multi-megabyte raw .bin files.
-func writeRawManifest(outDir string) {
-	type imgEntry struct {
-		Width    int    `json:"width"`
-		Height   int    `json:"height"`
-		Checksum string `json:"checksum"`
-	}
+// ground-truth pixels without downloading multi-megabyte raw .bin files. Cine
+// per-frame entries (keyed <DATASET>_f<NNN>) are merged in via extra.
+func writeRawManifest(outDir string, extra map[string]rawManifestEntry) {
 	out := struct {
-		Images map[string]imgEntry `json:"images"`
-	}{Images: map[string]imgEntry{}}
+		Images map[string]rawManifestEntry `json:"images"`
+	}{Images: map[string]rawManifestEntry{}}
 
 	for _, img := range testImages {
 		byteData, err := os.ReadFile(img.file)
@@ -151,11 +202,14 @@ func writeRawManifest(outDir string) {
 		for i := 0; i+1 < n; i += 2 {
 			shortData[i/2] = uint16(byteData[i]) | (uint16(byteData[i+1]) << 8)
 		}
-		out.Images[img.name] = imgEntry{
+		out.Images[img.name] = rawManifestEntry{
 			Width:    img.cols,
 			Height:   img.rows,
 			Checksum: fmt.Sprintf("fnv1a32:%08x", fnv1a32LE(shortData)),
 		}
+	}
+	for name, e := range extra {
+		out.Images[name] = e
 	}
 
 	blob, err := json.MarshalIndent(out, "", "  ")
@@ -329,6 +383,27 @@ var dicomTestImages = []struct {
 		name: "MG_TOMO",
 		file: "testdata/Series 73200000 [MG - R CC Breast Tomosynthesis Image]/1.3.6.1.4.1.5962.99.1.2280943358.716200484.1363785608958.647.0.dcm",
 	},
+}
+
+// Cine datasets: multi-frame DICOMs whose every frame is emitted as an
+// INDEPENDENT single-frame image (<id>_f<NNN>) so the browser PACS benchmark can
+// exercise the full single-frame codec matrix (MIC 1/4/8-state, PICS, and the
+// reference codecs via mic-refgen) per frame and report cine decode throughput.
+// Sources are public-domain samples fetched by
+// testdata/multiframe/fetch-cine-sources.sh. Keep in sync with the frame counts
+// declared in web/pacs-model.mjs CINE_DATASETS and the cine list in
+// cmd/mic-refgen/main.go.
+var cineDatasets = []struct {
+	id         string
+	file       string
+	maxFrames  int // 0 = all frames
+	picsStrips int // 0 = no PICS variant
+}{
+	{id: "CINE_MRCARD", file: "testdata/multiframe/MR-MONO2-8-16x-heart.dcm", picsStrips: 4}, // cardiac cine MR, 16f 256x256 8b
+	{id: "CINE_XA", file: "testdata/multiframe/XA-MONO2-8-12x-catheter.dcm", picsStrips: 8},  // XA coronary angiography, 12f 512x512 8b
+	{id: "CINE_NM", file: "testdata/multiframe/NM-MONO2-16-13x-heart.dcm", picsStrips: 4},    // nuclear medicine gated heart, 13f 64x64 16b
+	{id: "CINE_EMR", file: "testdata/multiframe/emri_small.dcm", picsStrips: 4},              // enhanced/volumetric MR, 10f 64x64 16b
+	{id: "CINE_ECT", file: "testdata/multiframe/eCT_Supplemental.dcm", picsStrips: 4},        // enhanced CT, 2f 512x512 16b
 }
 
 // Multiframe DICOM series (directory of individual DICOM files)
@@ -821,9 +896,49 @@ func main() {
 				img.name, len(byteData), len(compressed), ratio, outPath)
 		}
 
+		// Cine datasets: emit every frame of each multi-frame DICOM as an
+		// independent single-frame image (<id>_f<NNN>) across the full MIC/PICS
+		// matrix, plus a per-frame checksum for the browser verify pass.
+		cineEntries := map[string]rawManifestEntry{}
+		for _, ds := range cineDatasets {
+			if _, err := os.Stat(ds.file); os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "  skip cine %s: %s not found (run testdata/multiframe/fetch-cine-sources.sh)\n", ds.id, ds.file)
+				continue
+			}
+			frames, w, h, _, err := readDicomMultiFrame(ds.file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error reading cine %s: %v\n", ds.id, err)
+				continue
+			}
+			n := len(frames)
+			if ds.maxFrames > 0 && n > ds.maxFrames {
+				n = ds.maxFrames
+			}
+			fmt.Printf("Compressing cine %s: %d frames %dx%d (pics=%d)...\n", ds.id, n, w, h, ds.picsStrips)
+			for f := 0; f < n; f++ {
+				px := frames[f]
+				var mv uint16
+				for _, v := range px {
+					if v > mv {
+						mv = v
+					}
+				}
+				name := fmt.Sprintf("%s_f%03d", ds.id, f)
+				if err := writeMICVariants(outDir, name, px, w, h, mv, ds.picsStrips); err != nil {
+					fmt.Fprintf(os.Stderr, "  error compressing cine %s: %v\n", name, err)
+					continue
+				}
+				cineEntries[name] = rawManifestEntry{
+					Width:    w,
+					Height:   h,
+					Checksum: fmt.Sprintf("fnv1a32:%08x", fnv1a32LE(px)),
+				}
+			}
+		}
+
 		// Raw-pixel checksum manifest for the browser PACS benchmark's
 		// pixel-correctness pass (see web/pacs-model.mjs fnv1a32).
-		writeRawManifest(outDir)
+		writeRawManifest(outDir, cineEntries)
 		return
 	}
 

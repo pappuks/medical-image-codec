@@ -65,6 +65,30 @@ test('PACS dashboard decodes all live codecs and verifies pixel-correctness', as
   // quick set), so assert it decoded live for at least one image.
   expect(liveIds.has('pics-c-wasm-8'), 'MIC-C-WASM-PICS did not decode live').toBeTruthy();
 
+  // ── Cine / multi-frame section ────────────────────────────────────────────
+  // Every frame of the quick cine dataset (CINE_MRCARD, 16 frames) is fetched
+  // and decoded independently across the full codec matrix. Assert the section
+  // ran, produced aggregate loop timings, and that every live codec decoded all
+  // frames bit-exact against the per-frame manifest checksums.
+  expect(Array.isArray(result.cineRecords), 'no cineRecords array').toBeTruthy();
+  expect(result.cineRecords.length, 'no cine measurements produced').toBeGreaterThan(0);
+
+  const liveCine = result.cineRecords.filter((r) => r.liveDecode && r.framesMeasured > 0);
+  expect(liveCine.length, 'no live cine records').toBeGreaterThan(0);
+  for (const r of liveCine) {
+    expect(r.framesMeasured, `${r.cine}/${r.codecId} measured 0 frames`).toBeGreaterThan(0);
+    expect(r.loopMs, `${r.cine}/${r.codecId} has no loop time`).toBeGreaterThan(0);
+    if (result.verify) {
+      expect(r.pixelsVerified, `${r.cine}/${r.codecId} cine pixel mismatch (${r.note ?? ''})`).toBe(true);
+    }
+  }
+  // The reference WASM decoders and the MIC/C-WASM builds must decode cine
+  // frames live too (same three WASM loading paths as the single-frame section).
+  const liveCineIds = new Set(liveCine.map((r) => r.codecId));
+  for (const id of ['mic-4state', 'htj2k', 'jpegls', 'mic-wasm', 'mic-c-wasm-4']) {
+    expect(liveCineIds.has(id), `${id} did not decode cine frames live`).toBeTruthy();
+  }
+
   // No genuine JS/page errors during the run (benign resource 404s filtered).
   expect(jsErrors, `js errors:\n${jsErrors.join('\n')}`).toEqual([]);
 

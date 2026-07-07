@@ -515,9 +515,43 @@ transfer dominates by many multiples, so compression ratio matters more than
 decode speed. Full how-to (build steps for the Go/C WASM variants, Emscripten
 prereqs) is in the **[Web Decoder README](../web/README.md#pacs-web-viewer-benchmark)**.
 
+### Cine / multi-frame datasets
+
+Both runners include a cine section over five public-domain multi-frame studies.
+Each is a real, uncompressed (native) multi-frame DICOM whose **every frame is
+emitted as an independent single-frame image** (`<id>_f<NNN>`) by
+`mic-compress -testdata` and `mic-refgen`. Because each frame is a normal
+single-frame file, the *entire* codec matrix (MIC 1/4/8-state, PICS, HTJ2K,
+JPEG-LS, JPEG-XL) runs per frame exactly as in the single-frame tables; the
+benchmark fetches and decodes each frame independently and aggregates to a full
+cine-loop decode time and frames/s — the way a PACS viewer streams a cine loop.
+
+| Dataset | Modality | Frames | Dims | Depth | Source |
+|---|---|---|---|---|---|
+| `CINE_MRCARD` | Cardiac cine MR | 16 | 256×256 | 8-bit | `MR-MONO2-8-16x-heart` |
+| `CINE_XA` | XA coronary angiography | 12 | 512×512 | 8-bit | `XA-MONO2-8-12x-catheter` (transcoded to native) |
+| `CINE_NM` | Nuclear-medicine gated heart | 13 | 64×64 | 16-bit | `NM-MONO2-16-13x-heart` |
+| `CINE_EMR` | Enhanced / volumetric MR | 10 | 64×64 | 16-bit | `emri_small` |
+| `CINE_ECT` | Enhanced CT | 2 | 512×512 | 16-bit | `eCT_Supplemental` |
+
+Sources are fetched and prepared by
+[`testdata/multiframe/fetch-cine-sources.sh`](../testdata/multiframe/fetch-cine-sources.sh)
+(public-domain Barre / pydicom-data samples; the JPEG-Lossless XA is transcoded
+to uncompressed once via the project `.venv`). Because the 8-bit cardiac/XA/NM
+frames trip CharLS's 1-byte sample packing and libjxl's UINT16-at-8-bit path,
+`mic-refgen` floors the *reference-codec* declared bit depth at 9 (still bit-exact
+lossless). Representative cine throughput (Apple M2 Max, MIC decode live):
+
+| Dataset | MIC-4state | MIC-PICS |
+|---|---|---|
+| Cardiac cine MR (16f) | ~460 fps | ~650 fps (4 strips) |
+| XA angiography (12f) | ~140 fps | ~290 fps (8 strips) |
+| Enhanced CT (2f, 512²) | ~210 fps | ~440 fps (4 strips) |
+
 ### Build prerequisites for the WASM variants
 
 ```bash
+bash testdata/multiframe/fetch-cine-sources.sh # cine source DICOMs (one-time; needs .venv)
 go run ./cmd/mic-compress -testdata            # MIC .mic + manifest.json (no cgo)
 go run -tags cgo_ojph ./cmd/mic-refgen         # HTJ2K/JPEG-LS/JPEG-XL reference files
 cd web && npm install && bash scripts/vendor-wasm.sh   # vendor OpenJPH + CharLS WASM
