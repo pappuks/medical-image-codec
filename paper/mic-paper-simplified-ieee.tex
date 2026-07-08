@@ -181,6 +181,23 @@ once.
   client-side decoding in browsers.
 \end{itemize}
 
+\paragraph{Why this combination, not any single stage} Spatial prediction,
+run-length coding, and ANS/FSE entropy coding are each well established on
+their own, so the contribution here is not any individual stage but the
+combination. Pairing a 16-bit-native entropy stage with multi-state parallel
+ANS decoding removes a specific bottleneck: sustained, real-time,
+browser-based decoding of DICOM images at their native 16-bit depth. JPEG-LS's
+Golomb-Rice stage and HTJ2K's block coder both retain per-symbol
+data-dependent branches, and Zstandard's FSE is fixed at an 8-bit-oriented,
+4,096-symbol alphabet; none of the three was designed to be widened to a
+native 16-bit alphabet and interleaved into independent parallel decode chains
+without a change to its compressed format. Section~\ref{sec:results} shows
+this combination sustaining single-threaded and strip-parallel decode above
+the frame rates a clinical multi-frame viewer requires
+(Section~\ref{sec:clinical-workflow}); to the author's knowledge, that specific
+combination of native bit depth, decode speed, and browser deployment is not
+simultaneously targeted by JPEG-LS, HTJ2K, or Zstandard-based pipelines.
+
 \paragraph{Scope} This work covers lossless, single-frame, grayscale images
 only. Color and multi-frame extensions, lossy modes, and progressive decoding
 are out of scope.
@@ -199,6 +216,31 @@ scheme compresses little because it works on raw bytes with no prediction step.
 Research codecs such as CALIC~\cite{wu1997} and FLIF~\cite{sneyers2016}
 compress well on natural images but are not DICOM standards and lack browser
 decoders.
+
+\textbf{JPEG~XL.} JPEG~XL~\cite{jpegxl} is a general-purpose image format
+whose modular lossless mode also handles high-bit-depth data, and its absence
+from the quantitative comparison deserves an explicit explanation rather than
+a silent omission. In informal cross-checks using the reference \texttt{libjxl}
+encoder and decoder called in-process (effort level~7; the harness is included
+in the accompanying code as \texttt{ojph/jxl\_comparison\_test.go}), JPEG~XL
+reaches a modestly better compression ratio than MIC on the same images, while
+MIC encodes and decodes markedly faster; a full quantitative comparison on the
+reference platforms of Section~\ref{sec:methodology}, following the same
+in-process methodology used for HTJ2K and JPEG-LS, is left to future work
+(Section~\ref{sec:discussion}). The more important reason JPEG~XL is not a
+baseline here is that it is not a feasible option for the browser-viewer
+workflow this paper targets: the only mature browser-side JPEG~XL decoder
+available at the time of writing, \texttt{@jsquash/jxl}, returns an 8-bit RGBA
+\texttt{ImageData} object and so cannot represent lossless 16-bit grayscale
+medical pixels; no current browser can decode JPEG~XL losslessly at 16-bit
+depth. The comparison is therefore not only a matter of ratio versus speed but
+of baseline feasibility for a client-side, 16-bit lossless viewer. Newer
+learned lossless codecs, such as L3C~\cite{mentzer2019l3c} and
+SReC~\cite{cao2020srec}, and other autoregressive or hierarchical
+range-coding approaches, can reach still better ratios, but depend on
+neural-network runtimes and decode far more slowly, which makes them
+impractical for real-time web viewing; they are excluded from the
+quantitative comparison for the same reason.
 
 These are the codecs MIC is measured against. The goal is not to outperform
 them on every metric, but to explore a \textbf{simpler, residual-domain design}
@@ -1047,6 +1089,66 @@ over many pixels; MIC stays within 0--20\% there.
 Third, \textbf{multi-state decoding} is what makes MIC's decoder competitive
 with HTJ2K's vectorized block coder, and it costs nothing in file size.
 
+\subsection{Clinical Workflow: Real-Time Multi-Frame Viewing}
+\label{sec:clinical-workflow}
+
+The primary use case motivating MIC is real-time, multi-frame DICOM study
+viewing in web-based Picture Archiving and Communication Systems (PACS)
+viewers: a radiologist scrolling through a tomosynthesis stack, a multi-slice
+CT series, or a cine loop must see each frame decoded and displayed without a
+perceptible stall. In that setting, decode speed has to be balanced against
+compression ratio rather than optimized for ratio alone, since a codec that
+produces smaller files but cannot sustain frame rate degrades the viewing
+experience regardless of its archival efficiency; that is a different
+objective from an archival codec whose files are written once and read
+rarely, where ratio dominates. Based on prior experience building clinical
+PACS viewer software, the practical bottleneck for multi-frame studies is
+sustaining 25--60 frames per second (FPS) of decoded pixels for smooth
+scrolling and cine playback.
+
+In-browser cine-playback measurements (headless Chromium, Apple M2~Max,
+seven multi-frame studies spanning cardiac cine MR, XA angiography,
+nuclear-medicine gated heart, enhanced CT, breast tomosynthesis, and CT axial
+series, using the multi-frame benchmark harness in the accompanying code's
+\texttt{web/} directory) confirm that MIC's parallel decode path meets this
+target across modalities. Single-threaded MIC-4state decodes cardiac cine MR
+at approximately 460\,FPS, XA angiography at approximately 140\,FPS, and a CT
+axial series at approximately 86\,FPS, all comfortably above the 60\,FPS
+ceiling of the target range. The heaviest case, breast tomosynthesis at
+native tile size (about 9.3\,MB per frame, comparable to a full mammography
+image), drops single-threaded throughput to approximately 17\,FPS; the
+strip-parallel decoder (Section~\ref{sec:results}) recovers approximately
+51\,FPS with eight strips, which falls inside the target range.
+Table~\ref{tab:cine} summarises these results.
+
+\begin{table}[htbp]
+\centering
+\caption{In-browser cine-playback throughput (headless Chromium, Apple
+M2~Max), MIC-4state single-threaded vs.\ strip-parallel decode.}
+\label{tab:cine}
+\scriptsize
+\begin{tabular}{lrr}
+\toprule
+Study & MIC-4state & MIC-PICS \\
+\midrule
+Cardiac cine MR (16 frames)      & ${\sim}460$\,FPS & ${\sim}650$\,FPS (4-strip) \\
+XA angiography (12 frames)       & ${\sim}140$\,FPS & ${\sim}290$\,FPS (8-strip) \\
+Enhanced CT (2 frames)           & ${\sim}210$\,FPS & ${\sim}440$\,FPS (4-strip) \\
+CT axial series (16 frames)      & ${\sim}86$\,FPS  & ${\sim}218$\,FPS (8-strip) \\
+Breast tomosynthesis (16 frames) & ${\sim}17$\,FPS  & ${\sim}51$\,FPS (8-strip) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This distinguishes MIC's goal from archival-ratio-focused codecs such as
+JPEG-LS: a viewer that must sustain frame rate across an entire multi-frame
+study benefits more from a codec with bounded, fast per-frame decode time than
+from one that reduces file size a further few percent at the cost of decode
+latency. The tomosynthesis case above is the one dataset in this evaluation
+heavy enough to approach the lower edge of the target frame-rate range on a
+single thread, and it is also the case where strip-parallel decoding provides
+the clearest clinical benefit.
+
 \subsection{Choosing a codec}
 
 For \textbf{low-latency viewing} (PACS, thumbnails, tomosynthesis playback),
@@ -1138,10 +1240,15 @@ advantage comes from. In particular, a byte-oriented pipeline with an explicit
 byte- or bit-shuffle stage before Zstandard, and the basic DICOM run-length
 syntax, would separate the benefit of the 16-bit-native entropy stage from the
 benefit of prediction alone. Research codecs that compress better on natural
-images, such as CALIC~\cite{wu1997} and FLIF~\cite{sneyers2016}, and the newer
-JPEG~XL, are also not included because they are not DICOM-deployable today;
-their absence means the upper end of achievable lossless ratio is not bracketed
-here. Adding these baselines is left to future work.
+images, such as CALIC~\cite{wu1997} and FLIF~\cite{sneyers2016}, are also not
+included because they are not DICOM-deployable today; their absence means the
+upper end of achievable lossless ratio is not bracketed here. A full
+quantitative comparison against JPEG~XL on the reference ARM64 and AMD64
+platforms of Section~\ref{sec:methodology}, following the same in-process
+methodology used for HTJ2K and JPEG-LS, is likewise left to future work;
+Section~\ref{sec:related} reports the direction of that gap (a modest ratio
+disadvantage and a marked speed advantage for MIC) from informal testing.
+Adding these baselines is left to future work.
 
 \subsection{Adding MIC as a DICOM Transfer Syntax}
 
@@ -1233,6 +1340,21 @@ X.\,Wu and N.\,Memon,
 J.\,Sneyers and P.\,Wuille,
 ``FLIF: Free Lossless Image Format based on MANIAC Compression,''
 \textit{Proc.\ IEEE ICIP}, 2016.
+
+\bibitem{jpegxl}
+J.\,Alakuijala \textit{et al.},
+``JPEG XL next-generation image compression architecture and coding tools,''
+\textit{Proc.\ SPIE 11137}, Sep.\,2019.
+
+\bibitem{mentzer2019l3c}
+F.\,Mentzer, E.\,Agustsson, M.\,Tschannen, R.\,Timofte, and L.\,Van Gool,
+``Practical Full Resolution Learned Lossless Image Compression,''
+\textit{Proc.\ IEEE/CVF CVPR}, pp.\,10629--10638, 2019.
+
+\bibitem{cao2020srec}
+S.\,Cao, C.-Y.\,Wu, and P.\,Kr\"ahenb\"uhl,
+``Lossless Image Compression through Super-Resolution,''
+arXiv:2004.02872, 2020.
 
 \bibitem{duda2009}
 J.\,Duda, ``Asymmetric numeral systems,'' arXiv:0902.0271, 2009.
