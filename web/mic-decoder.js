@@ -1130,11 +1130,17 @@ const PLANE_RAW = 3;
 
 // ─── PICS Parallel Strip Support ─────────────────────────────────────────────
 
+// picsRawFlag is set in the high bit of a strip's length field in the offset
+// table to mark an incompressible strip stored as raw little-endian uint16
+// pixels instead of an FSE-compressed stream (mirrors parallelstrips.go's
+// picsRawFlag). MUST be masked off before using the length to slice the blob.
+const PICS_RAW_FLAG = 0x80000000;
+
 /**
  * Parse a PICS parallel-strip header without decompressing.
  * @param {Uint8Array} fileBytes
  * @returns {{ width: number, height: number, numStrips: number, stripH: number,
- *             strips: Array<{offset: number, length: number}>, dataOffset: number }}
+ *             strips: Array<{offset: number, length: number, isRaw: boolean}>, dataOffset: number }}
  */
 function parsePICSHeader(fileBytes) {
   const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset, fileBytes.byteLength);
@@ -1153,9 +1159,11 @@ function parsePICSHeader(fileBytes) {
   const strips = [];
   for (let s = 0; s < numStrips; s++) {
     const tbl = PICS_HEADER_BASE + s * 8;
+    const lenField = dv.getUint32(tbl + 4, true);
     strips.push({
-      offset: dv.getUint32(tbl,     true),
-      length: dv.getUint32(tbl + 4, true),
+      offset: dv.getUint32(tbl, true),
+      length: lenField & ~PICS_RAW_FLAG,
+      isRaw: (lenField & PICS_RAW_FLAG) !== 0,
     });
   }
 
@@ -1179,6 +1187,14 @@ function decodePICS(fileBytes) {
     const sh = y1 - y0;
     const blobStart = dataOffset + strips[s].offset;
     const blob = fileBytes.subarray(blobStart, blobStart + strips[s].length);
+
+    if (strips[s].isRaw) {
+      const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+      const stripPixels = new Uint16Array(width * sh);
+      for (let i = 0; i < stripPixels.length; i++) stripPixels[i] = dv.getUint16(i * 2, true);
+      out.set(stripPixels, y0 * width);
+      continue;
+    }
 
     const fse = new FSEDecompressor();
     const rleSymbols = fse.decompress(blob);

@@ -21,7 +21,16 @@ parentPort.on('message', (msg) => {
       blob = new Uint8Array(msg.blobBuffer);
     }
 
-    const pixels = MICDecoder.decode(blob, width, stripHeight);
+    // An incompressible strip is stored as raw little-endian uint16 pixels
+    // (see PICS_RAW_FLAG in mic-decoder.js) — skip the FSE/RLE/Delta pipeline.
+    let pixels;
+    if (msg.isRaw) {
+      const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+      pixels = new Uint16Array(width * stripHeight);
+      for (let i = 0; i < pixels.length; i++) pixels[i] = dv.getUint16(i * 2, true);
+    } else {
+      pixels = MICDecoder.decode(blob, width, stripHeight);
+    }
 
     if (msg.outBuffer) {
       // SAB mode: write pixels directly into the shared output buffer

@@ -34,6 +34,8 @@
 //     // Both modes:
 //     width:       number,
 //     stripHeight: number,
+//     isRaw:       boolean, // true if this strip is stored as raw uint16 pixels
+//                            // (incompressible strip; see PICS_RAW_FLAG in mic-decoder.js)
 //   }
 //
 // Message out (SAB mode):
@@ -81,8 +83,18 @@ self.onmessage = function (e) {
       blob = new Uint8Array(msg.blobBuffer);
     }
 
-    // Decode: FSE + RLE + Delta pipeline (auto-detects 1/2/4/8-state)
-    const pixels = MICDecoder.decode(blob, width, stripHeight);
+    // An incompressible strip is stored as raw little-endian uint16 pixels
+    // (see PICS_RAW_FLAG in mic-decoder.js) — skip the FSE/RLE/Delta pipeline
+    // and read pixels directly.
+    let pixels;
+    if (msg.isRaw) {
+      const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+      pixels = new Uint16Array(width * stripHeight);
+      for (let i = 0; i < pixels.length; i++) pixels[i] = dv.getUint16(i * 2, true);
+    } else {
+      // Decode: FSE + RLE + Delta pipeline (auto-detects 1/2/4/8-state)
+      pixels = MICDecoder.decode(blob, width, stripHeight);
+    }
 
     if (msg.outBuffer) {
       // SAB mode: write pixels directly into the shared output buffer

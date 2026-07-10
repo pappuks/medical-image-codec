@@ -537,13 +537,22 @@ JPEG-XL shown as an informational reference. A headless Playwright runner drives
 the same page for CI. See the **[Web Decoder README](./web/README.md#pacs-web-viewer-benchmark)**
 and **[benchmark docs](./docs/benchmarks.md#12-browser-pacs-web-viewer-benchmark)**.
 
-**Cine / multi-frame.** The dashboard also has a cine section covering five
-public-domain multi-frame studies — cardiac cine MR, XA coronary angiography,
-nuclear-medicine gated heart, and enhanced/volumetric MR & CT. Every frame is
-emitted as an independent single-frame image, so the *entire* codec matrix runs
-per frame and the benchmark reports full cine-loop decode time and frames/s
-(e.g. cardiac cine MR: MIC-4state ≈460 fps single-thread, PICS-4 ≈650 fps). Fetch
-the sources with [`testdata/multiframe/fetch-cine-sources.sh`](./testdata/multiframe/fetch-cine-sources.sh).
+**Cine / multi-frame.** The dashboard also has a cine section covering seven
+multi-frame studies — five public-domain ones (cardiac cine MR, XA coronary
+angiography, nuclear-medicine gated heart, enhanced/volumetric MR & CT) plus
+two reused from the whole-image demo corpus (breast tomosynthesis, CT axial
+series). Every frame is emitted as an independent single-frame image, so the
+*entire* codec matrix runs per frame and the benchmark reports full cine-loop
+decode time and frames/s (e.g. cardiac cine MR: MIC-4state ≈444 fps
+single-thread, PICS-8 ≈1070 fps; breast tomosynthesis at full CR/MG-sized
+frames: MIC-4state ≈17 fps, PICS-8 ≈51 fps). Run in a real browser (headless
+Chromium via Playwright), the section also live-decodes every WASM variant —
+MIC-WASM (Go), MIC-C-WASM (4/8-state), MIC-C-WASM-PICS, and the HTJ2K/JPEG-LS
+reference codecs — pixel-verified frame-by-frame; see the full per-dataset,
+per-codec breakdown in
+[docs/benchmarks.md](./docs/benchmarks.md#full-codec-matrix-cine-benchmark-browser-all-wasm-variants-live).
+Fetch the sources with
+[`testdata/multiframe/fetch-cine-sources.sh`](./testdata/multiframe/fetch-cine-sources.sh).
 
 ---
 

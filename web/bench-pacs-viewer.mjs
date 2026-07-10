@@ -115,6 +115,7 @@ class NodeWorkerPool {
           type: 'decode-strip', stripIndex: s, fileBuffer: fileSAB,
           fileOffset: dataOffset + strip.offset, fileLength: strip.length,
           outBuffer: outSAB, outOffset: y0 * width, width, stripHeight: y1 - y0,
+          isRaw: strip.isRaw,
         });
       });
     });

@@ -104,12 +104,12 @@ func compressImage8State(shortData []uint16, width, height int, maxValue uint16)
 }
 
 // writeMICVariants writes the full single-frame MIC output set for one image or
-// cine frame: MIC1 1/4/8-state (with the MIC1 header) plus, when picsStrips > 0,
-// the PICS 4-state and 8-state strip variants (raw, no MIC1 header — the PICS
-// container carries its own header). File names mirror the single-frame testdata
-// loops: <name>.mic, <name>_4s.mic, <name>_8s.mic, <name>_pics<N>.mic,
-// <name>_pics<N>_8s.mic.
-func writeMICVariants(outDir, name string, pixels []uint16, width, height int, maxValue uint16, picsStrips int) error {
+// cine frame: MIC1 1/4/8-state (with the MIC1 header) plus, for each strip count
+// in picsStripCounts, the PICS 4-state and 8-state strip variants (raw, no MIC1
+// header — the PICS container carries its own header). File names mirror the
+// single-frame testdata loops: <name>.mic, <name>_4s.mic, <name>_8s.mic,
+// <name>_pics<N>.mic, <name>_pics<N>_8s.mic.
+func writeMICVariants(outDir, name string, pixels []uint16, width, height int, maxValue uint16, picsStripCounts []int) error {
 	b, err := compressImage(pixels, width, height, maxValue)
 	if err != nil {
 		return fmt.Errorf("1-state: %w", err)
@@ -131,7 +131,10 @@ func writeMICVariants(outDir, name string, pixels []uint16, width, height int, m
 	if err := writeMicFile(filepath.Join(outDir, name+"_8s.mic"), width, height, b8); err != nil {
 		return err
 	}
-	if picsStrips > 0 {
+	for _, picsStrips := range picsStripCounts {
+		if picsStrips <= 0 {
+			continue
+		}
 		p4, err := mic.CompressParallelStrips4State(pixels, width, height, maxValue, picsStrips)
 		if err != nil {
 			return fmt.Errorf("pics%d 4-state: %w", picsStrips, err)
@@ -416,25 +419,35 @@ var dicomTestImages = []struct {
 // testdata/multiframe/fetch-cine-sources.sh. Keep in sync with the frame counts
 // declared in web/pacs-model.mjs CINE_DATASETS and the cine list in
 // cmd/mic-refgen/main.go.
+//
+// Every dataset gets BOTH 4-strip and 8-strip PICS variants (see
+// cineDatasetPICSStrips below) regardless of frame size, so the JS PICS-4/PICS-8
+// rows and the MIC-C-WASM-PICS row (which only ships an 8-strip build) always
+// have a matching file to decode in the browser benchmark.
 type cineDataset struct {
-	id         string
-	file       string // set for single multi-frame DICOM file sources (readDicomMultiFrame)
-	dir        string // set for DICOM series directory sources (readDicomSeries); mutually exclusive with file
-	maxFrames  int    // 0 = all frames
-	picsStrips int    // 0 = no PICS variant
+	id        string
+	file      string // set for single multi-frame DICOM file sources (readDicomMultiFrame)
+	dir       string // set for DICOM series directory sources (readDicomSeries); mutually exclusive with file
+	maxFrames int    // 0 = all frames
 }
 
+// cineDatasetPICSStrips is the PICS strip counts generated for every cine
+// dataset. Kept as a single constant (rather than a per-dataset field) so the
+// full codec matrix — including the 8-strip-only MIC-C-WASM-PICS variant —
+// always has a file to decode, however small a dataset's frames are.
+var cineDatasetPICSStrips = []int{4, 8}
+
 var cineDatasets = []cineDataset{
-	{id: "CINE_MRCARD", file: "testdata/multiframe/MR-MONO2-8-16x-heart.dcm", picsStrips: 4}, // cardiac cine MR, 16f 256x256 8b
-	{id: "CINE_XA", file: "testdata/multiframe/XA-MONO2-8-12x-catheter.dcm", picsStrips: 8},  // XA coronary angiography, 12f 512x512 8b
-	{id: "CINE_NM", file: "testdata/multiframe/NM-MONO2-16-13x-heart.dcm", picsStrips: 4},    // nuclear medicine gated heart, 13f 64x64 16b
-	{id: "CINE_EMR", file: "testdata/multiframe/emri_small.dcm", picsStrips: 4},              // enhanced/volumetric MR, 10f 64x64 16b
-	{id: "CINE_ECT", file: "testdata/multiframe/eCT_Supplemental.dcm", picsStrips: 4},        // enhanced CT, 2f 512x512 16b
+	{id: "CINE_MRCARD", file: "testdata/multiframe/MR-MONO2-8-16x-heart.dcm"}, // cardiac cine MR, 16f 256x256 8b
+	{id: "CINE_XA", file: "testdata/multiframe/XA-MONO2-8-12x-catheter.dcm"},  // XA coronary angiography, 12f 512x512 8b
+	{id: "CINE_NM", file: "testdata/multiframe/NM-MONO2-16-13x-heart.dcm"},    // nuclear medicine gated heart, 13f 64x64 16b
+	{id: "CINE_EMR", file: "testdata/multiframe/emri_small.dcm"},              // enhanced/volumetric MR, 10f 64x64 16b
+	{id: "CINE_ECT", file: "testdata/multiframe/eCT_Supplemental.dcm"},        // enhanced CT, 2f 512x512 16b
 	// Reuse the existing MG_TOMO/CT_MULTI DICOM sources (already in testdata/ for
 	// the whole-image demo tables) as per-frame cine datasets, capped to 16 frames
 	// to bound full-run wall-clock time (native: 69f / 203f respectively).
-	{id: "CINE_TOMO", file: mgTomoDICOMFile, maxFrames: 16, picsStrips: 8},    // breast tomosynthesis DBT, 1890x2457 10b
-	{id: "CINE_CTMULTI", dir: ctMultiSeriesDir, maxFrames: 16, picsStrips: 8}, // CT axial series, 512x512
+	{id: "CINE_TOMO", file: mgTomoDICOMFile, maxFrames: 16},    // breast tomosynthesis DBT, 1890x2457 10b
+	{id: "CINE_CTMULTI", dir: ctMultiSeriesDir, maxFrames: 16}, // CT axial series, 512x512
 }
 
 // Multiframe DICOM series (directory of individual DICOM files)
@@ -605,7 +618,7 @@ func emitCineDataset(outDir string, ds cineDataset, cineEntries map[string]rawMa
 	if ds.maxFrames > 0 && n > ds.maxFrames {
 		n = ds.maxFrames
 	}
-	fmt.Printf("Compressing cine %s: %d frames %dx%d (pics=%d)...\n", ds.id, n, w, h, ds.picsStrips)
+	fmt.Printf("Compressing cine %s: %d frames %dx%d (pics=%v)...\n", ds.id, n, w, h, cineDatasetPICSStrips)
 	for f := 0; f < n; f++ {
 		px := frames[f]
 		var mv uint16
@@ -615,7 +628,7 @@ func emitCineDataset(outDir string, ds cineDataset, cineEntries map[string]rawMa
 			}
 		}
 		name := fmt.Sprintf("%s_f%03d", ds.id, f)
-		if err := writeMICVariants(outDir, name, px, w, h, mv, ds.picsStrips); err != nil {
+		if err := writeMICVariants(outDir, name, px, w, h, mv, cineDatasetPICSStrips); err != nil {
 			fmt.Fprintf(os.Stderr, "  error compressing cine %s: %v\n", name, err)
 			continue
 		}

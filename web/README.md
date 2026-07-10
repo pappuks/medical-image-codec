@@ -705,7 +705,11 @@ reports full cine-loop decode time and frames/s. The `fetch-cine-sources.sh` ste
 above downloads the first five source DICOMs (and transcodes the JPEG-Lossless XA
 sample to uncompressed); `mic-compress`/`mic-refgen` then emit the per-frame files
 for all seven datasets. See
-[docs/benchmarks.md §12](../docs/benchmarks.md#12-browser-pacs-web-viewer-benchmark).
+[docs/benchmarks.md §12](../docs/benchmarks.md#12-browser-pacs-web-viewer-benchmark)
+for the full per-dataset, per-codec results table (all live WASM variants —
+MIC-WASM, MIC-C-WASM, MIC-C-WASM-PICS, HTJ2K, JPEG-LS — plus informational
+JPEG-XL), captured from a headless-Chromium run:
+[§ Full codec-matrix cine benchmark](../docs/benchmarks.md#full-codec-matrix-cine-benchmark-browser-all-wasm-variants-live).
 
 Which codecs decode **live** vs. **informational**:
 

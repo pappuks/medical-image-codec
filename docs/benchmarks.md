@@ -546,21 +546,222 @@ testdata sources already present for the whole-image demo tables, capped to 16
 frames to keep the benchmark wall-clock time bounded. Because the 8-bit cardiac/XA/NM
 frames trip CharLS's 1-byte sample packing and libjxl's UINT16-at-8-bit path,
 `mic-refgen` floors the *reference-codec* declared bit depth at 9 (still bit-exact
-lossless). Representative cine throughput (Apple M2 Max, MIC decode live):
+lossless). Every dataset now ships **both** 4- and 8-strip PICS variants (see
+`cineDatasetPICSStrips` in `cmd/mic-compress/main.go`), so the table below
+shows whichever strip count is faster per dataset. Representative cine
+throughput (Apple M2 Max, MIC decode live):
 
-| Dataset | MIC-4state | MIC-PICS |
+| Dataset | MIC-4state | MIC-PICS (best of 4/8 strips) |
 |---|---|---|
-| Cardiac cine MR (16f) | ~460 fps | ~650 fps (4 strips) |
-| XA angiography (12f) | ~140 fps | ~290 fps (8 strips) |
-| Enhanced CT (2f, 512²) | ~210 fps | ~440 fps (4 strips) |
+| Cardiac cine MR (16f) | ~444 fps | ~1070 fps (8 strips) |
+| XA angiography (12f) | ~141 fps | ~396 fps (8 strips) |
+| NM gated heart (13f, 64²) | ~9214 fps | ~3974 fps (4 strips)* |
+| Enhanced MR (10f, 64²) | ~5355 fps | ~3762 fps (4 strips)* |
+| Enhanced CT (2f, 512²) | ~220 fps | ~571 fps (8 strips) |
 | Breast tomosynthesis (16f, 1890×2457) | ~17 fps | ~51 fps (8 strips) |
-| CT axial series (16f, 512²) | ~86 fps | ~218 fps (8 strips) |
+| CT axial series (16f, 512²) | ~88 fps | ~229 fps (8 strips) |
+
+\* At these tiny per-frame sizes (64×64, ~8 KB raw) worker dispatch/collection
+overhead in the JS PICS pool exceeds the decode work itself, so single-threaded
+MIC beats PICS — parallel strips only pay off once per-frame decode time clears
+the worker overhead floor (visible starting around the Enhanced CT / cardiac
+cine sizes).
 
 `CINE_TOMO`'s per-frame raw size (~9.3 MB, comparable to a full CR/MG image) makes
 it the heaviest cine dataset by far — single-threaded MIC decode throughput drops
 to ~17 fps accordingly, while 8-strip PICS recovers ~3× to ~51 fps. `CINE_CTMULTI`
 frames are 512×512 like `CINE_XA` but 12-bit instead of 8-bit and unpadded, giving
 a lower ~2.4x compression ratio than the smaller cine datasets.
+
+Full run: `cd web && node bench-pacs-viewer.mjs` (prints per-image tables, then
+a `########## Cine / multi-frame ##########` section with one table per dataset
+above — compressed size, decode loop time, frames/s, and full-loop time to
+display across all eight simulated network profiles). That Node run only
+live-measures MIC/PICS; HTJ2K/JPEG-LS/JPEG-XL are informational native-C
+numbers there since Node has no WASM DOM environment — but real per-frame
+reference-codec files (and therefore real compressed sizes, not corpus-average
+estimates) now exist for all seven datasets, including `CINE_TOMO`/`CINE_CTMULTI`
+(see "What closed the three gaps" below).
+
+### Full codec-matrix cine benchmark (browser, all WASM variants live)
+
+The Node run above can't exercise the browser-only decoders (MIC-WASM Go,
+MIC-C-WASM, MIC-C-WASM-PICS) and only has informational numbers for the
+reference codecs. Driving the actual dashboard in headless Chromium
+(`pacs-dashboard.html?headless=1&images=cine&verify=1`, the same harness
+[`tests/pacs-bench.spec.mjs`](../web/tests/pacs-bench.spec.mjs) uses for CI,
+just pointed at every cine dataset instead of the quick subset) live-decodes
+every codec that has a browser implementation — HTJ2K and JPEG-LS included —
+and pixel-verifies every frame against the manifest checksums. Below is one
+table per dataset (Apple M2 Max, headless Chromium, 8 iterations + 2 warm-up
+per codec/frame; every row is pixel-verified bit-exact except JPEG-XL, which
+has no lossless-16-bit browser decoder and stays informational). All twelve
+codec rows have real, live-measured data for all seven datasets — closing
+three gaps that an earlier version of this table left open (see below).
+
+**Cardiac cine MR (16f, 256×256, 8-bit)**
+
+| Codec | Comp. (total) | Frames/s |
+|---|---|---|
+| MIC-1state | 387 KB | 300 |
+| MIC-4state | 387 KB | 300 |
+| MIC-8state | 387 KB | 286 |
+| MIC-WASM (Go) | 387 KB | 153 |
+| MIC-C-WASM (4-state) | 387 KB | 1077 |
+| MIC-C-WASM (8-state) | 387 KB | 954 |
+| MIC-PICS (JS, 4 strips) | 393 KB | 445 |
+| MIC-PICS (JS, 8 strips) | 400 KB | 605 |
+| MIC-C-WASM-PICS (8 strips) | 400 KB | 1123 |
+| HTJ2K (OpenJPH WASM) | 435 KB | 287 |
+| JPEG-LS (CharLS WASM) | 367 KB | 421 |
+| JPEG-XL (informational) | 165 KB | 391 |
+
+**XA coronary angiography (12f, 512×512, 8-bit)**
+
+| Codec | Comp. (total) | Frames/s |
+|---|---|---|
+| MIC-1state | 749 KB | 136 |
+| MIC-4state | 749 KB | 140 |
+| MIC-8state | 749 KB | 140 |
+| MIC-WASM (Go) | 749 KB | 46 |
+| MIC-C-WASM (4-state) | 749 KB | 430 |
+| MIC-C-WASM (8-state) | 749 KB | 396 |
+| MIC-PICS (JS, 4 strips) | 750 KB | 252 |
+| MIC-PICS (JS, 8 strips) | 754 KB | 347 |
+| MIC-C-WASM-PICS (8 strips) | 754 KB | 584 |
+| HTJ2K (OpenJPH WASM) | 701 KB | 129 |
+| JPEG-LS (CharLS WASM) | 619 KB | 218 |
+| JPEG-XL (informational) | 571 KB | 98 |
+
+**NM gated heart (13f, 64×64, 16-bit)**
+
+| Codec | Comp. (total) | Frames/s |
+|---|---|---|
+| MIC-1state | 17 KB | 1045 |
+| MIC-4state | 17 KB | 937 |
+| MIC-8state | 17 KB | 925 |
+| MIC-WASM (Go) | 17 KB | 502 |
+| MIC-C-WASM (4-state) | 17 KB | 8497 |
+| MIC-C-WASM (8-state) | 17 KB | 8442 |
+| MIC-PICS (JS, 4 strips) | 19 KB | 1055 |
+| MIC-PICS (JS, 8 strips) | 22 KB | 785 |
+| MIC-C-WASM-PICS (8 strips) | 22 KB | 1791 |
+| HTJ2K (OpenJPH WASM) | 16 KB | 779 |
+| JPEG-LS (CharLS WASM) | 12 KB | 2951 |
+| JPEG-XL (informational) | 10 KB | 6256 |
+
+**Enhanced/volumetric MR (10f, 64×64, 16-bit)**
+
+| Codec | Comp. (total) | Frames/s |
+|---|---|---|
+| MIC-1state | 37 KB | 672 |
+| MIC-4state | 37 KB | 607 |
+| MIC-8state | 37 KB | 847 |
+| MIC-WASM (Go) | 37 KB | 513 |
+| MIC-C-WASM (4-state) | 37 KB | 6849 |
+| MIC-C-WASM (8-state) | 37 KB | 7547 |
+| MIC-PICS (JS, 4 strips) | 42 KB | 903 |
+| MIC-PICS (JS, 8 strips) | 47 KB | 549 |
+| MIC-C-WASM-PICS (8 strips) | 47 KB | 1625 |
+| HTJ2K (OpenJPH WASM) | 39 KB | 705 |
+| JPEG-LS (CharLS WASM) | 36 KB | 1660 |
+| JPEG-XL (informational) | 34 KB | 6256 |
+
+**Enhanced CT (2f, 512×512, 16-bit)**
+
+| Codec | Comp. (total) | Frames/s |
+|---|---|---|
+| MIC-1state | 104 KB | 174 |
+| MIC-4state | 104 KB | 197 |
+| MIC-8state | 104 KB | 181 |
+| MIC-WASM (Go) | 104 KB | 46 |
+| MIC-C-WASM (4-state) | 104 KB | 658 |
+| MIC-C-WASM (8-state) | 104 KB | 548 |
+| MIC-PICS (JS, 4 strips) | 107 KB | 393 |
+| MIC-PICS (JS, 8 strips) | 237 KB¹ | 442 |
+| MIC-C-WASM-PICS (8 strips) | 237 KB¹ | 1173 |
+| HTJ2K (OpenJPH WASM) | 126 KB | 127 |
+| JPEG-LS (CharLS WASM) | 78 KB | 325 |
+| JPEG-XL (informational) | 54 KB | 98 |
+
+**Breast tomosynthesis (16f, 1890×2457, 10-bit)**
+
+| Codec | Comp. (total) | Frames/s |
+|---|---|---|
+| MIC-1state | 10792 KB | 19 |
+| MIC-4state | 10794 KB | 18 |
+| MIC-8state | 10795 KB | 18 |
+| MIC-WASM (Go) | 10794 KB | 3 |
+| MIC-C-WASM (4-state) | 10794 KB | 66 |
+| MIC-C-WASM (8-state) | 10795 KB | 67 |
+| MIC-PICS (JS, 4 strips) | 10740 KB | 47 |
+| MIC-PICS (JS, 8 strips) | 10681 KB | 90 |
+| MIC-C-WASM-PICS (8 strips) | 10681 KB | 252 |
+| HTJ2K (OpenJPH WASM) | 11282 KB | 9 |
+| JPEG-LS (CharLS WASM) | 10192 KB | 36 |
+| JPEG-XL (informational) | 8813 KB | 6 |
+
+**CT axial series (16f, 512×512, 12-bit)**
+
+| Codec | Comp. (total) | Frames/s |
+|---|---|---|
+| MIC-1state | 3365 KB | 102 |
+| MIC-4state | 3366 KB | 101 |
+| MIC-8state | 3367 KB | 97 |
+| MIC-WASM (Go) | 3366 KB | 44 |
+| MIC-C-WASM (4-state) | 3366 KB | 554 |
+| MIC-C-WASM (8-state) | 3367 KB | 483 |
+| MIC-PICS (JS, 4 strips) | 3304 KB | 254 |
+| MIC-PICS (JS, 8 strips) | 3339 KB | 369 |
+| MIC-C-WASM-PICS (8 strips) | 3339 KB | 676 |
+| HTJ2K (OpenJPH WASM) | 3053 KB | 111 |
+| JPEG-LS (CharLS WASM) | 2929 KB | 176 |
+| JPEG-XL (informational) | 2691 KB | 98 |
+
+¹ Larger than the single-threaded MIC variants because one of the 8 strips
+(64 rows of high-entropy volumetric CT data) is incompressible and falls back
+to raw storage — a real, expected ratio/parallelism tradeoff of the PICS
+format, not a display artifact.
+
+What closed the three gaps from the previous version of this table:
+
+- **`mic-c-wasm-pics` was 8-strip-only, so datasets shipped with only a
+  4-strip PICS file had nothing for it to decode.** `cmd/mic-compress`'s
+  `cineDatasets` used to declare one `picsStrips` count per dataset (4 or 8);
+  now every cine dataset always gets **both** 4- and 8-strip PICS variants
+  (`cineDatasetPICSStrips = []int{4, 8}` in `cmd/mic-compress/main.go`), so
+  MIC-PICS (JS, 4 strips), MIC-PICS (JS, 8 strips), and MIC-C-WASM-PICS
+  (8 strips only) all have a file to decode for every dataset.
+- **`mic-refgen` hadn't been re-run since `CINE_TOMO`/`CINE_CTMULTI` were
+  added**, even though its cine loop already covered them — the reference
+  manifest was just stale. Re-running `go run -tags cgo_ojph ./cmd/mic-refgen`
+  generated real `.jph`/`.jls`/`.jxl` files (native-roundtrip-verified) for
+  both, giving HTJ2K/JPEG-LS live browser numbers and JPEG-XL a real
+  per-frame compressed size instead of the corpus-average fallback.
+- **Generating the missing 8-strip PICS files for the four small (64–512px)
+  cine datasets surfaced a real, previously-latent decoder bug**: an
+  incompressible strip is stored raw with the high bit of its length field
+  set (`picsRawFlag` in `parallelstrips.go`), but the JS decoders
+  (`mic-decoder.js`'s `parsePICSHeader`/`decodePICS`, the Web Worker in
+  `mic-worker.js`, and the parallel orchestrator in `mic-decoder-parallel.js`)
+  never masked the flag or checked it — they always ran a raw-fallback strip
+  through the FSE decompressor, corrupting the read length and throwing
+  `Invalid typed array length`. This only manifested when a fine-grained
+  strip split (8 strips of 64 rows on `CINE_ECT`) hit a high-entropy region;
+  large single-frame images never had. Fixed by masking `picsRawFlag` out of
+  the parsed length, exposing an `isRaw` flag per strip, and having both the
+  main-thread and worker decode paths read raw strips as plain little-endian
+  uint16 pixels instead of FSE-decoding them (mirroring the already-correct
+  Go and C decoders). The Node harness's `bench-worker.mjs` /
+  `NodeWorkerPool` had the identical bug and got the identical fix.
+
+Reproduce: `cd web && npx playwright test` runs the CI-scoped quick cine subset
+(`CINE_MRCARD` only); the tables above cover all seven datasets by pointing
+the same dashboard at `?images=cine` directly (see
+[`tests/pacs-bench.spec.mjs`](../web/tests/pacs-bench.spec.mjs) for the URL
+pattern and assertions to mirror). Regenerating requires `mic-compress
+-testdata` and `mic-refgen` to have been (re-)run first — see build
+prerequisites below.
 
 ### Build prerequisites for the WASM variants
 

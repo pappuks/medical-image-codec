@@ -173,6 +173,7 @@ export class PICSSABDecoder {
             outOffset: y0 * width,
             width,
             stripHeight: sh,
+            isRaw: strip.isRaw,
           });
         } else {
           // Transferable mode: copy just this strip's blob and transfer it.
@@ -187,6 +188,7 @@ export class PICSSABDecoder {
               blobBuffer: blobCopy,
               width,
               stripHeight: sh,
+              isRaw: strip.isRaw,
             },
             [blobCopy],
           );
