@@ -5,3 +5,7 @@ testdata/0acbebb*/
 *.so
 *.o
 .venv-fig/
+# PACS ingest — downloaded DICOM sources (do not commit)
+pacs-data/
+/mic-pacs-encode
+/mic-pacs-refgen
