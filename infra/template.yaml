@@ -438,7 +438,12 @@ Resources:
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS]
             CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-95df-b08e38992ac4 # CachingDisabled (managed)
+            # Managed-CachingDisabled. This is an AWS-global constant; verify
+            # with `aws cloudfront list-cache-policies --type managed` rather
+            # than trusting a copied value — a wrong-but-plausible UUID fails
+            # only at distribution-create time, with the unhelpful message
+            # "The specified cache policy does not exist."
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: !Ref DataOriginRequestPolicy
             ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
             Compress: true
