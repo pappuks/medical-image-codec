@@ -19,6 +19,15 @@ const S3_MODE = params.get('source') === 's3';
 // In S3 mode, /data/* is served by CloudFront from the studies bucket.
 // In dev mode, /data/ is absent — the dashboard uses testdata/ via baseUrl.
 const S3_DATA_BASE = '/data/';
+// Absolute form, required wherever this is used as a URL *base*.
+// new URL(path, '/data/') throws "Invalid URL" — a relative string is not a
+// valid base — and pacs-runner.mjs's fetchBytes joins every artifact path
+// against opts.baseUrl, so passing the relative form made every S3-mode fetch
+// throw before issuing a request. listStudies/loadStudy are unaffected because
+// pacs-study-source.mjs resolves their base through absBase() itself.
+const S3_DATA_BASE_ABS = typeof location !== 'undefined'
+  ? new URL(S3_DATA_BASE, location.href).href
+  : S3_DATA_BASE;
 
 // ---------------------------------------------------------------------------
 // Controls
@@ -362,7 +371,9 @@ async function start() {
     opts.resolvePath = study.resolvePath;
     opts.rawManifest = study.rawManifest;
     opts.refManifest = study.refManifest;
-    opts.baseUrl = S3_DATA_BASE; // resolvePath emits <id>/<dir>/...; baseUrl roots at /data/
+    // Absolute: resolvePath emits <id>/<dir>/<file>, and fetchBytes joins it
+    // against this as a URL base — which must not be relative (see above).
+    opts.baseUrl = S3_DATA_BASE_ABS;
   }
 
   let result;

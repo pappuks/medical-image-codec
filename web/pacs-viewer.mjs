@@ -30,6 +30,15 @@ const params = new URLSearchParams(location.search);
 // the root manifest.json in web/testdata/ — so the page degrades to a clear
 // "no studies available" state rather than throwing (plan: verification).
 const DATA_BASE = '/data/';
+// Absolute form of DATA_BASE. new URL(path, '/data/') throws "Invalid URL" —
+// a *relative* string is not a valid base — so every frame fetch threw before
+// issuing a request, and the catch in fetchFrameBytes turned it into a silent
+// "not available for this codec" with no network activity to point at.
+// loadStudy avoided this because pacs-study-source.mjs resolves its base
+// through absBase(); this module has to do the same.
+const DATA_BASE_ABS = typeof location !== 'undefined'
+  ? new URL(DATA_BASE, location.href).href
+  : DATA_BASE;
 
 // Re-time discipline mirrors the dashboard (pacs-runner.mjs timeMedian): a few
 // warmup decodes, then a median of several timed ones, yielding to the event
@@ -134,7 +143,7 @@ async function fetchFrameBytes(imgName) {
   let bytes = null;
   try {
     for (const p of activeStudy.resolvePath(activeCodecEntry, imgName)) {
-      const url = new URL(p, DATA_BASE).href;
+      const url = new URL(p, DATA_BASE_ABS).href;
       const t0 = performance.now();
       const resp = await fetch(url);
       const transferMs = performance.now() - t0;
