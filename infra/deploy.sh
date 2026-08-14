@@ -84,7 +84,16 @@ if [[ "${1:-}" == "--no-sync" ]]; then
 fi
 
 echo "==> Syncing web/ to s3://${APP_BUCKET}/"
+# --cache-control no-cache: the app assets have unversioned filenames
+# (pacs-viewer.mjs, not pacs-viewer.a1b2c3.mjs), so without an explicit
+# directive browsers apply *heuristic* caching and can serve a stale module for
+# hours after a deploy — the deploy looks like it silently did nothing.
+# "no-cache" does not mean "don't cache": the browser still stores the file and
+# revalidates with its ETag, so an unchanged asset costs a 304 with no body.
+# CloudFront continues to cache at the edge per AppCachePolicy, so this does not
+# add origin load. Correct-after-deploy beats saving one revalidation on a demo.
 aws s3 sync "${WEB_DIR}" "s3://${APP_BUCKET}/" \
+  --cache-control 'no-cache' \
   --exclude 'node_modules' \
   --exclude 'testdata' \
   --exclude 'tests' \
