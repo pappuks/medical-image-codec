@@ -12,3 +12,6 @@ pacs-data/
 
 # Subagent handoff workspace (design/implementation notes — not committed)
 .claude/agent-workspace/
+
+# Playwright run artifacts
+test-results/
