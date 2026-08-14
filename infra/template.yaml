@@ -554,6 +554,18 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      # CloudFront's standard (legacy) access logging delivers to S3 by granting
+      # the awslogsdelivery account FULL_CONTROL through a bucket ACL. Buckets
+      # created since April 2023 default to BucketOwnerEnforced, which disables
+      # ACLs entirely, so the distribution fails to create with "The S3 bucket
+      # that you specified for CloudFront logs does not enable ACL access".
+      # BucketOwnerPreferred re-enables ACLs while still making this account the
+      # owner of every delivered object.
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      # Still blocks PUBLIC ACLs — CloudFront's grant is to a specific AWS
+      # canonical user, not to "everyone", so this does not conflict.
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
