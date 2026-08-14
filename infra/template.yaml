@@ -19,9 +19,15 @@ Parameters:
     Description: Existing private S3 bucket holding the 17 GB codec dataset.
   AppBucketName:
     Type: String
+    # Must be '' by default: the UseDefaultAppBucketName condition below tests
+    # for the empty string to decide whether to construct the name from the
+    # account ID. Without an explicit empty default CloudFormation rejects the
+    # changeset with "Parameters: [AppBucketName] must have values", since
+    # deploy.sh only passes WebACLArn.
+    Default: ''
     Description: >
       Name for the new private app bucket that hosts web/ static assets.
-      Must be globally unique. Default constructed from account + region below.
+      Must be globally unique. Leave empty to derive it from account + region.
   WebACLArn:
     Type: String
     Description: ARN of the us-east-1 WAFv2 WebACL (CLOUDFRONT scope) from infra/waf.yaml.
@@ -161,6 +167,7 @@ Resources:
         SecurityHeadersConfig:
           FrameOptions:
             FrameOption: DENY
+            Override: true # required by CloudFormation, not optional
           ContentTypeOptions:
             Override: true
           ReferrerPolicy:
@@ -224,6 +231,7 @@ Resources:
         SecurityHeadersConfig:
           FrameOptions:
             FrameOption: DENY
+            Override: true # required by CloudFormation, not optional
           ContentTypeOptions:
             Override: true
           ReferrerPolicy:
@@ -343,7 +351,7 @@ Resources:
       FunctionName: pacs-demo-api
       Description: Thin read-only API for the MIC PACS demo — studies listing + health.
       CodeUri: api/
-      Runtime: nodejs20.x
+      Runtime: nodejs22.x # nodejs20.x is deprecated; creation blocked from 2027-02-01
       Handler: index.handler
       MemorySize: 256
       Timeout: 10
@@ -355,7 +363,7 @@ Resources:
       AutoPublishAlias: live
       FunctionUrlConfig:
         AuthType: AWS_IAM
-        InvocationMode: BUFFERED
+        InvokeMode: BUFFERED # SAM's property name — "InvocationMode" is rejected
       Tags:
         project: mic-pacs-demo
         component: api-lambda
@@ -401,7 +409,12 @@ Resources:
             OriginAccessControlId: !Ref S3OriginAccessControl
             OriginPath: '' # keys already include <id>/<codec>/<file>
           - Id: api-lambda
-            DomainName: !GetAtt ApiFunctionUrl.FunctionUrlDomain
+            # AWS::Lambda::Url (which SAM generates from FunctionUrlConfig)
+            # exposes only FunctionArn and FunctionUrl — there is no
+            # FunctionUrlDomain attribute. A CloudFront origin needs the bare
+            # host, so split the URL and take the authority:
+            #   https://<id>.lambda-url.<region>.on.aws/  ->  index 2
+            DomainName: !Select [2, !Split ['/', !GetAtt ApiFunctionUrl.FunctionUrl]]
             CustomOriginConfig:
               HTTPPort: 443
               HTTPSPort: 443
