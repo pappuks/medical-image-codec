@@ -44,6 +44,10 @@ WEBACL_ARN=$(aws cloudformation describe-stacks \
 echo "    WebACL ARN: ${WEBACL_ARN}"
 
 echo "==> Deploying app stack: ${APP_STACK} (${REGION})"
+# --resolve-s3 is required: template.yaml's ApiFunction has CodeUri: api/, so
+# SAM must upload a packaged artifact somewhere. Without it the deploy fails
+# with "S3 Bucket not specified"; --resolve-s3 lets SAM create and reuse its
+# own managed artifacts bucket in this region.
 sam deploy \
   --template-file "$(dirname "$0")/template.yaml" \
   --stack-name "${APP_STACK}" \
@@ -51,6 +55,7 @@ sam deploy \
   --capabilities CAPABILITY_IAM \
   --no-fail-on-empty-changeset \
   --confirm-changeset \
+  --resolve-s3 \
   --parameter-overrides "WebACLArn=${WEBACL_ARN}"
 
 DIST_DOMAIN=$(aws cloudformation describe-stacks \
