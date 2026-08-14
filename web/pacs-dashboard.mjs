@@ -78,6 +78,9 @@ function recordsByImage(records) {
 // (dev/CI); set to the S3 study's images when running in S3 mode, so
 // renderResults iterates the actual images that produced records.
 let activeImages = IMAGES;
+// Human-readable name of the S3 study in play, for the study-load simulation
+// heading. Null in local/dev mode, where the fixed STUDIES profiles are used.
+let activeStudyLabel = null;
 
 function renderResults(result) {
   const profiles = activeProfiles();
@@ -219,14 +222,33 @@ function renderCine(result, profiles) {
   return `<h2 class="section">Cine / multi-frame — every frame decoded independently</h2>${blocks.join('')}`;
 }
 
+// The STUDIES profiles are hardwired to the local testdata image names (MG1,
+// MG2, CR, MR). In S3 mode the runner's image set is the loaded study's own
+// frames, so those names never match and every profile would skip itself with
+// "codec data unavailable" — accurate but misleading, since the codec data is
+// fine and it is the corpus that differs. Synthesize a profile from the study
+// actually loaded instead: it is a real series, which makes the simulation
+// more meaningful here than the fixed local one, not less.
+function studyProfilesFor(result) {
+  if (!S3_MODE) return STUDIES;
+  const names = activeImages.map((i) => i.name);
+  if (!names.length) return [];
+  const cine = (result.cineRecords || [])[0];
+  const label = cine?.datasetLabel || activeStudyLabel || 'loaded study';
+  const unit = names.length === 1 ? 'image' : 'frames';
+  return [{ name: `${label} (${names.length} ${unit})`, images: names }];
+}
+
 function renderStudies(result, profiles) {
   const byImage = recordsByImage(result.records);
   const findRec = (imgName, codecId) => (byImage.get(imgName) || []).find((r) => r.codecId === codecId);
   const codecs = ['mic-4state', 'mic-8state', 'pics-8'];
+  const studies = studyProfilesFor(result);
+  if (!studies.length) return '';
 
   const blocks = codecs.map((codecId) => {
     const label = CODEC_REGISTRY.find((c) => c.id === codecId)?.label ?? codecId;
-    const studyTables = STUDIES.map((study) => {
+    const studyTables = studies.map((study) => {
       const recs = study.images.map((n) => findRec(n, codecId));
       if (recs.some((r) => !r || r.compressedBytes == null || r.decodeMs == null)) {
         return `<div class="note">${escapeHtml(study.name)} — codec data unavailable, skipped</div>`;
@@ -334,6 +356,7 @@ async function start() {
     renderAttribution(study.study);
     opts.images = study.images;
     activeImages = study.images;
+    activeStudyLabel = study.study?.modalityLabel || studyId;
     opts.cine = study.cine;
     opts.cineFrameFn = studyCineFrameImages;
     opts.resolvePath = study.resolvePath;
