@@ -1,11 +1,17 @@
 # PACS Batch Encode Pipeline — Design
 
-Status: **design only, not implemented**. Target: turn the 80 Tier-A studies
+Status: **design implemented (Phases 1–4)**. Target: turn the 80 Tier-A studies
 already sitting in `pacs-data/raw-src/` (and mirrored to
 `s3://mic-studies-594551578651-us-west-1-an/<id>/raw/`) into MIC, PICS, HTJ2K,
 JPEG-LS and JPEG-XL artifacts under the S3 prefixes already reserved in
 `pacs-data/manifest.json` (`entries[].s3.codec_prefixes`), so a browser PACS
-viewer can benchmark real-time decode across codecs.
+viewer can benchmark real-time decode across codecs. The batch encoders
+(`cmd/mic-pacs-encode`, `cmd/mic-pacs-refgen`) and the upload pipeline
+(`scripts/pacs-ingest/upload_s3.py`) are built; 67 of 80 Tier-A studies are
+fully encoded and in S3. See [pacs-demo-roadmap.md](pacs-demo-roadmap.md) for
+current status and [infra/README.md](../infra/README.md) for the hosting
+stack. This document remains the design reference for the encoder routing and
+manifest schema.
 
 ---
 

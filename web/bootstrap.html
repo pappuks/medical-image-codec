@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>MIC PACS demo — verifying browser…</title>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #333; background: #fafafa;
+    }
+    .card { max-width: 420px; padding: 24px; text-align: center; }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+    p { margin: 0; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Verifying your browser…</h1>
+    <p>If this page does not reload automatically, <a href="/pacs-dashboard.html?source=s3">continue to the demo</a>.</p>
+  </div>
+  <!--
+    §5 fallback page (docs/pacs-access-control-design.md §5). This page exists
+    purely to be served WITHOUT Cross-Origin-Embedder-Policy so the AWS WAF
+    Challenge interstitial can mint a token even if its script is cross-origin
+    without CORP (which require-corp would block on the dashboard page). Once
+    the token is minted it is scoped to the origin, so the dashboard inherits it.
+
+    Unused unless the deploy-time check proves the interstitial is incompatible
+    with COEP. No imports, no module scripts, no SharedArrayBuffer requirement —
+    just a document navigation that carries Accept: text/html and gets the
+    interstitial, then redirects to the real dashboard.
+  -->
+  <script>
+    // By the time this script runs the token already exists. A request without
+    // a valid token never reaches this file: WAF returns the interstitial
+    // INSTEAD of it, and the interstitial mints the token and then resubmits
+    // the original request. So seeing this page at all means the challenge is
+    // already solved, and the delay below is only so the message is legible.
+    // location.replace avoids a back-button loop.
+    setTimeout(function () {
+      location.replace('/pacs-dashboard.html?source=s3');
+    }, 800);
+  </script>
+</body>
+</html>

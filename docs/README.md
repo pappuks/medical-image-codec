@@ -48,8 +48,10 @@ The dataset pipeline and the public-demo hosting architecture.
 | [pacs-s3-datasets.md](pacs-s3-datasets.md) | Dataset catalog — sources, licenses, Tier A/B (lossless vs lossy), the IDC selection |
 | [pacs-encode-design.md](pacs-encode-design.md) | Batch all-codec encoder design — routing, verification, manifest schema |
 | [pacs-lambda-service-design.md](pacs-lambda-service-design.md) | **Online demo hosting** — CloudFront + Lambda + private S3, cross-origin-isolation strategy, IAM, cost, IaC |
+| [pacs-access-control-design.md](pacs-access-control-design.md) | **Bot mitigation** — WAF Challenge, token minting order, the 202 failure mode, COEP interaction; identity options in the appendix |
 
 Related tooling READMEs outside `docs/`:
+[`infra/README.md`](../infra/README.md) (AWS hosting stack — SAM/CloudFront/Lambda/WAF) ·
 [scripts/pacs-ingest/README.md](../scripts/pacs-ingest/README.md) (ingest/encode/upload pipeline) ·
 [scripts/aws/README.md](../scripts/aws/README.md) (EC2 benchmark runbook) ·
 [web/README.md](../web/README.md) (dashboard + Node/Playwright benchmark).

@@ -9,11 +9,16 @@ import {
   CINE_DATASETS, QUICK_CINE_IDS,
   fmtMs, fmtKB, fmtRatio, timeToDisplayMs,
 } from './pacs-model.mjs';
-import { runBenchmark } from './pacs-runner.mjs';
+import { runBenchmark, ChallengeExpiredError } from './pacs-runner.mjs';
+import { listStudies, loadStudy, studyCineFrameImages } from './pacs-study-source.mjs';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const HEADLESS = params.get('headless') === '1';
+const S3_MODE = params.get('source') === 's3';
+// In S3 mode, /data/* is served by CloudFront from the studies bucket.
+// In dev mode, /data/ is absent — the dashboard uses testdata/ via baseUrl.
+const S3_DATA_BASE = '/data/';
 
 // ---------------------------------------------------------------------------
 // Controls
@@ -69,12 +74,17 @@ function recordsByImage(records) {
   return m;
 }
 
+// Active image set for the per-image section. Defaults to the local IMAGES
+// (dev/CI); set to the S3 study's images when running in S3 mode, so
+// renderResults iterates the actual images that produced records.
+let activeImages = IMAGES;
+
 function renderResults(result) {
   const profiles = activeProfiles();
   const byImage = recordsByImage(result.records);
   const parts = [];
 
-  for (const img of IMAGES) {
+  for (const img of activeImages) {
     const recs = byImage.get(img.name);
     if (!recs || recs.every((r) => r.compressedBytes == null)) continue;
     const rawMB = (img.w * img.h * 2 / 1024 / 1024).toFixed(2);
@@ -148,7 +158,19 @@ function renderCine(result, profiles) {
   }
 
   const blocks = [];
-  for (const ds of CINE_DATASETS) {
+  // In S3 mode the cine datasets come from the loaded study, not the local
+  // CINE_DATASETS. Build the list from the records themselves so any cine ID
+  // is rendered, then enrich with metadata from CINE_DATASETS when available.
+  const cineMeta = new Map(CINE_DATASETS.map((d) => [d.id, d]));
+  for (const r of cineRecords) {
+    if (!cineMeta.has(r.cine)) {
+      cineMeta.set(r.cine, {
+        id: r.cine, label: r.datasetLabel || r.cine, modality: r.modality,
+        frames: r.frames, w: r.width, h: r.height, bits: r.bits,
+      });
+    }
+  }
+  for (const ds of cineMeta.values()) {
     const recs = byCine.get(ds.id);
     if (!recs || recs.every((r) => r.compressedBytesTotal == null)) continue;
     const totalRawMB = (ds.w * ds.h * 2 * ds.frames / 1024 / 1024).toFixed(2);
@@ -237,6 +259,40 @@ function renderStudies(result, profiles) {
 // ---------------------------------------------------------------------------
 let running = false;
 
+// WAF Challenge (token expired / not yet minted) mid-run: abort the run,
+// discard the partial results (do NOT render a half-finished benchmark
+// table — this dashboard's numbers get quoted, and unlabelled-partial
+// rows would be worse than no rows), then reload the page. A document
+// navigation carries Accept: text/html, gets the interstitial, and
+// re-mints the token. See docs/pacs-access-control-design.md §4.
+function handleChallengeExpired(e, origin) {
+  running = false;
+  $('start').disabled = false;
+  $('cancel').disabled = true;
+  $('status').textContent = 'Re-verifying your browser, reloading…';
+  if (HEADLESS) {
+    window.__pacsBenchError = `${origin}: ${e.message}`;
+    window.__pacsBenchDone = true;
+    return;
+  }
+  // Reload to re-mint the token — a document navigation carries
+  // Accept: text/html and gets the interstitial. Cap the attempts: if
+  // verification keeps failing (e.g. the interstitial is blocked by
+  // require-corp, design §5), an unbounded retry would trap the user in a
+  // reload loop with no way to read the error. Two tries, then stop and say so.
+  let tries = 0;
+  try { tries = Number(sessionStorage.getItem('wafReloadTries') || 0); } catch { /* private mode */ }
+  if (tries >= 2) {
+    try { sessionStorage.removeItem('wafReloadTries'); } catch { /* ignore */ }
+    $('status').textContent =
+      'Browser verification keeps failing. Please reload the page manually; '
+      + 'if it persists the demo may be misconfigured.';
+    return;
+  }
+  try { sessionStorage.setItem('wafReloadTries', String(tries + 1)); } catch { /* ignore */ }
+  setTimeout(() => location.reload(), 1500); // legible before reload
+}
+
 async function start() {
   if (running) return;
   running = true;
@@ -251,15 +307,52 @@ async function start() {
     $('status').textContent = `${done} / ${total} — ${label}`;
   };
 
+  // S3-backed mode: load the selected study's manifests + path resolver and
+  // pass them through to runBenchmark. The timing/verify/adapter logic in
+  // pacs-runner.mjs is unchanged — only the path-resolution layer is swapped.
+  if (S3_MODE) {
+    const studyId = $('studyselect').value;
+    if (!studyId) {
+      $('status').textContent = 'Select an S3 study first.';
+      running = false; $('start').disabled = false; $('cancel').disabled = true;
+      return;
+    }
+    $('status').textContent = `Loading study ${studyId}…`;
+    let study;
+    try {
+      study = await loadStudy(studyId, { dataBaseUrl: S3_DATA_BASE });
+    } catch (e) {
+      if (e instanceof ChallengeExpiredError) { handleChallengeExpired(e, 'loadStudy'); return; }
+      $('status').textContent = 'Error loading study: ' + e.message;
+      running = false; $('start').disabled = false; $('cancel').disabled = true;
+      if (HEADLESS) { window.__pacsBenchError = e.message; window.__pacsBenchDone = true; }
+      return;
+    }
+    renderAttribution(study.study);
+    opts.images = study.images;
+    activeImages = study.images;
+    opts.cine = study.cine;
+    opts.cineFrameFn = studyCineFrameImages;
+    opts.resolvePath = study.resolvePath;
+    opts.rawManifest = study.rawManifest;
+    opts.refManifest = study.refManifest;
+    opts.baseUrl = S3_DATA_BASE; // resolvePath emits <id>/<dir>/...; baseUrl roots at /data/
+  }
+
   let result;
   try {
     result = await runBenchmark(opts);
   } catch (e) {
+    if (e instanceof ChallengeExpiredError) { handleChallengeExpired(e, 'runBenchmark'); return; }
     $('status').textContent = 'Error: ' + e.message;
     running = false; $('start').disabled = false; $('cancel').disabled = true;
     if (HEADLESS) { window.__pacsBenchError = e.message; window.__pacsBenchDone = true; }
     return;
   }
+
+  // A completed run proves verification is working — reset the reload counter
+  // so a later challenge in the same session still gets its two attempts.
+  try { sessionStorage.removeItem('wafReloadTries'); } catch { /* private mode */ }
 
   renderEnv(result.env);
   renderResults(result);
@@ -301,6 +394,62 @@ async function renderChartsIfAvailable(result) {
 }
 
 // ---------------------------------------------------------------------------
+// S3 mode — study picker + attribution banner
+// ---------------------------------------------------------------------------
+function fmtStudyLabel(s) {
+  const rep = s.representative || {};
+  const dim = rep.cols && rep.rows ? `${rep.cols}×${rep.rows}` : '—';
+  const frames = rep.frames ? ` × ${rep.frames}f` : '';
+  const mod = s.modalityLabel || s.modality || '';
+  const tier = s.tier ? ` [tier ${s.tier}]` : '';
+  return `${s.id} — ${mod} ${dim}${frames}${tier}`;
+}
+
+function renderAttribution(study) {
+  const panel = $('attribution-panel');
+  const box = $('attribution');
+  if (!study) { panel.hidden = true; return; }
+  const rep = study.representative || {};
+  const bits = [];
+  if (study.license) bits.push(`<strong>License:</strong> ${escapeHtml(study.license)}`);
+  if (study.attribution) bits.push(`<strong>Attribution:</strong> ${escapeHtml(study.attribution)}`);
+  if (study.tier) bits.push(`<strong>Tier:</strong> ${escapeHtml(study.tier)}${study.tier === 'A' ? ' (lossless ground truth)' : ' (lossy source — demo only)'}`);
+  if (rep.transferSyntaxName) bits.push(`<strong>Transfer syntax:</strong> ${escapeHtml(rep.transferSyntaxName)}`);
+  if (study.note) bits.push(`<strong>Note:</strong> ${escapeHtml(study.note)}`);
+  box.innerHTML = bits.join(' · ');
+  panel.hidden = false;
+}
+
+async function initS3Mode() {
+  $('studyctl').hidden = false;
+  const sel = $('studyselect');
+  sel.innerHTML = '<option value="">Loading studies…</option>';
+  try {
+    const { studies, source } = await listStudies({ dataBaseUrl: S3_DATA_BASE });
+    if (!studies.length) {
+      sel.innerHTML = '<option value="">No studies found (is /data/ served?)</option>';
+      $('status').textContent = 'S3 mode: no studies available. Ensure the CloudFront /data/* origin is reachable.';
+      return;
+    }
+    // Tier A first (lossless ground truth), then Tier B (demo only), then by id.
+    studies.sort((a, b) => {
+      const ta = (a.tier || 'Z').localeCompare(b.tier || 'Z');
+      if (ta) return ta;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+    sel.innerHTML = studies.map((s) =>
+      `<option value="${escapeHtml(s.id)}">${escapeHtml(fmtStudyLabel(s))}</option>`).join('');
+    // If ?study=<id> is in the URL, preselect it.
+    const pre = params.get('study');
+    if (pre && studies.some((s) => s.id === pre)) sel.value = pre;
+    $('status').textContent = `S3 mode: ${studies.length} studies available (${source} source). Select a study and click Start.`;
+  } catch (e) {
+    sel.innerHTML = '<option value="">Error loading studies</option>';
+    $('status').textContent = 'S3 mode error: ' + e.message;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Wire up
 // ---------------------------------------------------------------------------
 $('start').addEventListener('click', start);
@@ -312,6 +461,13 @@ if (params.has('warmup')) $('warmup').value = params.get('warmup');
 if (['quick', 'full', 'cine'].includes(params.get('images'))) $('imageset').value = params.get('images');
 if (params.get('verify') === '1') $('verify').checked = true;
 if (params.get('allprofiles') === '1') $('allprofiles').checked = true;
+
+// S3 mode: swap the local image-set dropdown for the S3 study picker. The
+// benchmark timing/verify pipeline is shared; only the data source differs.
+if (S3_MODE) {
+  $('imageset').parentElement.hidden = true;
+  initS3Mode();
+}
 
 // Initial environment snapshot (before any run).
 renderEnv({

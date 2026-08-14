@@ -6,6 +6,7 @@
 
 import {
   IMAGES, CODEC_REGISTRY, REFERENCE_NATIVE, CINE_DATASETS, cineFrameImages, fnv1a32Hex,
+  ChallengeExpiredError, throwIfChallenged,
 } from './pacs-model.mjs';
 import { makeAdapter } from './codecs/index.mjs';
 
@@ -13,6 +14,11 @@ import { makeAdapter } from './codecs/index.mjs';
 // bench-pacs-viewer.mjs so browser and Node numbers are comparable.
 export const DEFAULT_ITERATIONS = 15;
 export const DEFAULT_WARMUP = 3;
+
+// Re-exported so existing importers (pacs-dashboard.mjs, pacs-study-source.mjs)
+// keep working. The class itself lives in pacs-model.mjs — see the comment
+// there for why it can't live in this file.
+export { ChallengeExpiredError };
 
 const nextFrame = () =>
   new Promise((r) => (typeof requestAnimationFrame === 'function'
@@ -36,6 +42,7 @@ function candidatePaths(codec, imgName) {
 async function fetchBytes(baseUrl, path, fetchFn) {
   const url = new URL(path, baseUrl).href;
   const resp = await fetchFn(url);
+  throwIfChallenged(resp, url); // must precede resp.ok — 202 is "ok" (§4)
   if (!resp.ok) return null;
   const buf = await resp.arrayBuffer();
   return new Uint8Array(buf);
@@ -43,10 +50,18 @@ async function fetchBytes(baseUrl, path, fetchFn) {
 
 async function fetchJSON(baseUrl, path, fetchFn) {
   try {
-    const resp = await fetchFn(new URL(path, baseUrl).href);
+    const url = new URL(path, baseUrl).href;
+    const resp = await fetchFn(url);
+    throwIfChallenged(resp, url); // must precede resp.ok — 202 is "ok" (§4)
     if (!resp.ok) return null;
     return await resp.json();
-  } catch { return null; }
+  } catch (e) {
+    // The catch here normally swallows everything and returns null, but a
+    // ChallengeExpiredError must NOT be swallowed — the dashboard needs to
+    // catch it at the run boundary to abort + reload. Re-throw it.
+    if (e instanceof ChallengeExpiredError) throw e;
+    return null;
+  }
 }
 
 function checksumOfPixels(pixels) {
@@ -97,7 +112,7 @@ async function measureOne(adapter, codec, img, ctx) {
   };
   if (adapter.liveDecodeSupported) {
     let bytes = null;
-    for (const p of candidatePaths(codec, img.name)) {
+    for (const p of (ctx.resolvePath ?? candidatePaths)(codec, img.name)) {
       bytes = await fetchBytes(ctx.baseUrl, p, ctx.fetchFn);
       if (bytes) break;
     }
@@ -138,6 +153,17 @@ async function measureOne(adapter, codec, img, ctx) {
 //   opts.baseUrl      : base URL for testdata fetches (default location.href)
 //   opts.fetchFn      : fetch implementation (default global fetch)
 //   opts.onProgress   : ({done,total,label}) => void
+//   opts.resolvePath  : optional (codec, imgName) -> [path] override. Defaults
+//                       to the internal testdata/ candidatePaths. The S3-backed
+//                       dashboard passes makeS3PathResolver(studyId) here so
+//                       fetch URLs become <id>/<codec-dir>/<imgName><suffix>.<ext>
+//                       without the rest of this runner changing.
+//   opts.rawManifest  : pre-loaded pixel-checksum manifest (skips the testdata
+//                       fetch when provided). The S3 source supplies this.
+//   opts.refManifest  : pre-loaded reference-codec size manifest (same).
+//   opts.cineFrameFn  : optional (cineDataset) -> [frameImage] override, used
+//                       by the S3 source to honor the study's actual frame
+//                       indices (deep series may sample a subset).
 // Returns { generatedAt, env, records, manifestPresent, refManifestPresent }.
 export async function runBenchmark(opts = {}) {
   const images = opts.images ?? IMAGES;
@@ -149,9 +175,12 @@ export async function runBenchmark(opts = {}) {
   const baseUrl = opts.baseUrl ?? (typeof location !== 'undefined' ? location.href : 'http://localhost/');
   const fetchFn = opts.fetchFn ?? fetch;
   const onProgress = opts.onProgress ?? (() => {});
+  const resolvePath = opts.resolvePath ?? candidatePaths;
 
-  const rawManifest = await fetchJSON(baseUrl, 'testdata/manifest.json', fetchFn);
-  const refManifest = await fetchJSON(baseUrl, 'testdata/refcodecs-manifest.json', fetchFn);
+  const rawManifest = opts.rawManifest
+    ?? await fetchJSON(baseUrl, 'testdata/manifest.json', fetchFn);
+  const refManifest = opts.refManifest
+    ?? await fetchJSON(baseUrl, 'testdata/refcodecs-manifest.json', fetchFn);
 
   // Build + init adapters once, outside all timing loops. If any init() throws
   // (e.g. a WASM decoder wasn't vendored), dispose the adapters already created
@@ -169,94 +198,111 @@ export async function runBenchmark(opts = {}) {
     throw e;
   }
 
-  const ctx = { baseUrl, fetchFn, iterations, warmup, verify, rawManifest, refManifest };
+  const ctx = { baseUrl, fetchFn, iterations, warmup, verify, rawManifest, refManifest, resolvePath };
 
   const records = [];
   const cineRecords = [];
   const total = (images.length + cineDatasets.length) * codecs.length;
   let done = 0;
 
-  for (const img of images) {
-    const rawBytes = img.w * img.h * 2;
-    for (const codec of codecs) {
-      const adapter = adapters.get(codec.id);
-      onProgress({ done, total, label: `${img.name} / ${codec.label}` });
+  // The per-record try/catches below normally swallow decode errors and record
+  // them as `rec.note` so one bad image doesn't abort the whole run. A WAF
+  // ChallengeExpiredError is different — it means the token expired mid-run
+  // and EVERY subsequent fetch will also fail, so rendering partial results
+  // would surface as bogus codec failures. Re-throw it so the dashboard can
+  // abort + reload. The try/finally ensures adapters (PICS worker pools) are
+  // disposed even on that re-throw. See design §4.
+  try {
+    for (const img of images) {
+      const rawBytes = img.w * img.h * 2;
+      for (const codec of codecs) {
+        const adapter = adapters.get(codec.id);
+        onProgress({ done, total, label: `${img.name} / ${codec.label}` });
 
-      const rec = {
-        image: img.name, modality: img.modality, width: img.w, height: img.h,
-        rawBytes, codecId: codec.id, label: codec.label, kind: codec.kind,
-        liveDecode: adapter.liveDecodeSupported, compressedBytes: null,
-        decodeMs: null, ratio: null, pixelsVerified: null, note: null,
-      };
-      try {
-        Object.assign(rec, await measureOne(adapter, codec, img, ctx));
-      } catch (e) {
-        rec.note = `error: ${e.message}`;
+        const rec = {
+          image: img.name, modality: img.modality, width: img.w, height: img.h,
+          rawBytes, codecId: codec.id, label: codec.label, kind: codec.kind,
+          liveDecode: adapter.liveDecodeSupported, compressedBytes: null,
+          decodeMs: null, ratio: null, pixelsVerified: null, note: null,
+        };
+        try {
+          Object.assign(rec, await measureOne(adapter, codec, img, ctx));
+        } catch (e) {
+          if (e instanceof ChallengeExpiredError) throw e;
+          rec.note = `error: ${e.message}`;
+        }
+        done++;
+        records.push(rec);
       }
-      done++;
-      records.push(rec);
     }
-  }
 
-  // Cine / multi-frame section: decode every frame of each dataset independently
-  // and aggregate to a full-loop time and frames/s, per (dataset, codec).
-  for (const ds of cineDatasets) {
-    const frames = cineFrameImages(ds);
-    const rawPerFrame = ds.w * ds.h * 2;
-    for (const codec of codecs) {
-      const adapter = adapters.get(codec.id);
-      onProgress({ done, total, label: `${ds.id} (cine) / ${codec.label}` });
+    const cineFrameFn = opts.cineFrameFn ?? cineFrameImages;
 
-      const rec = {
-        cine: ds.id, datasetLabel: ds.label, modality: ds.modality,
-        width: ds.w, height: ds.h, bits: ds.bits, frames: ds.frames,
-        codecId: codec.id, label: codec.label, kind: codec.kind,
-        liveDecode: adapter.liveDecodeSupported,
-        framesMeasured: 0, rawBytesTotal: rawPerFrame * ds.frames,
-        compressedBytesTotal: null, ratio: null,
-        loopMs: null, msPerFrame: null, fps: null,
-        pixelsVerified: null, note: null,
-      };
-      try {
-        let comp = 0, dec = 0, verifiedSeen = false, allVerified = true;
-        for (const fr of frames) {
-          const m = await measureOne(adapter, codec, fr, ctx);
-          if (m.compressedBytes == null && m.decodeMs == null) {
-            if (!rec.note) rec.note = m.note; // e.g. 'file missing'
-            continue;
+    // Cine / multi-frame section: decode every frame of each dataset independently
+    // and aggregate to a full-loop time and frames/s, per (dataset, codec).
+    for (const ds of cineDatasets) {
+      const frames = cineFrameFn(ds);
+      const rawPerFrame = ds.w * ds.h * 2;
+      for (const codec of codecs) {
+        const adapter = adapters.get(codec.id);
+        onProgress({ done, total, label: `${ds.id} (cine) / ${codec.label}` });
+
+        const rec = {
+          cine: ds.id, datasetLabel: ds.label, modality: ds.modality,
+          width: ds.w, height: ds.h, bits: ds.bits, frames: ds.frames,
+          codecId: codec.id, label: codec.label, kind: codec.kind,
+          liveDecode: adapter.liveDecodeSupported,
+          framesMeasured: 0, rawBytesTotal: rawPerFrame * ds.frames,
+          compressedBytesTotal: null, ratio: null,
+          loopMs: null, msPerFrame: null, fps: null,
+          pixelsVerified: null, note: null,
+        };
+        try {
+          let comp = 0, dec = 0, verifiedSeen = false, allVerified = true;
+          for (const fr of frames) {
+            const m = await measureOne(adapter, codec, fr, ctx);
+            if (m.compressedBytes == null && m.decodeMs == null) {
+              if (!rec.note) rec.note = m.note; // e.g. 'file missing'
+              continue;
+            }
+            rec.framesMeasured++;
+            if (m.compressedBytes != null) comp += m.compressedBytes;
+            if (m.decodeMs != null) dec += m.decodeMs;
+            if (m.pixelsVerified === true) verifiedSeen = true;
+            else if (m.pixelsVerified === false) { verifiedSeen = true; allVerified = false; if (!rec.note) rec.note = m.note; }
           }
-          rec.framesMeasured++;
-          if (m.compressedBytes != null) comp += m.compressedBytes;
-          if (m.decodeMs != null) dec += m.decodeMs;
-          if (m.pixelsVerified === true) verifiedSeen = true;
-          else if (m.pixelsVerified === false) { verifiedSeen = true; allVerified = false; if (!rec.note) rec.note = m.note; }
+          if (rec.framesMeasured > 0) {
+            rec.compressedBytesTotal = comp || null;
+            rec.ratio = comp ? rec.rawBytesTotal / comp : null;
+            rec.loopMs = dec || null;
+            rec.msPerFrame = dec ? dec / rec.framesMeasured : null;
+            rec.fps = dec ? 1000 / (dec / rec.framesMeasured) : null;
+            rec.pixelsVerified = verifiedSeen ? allVerified : null;
+            if (!rec.liveDecode && !rec.note) rec.note = 'native-C reference (no browser decoder)';
+          } else if (!rec.note) {
+            rec.note = 'no frames';
+          }
+        } catch (e) {
+          if (e instanceof ChallengeExpiredError) throw e;
+          rec.note = `error: ${e.message}`;
         }
-        if (rec.framesMeasured > 0) {
-          rec.compressedBytesTotal = comp || null;
-          rec.ratio = comp ? rec.rawBytesTotal / comp : null;
-          rec.loopMs = dec || null;
-          rec.msPerFrame = dec ? dec / rec.framesMeasured : null;
-          rec.fps = dec ? 1000 / (dec / rec.framesMeasured) : null;
-          rec.pixelsVerified = verifiedSeen ? allVerified : null;
-          if (!rec.liveDecode && !rec.note) rec.note = 'native-C reference (no browser decoder)';
-        } else if (!rec.note) {
-          rec.note = 'no frames';
-        }
-      } catch (e) {
-        rec.note = `error: ${e.message}`;
+        done++;
+        cineRecords.push(rec);
       }
-      done++;
-      cineRecords.push(rec);
     }
+  } finally {
+    // Dispose adapters whether the run completed normally or a
+    // ChallengeExpiredError re-threw out of the loops above.
+    for (const a of adapters.values()) if (typeof a.dispose === 'function') a.dispose();
   }
 
   onProgress({ done: total, total, label: 'complete' });
 
   const env = collectEnv();
-  // Surface the PICS SAB mode if a PICS adapter ran (before disposing them).
+  // Surface the PICS SAB mode if a PICS adapter ran. Adapters were already
+  // disposed by the finally block above; sabMode is a plain property that
+  // dispose() doesn't clear, so reading it here is still valid.
   for (const a of adapters.values()) if (a.sabMode != null) env.picsSabMode = a.sabMode;
-
-  for (const a of adapters.values()) if (typeof a.dispose === 'function') a.dispose();
 
   return {
     generatedAt: new Date().toISOString(),

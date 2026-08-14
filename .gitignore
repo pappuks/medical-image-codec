@@ -9,3 +9,6 @@ testdata/0acbebb*/
 pacs-data/
 /mic-pacs-encode
 /mic-pacs-refgen
+
+# Subagent handoff workspace (design/implementation notes — not committed)
+.claude/agent-workspace/

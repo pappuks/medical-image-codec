@@ -774,6 +774,35 @@ cd web && npx playwright install chromium   # one-time
 npx playwright test                          # auto-launches serve.py, runs the bench
 ```
 
+> **Keep the Playwright suite pointed at the local server** (`serve.py`). The
+> deployed demo sits behind an AWS WAF Challenge (see
+> [docs/pacs-access-control-design.md](../docs/pacs-access-control-design.md))
+> and a CloudFront request without a valid challenge token gets a `202` with an
+> empty body. Headless Chromium will *probably* solve the challenge, but a flaky
+> CI failure that actually means "the bot mitigation fired" would waste real
+> debugging time. Pointing the suite at the deployed URL is not supported.
+
+### Deployed demo — WAF Challenge (bot mitigation)
+
+The public CloudFront deployment is gated by an AWS WAF `Challenge` rule. A
+real browser solves the silent JavaScript interrogation once, mints a token
+cookie (72-hour immunity), and never sees anything. Clients that cannot run
+JavaScript — `curl`, `wget`, `requests`, `httpx`, and every trivial scraper —
+cannot obtain a token and get:
+
+- HTTP `202 Request Accepted`
+- header `x-amzn-waf-action: challenge`
+- an empty body
+
+This is **expected, not an outage.** A `curl` against the CloudFront URL that
+returns `202` with no bytes is the mitigation working as designed. The dataset
+is public-domain and freely downloadable from NCI IDC; the gate exists only to
+stop automated mirroring of the hosted copy, not to protect confidentiality.
+
+If a token expires mid-session, the dashboard detects the `202` and reloads the
+page (a document navigation re-mints the token) rather than feeding empty
+buffers into the decoders — see `ChallengeExpiredError` in `pacs-runner.mjs`.
+
 ### Node console report — `bench-pacs-viewer.mjs`
 
 ```bash

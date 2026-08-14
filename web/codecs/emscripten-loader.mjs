@@ -1,3 +1,5 @@
+import { throwIfChallenged } from '../pacs-model.mjs';
+
 // emscripten-loader.mjs — Load a UMD Emscripten module (OpenJPH / CharLS) from
 // the vendored static tree into an ESM context.
 //
@@ -33,6 +35,10 @@ export async function instantiateFromSource(src, locateWasm) {
 // wasmUrl. Both URLs are typically built with new URL('./vendor/...', import.meta.url).
 export async function loadEmscriptenModule(jsUrl, wasmUrl) {
   const resp = await fetch(jsUrl);
+  // A WAF challenge returns 202 with an empty body, which resp.ok accepts —
+  // we would then run new Function('') and throw an opaque SyntaxError from
+  // adapter init, instead of the dashboard's re-verify-and-reload path.
+  throwIfChallenged(resp, jsUrl);
   if (!resp.ok) throw new Error(`emscripten-loader: fetch ${jsUrl} -> ${resp.status}`);
   const src = await resp.text();
   return instantiateFromSource(src, () => wasmUrl);

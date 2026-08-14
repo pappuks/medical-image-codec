@@ -1,0 +1,593 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MIC PACS web-viewer public demo — us-west-1 stack.
+  One CloudFront distribution, one hostname, three origins:
+    /*       -> app S3 bucket      (HTML/JS/WASM, private via OAC)
+    /data/*  -> studies S3 bucket  (existing 17 GB dataset, private via OAC)
+    /api/*   -> Lambda Function URL (SigV4 via CloudFront OAC, not directly callable)
+
+  Design source of truth: docs/pacs-lambda-service-design.md.
+  The WAF WebACL lives in a separate us-east-1 stack (infra/waf.yaml) and its
+  ARN is passed in here as WebACLArn — AWS requires CLOUDFRONT-scope WebACLs
+  to be created in us-east-1 regardless of where the distribution's origins live.
+
+Parameters:
+  StudiesBucketName:
+    Type: String
+    Default: mic-studies-594551578651-us-west-1-an
+    Description: Existing private S3 bucket holding the 17 GB codec dataset.
+  AppBucketName:
+    Type: String
+    Description: >
+      Name for the new private app bucket that hosts web/ static assets.
+      Must be globally unique. Default constructed from account + region below.
+  WebACLArn:
+    Type: String
+    Description: ARN of the us-east-1 WAFv2 WebACL (CLOUDFRONT scope) from infra/waf.yaml.
+  DataCacheTTL:
+    Type: String
+    Default: '86400'
+    Description: CloudFront default TTL (seconds) for /data/* codec blobs (immutable).
+  ManifestCacheTTL:
+    Type: String
+    Default: '300'
+    Description: Short TTL (seconds) for manifest.json responses so re-ingests surface quickly.
+
+Conditions:
+  UseDefaultAppBucketName: !Equals [!Ref AppBucketName, '']
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # S3 app bucket — hosts web/ static assets (HTML/JS/WASM + vendor/).
+  # Private: public-access fully blocked; reads only via the CloudFront OAC.
+  # ---------------------------------------------------------------------------
+  AppBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - UseDefaultAppBucketName
+        - !Sub 'mic-pacs-demo-app-${AWS::AccountId}-us-west-1'
+        - !Ref AppBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-access-logs
+            Status: Enabled
+            Prefix: logs/
+            ExpirationInDays: 30
+      Tags:
+        - { Key: project, Value: mic-pacs-demo }
+        - { Key: component, Value: app-bucket }
+
+  # Studies bucket already exists; we only attach a bucket policy granting the
+  # CloudFront OAC read-only access. No new bucket, no public-access flag changes.
+  StudiesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StudiesBucketName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontOACRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${StudiesBucketName}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  AppBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AppBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontOACRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${AppBucket}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  # ---------------------------------------------------------------------------
+  # Origin Access Control (S3) — single OAC reused for both S3 origins.
+  # ---------------------------------------------------------------------------
+  S3OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: mic-pacs-demo-s3-oac
+        OriginAccessControlOriginType: s3
+        SigningProtocol: sigv4
+        SigningBehavior: always
+
+  # ---------------------------------------------------------------------------
+  # Response Headers Policy — COOP/COEP/CORP + security headers.
+  # This is the production equivalent of web/serve.py's end_headers() shim.
+  # Same-origin resources are exempt from COEP's CORP check, so the CORP
+  # header here is defense-in-depth (costs nothing) for future cross-origin reuse.
+  # ---------------------------------------------------------------------------
+  ResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: mic-pacs-demo-coop-coep
+        Comment: 'COOP/COEP for SharedArrayBuffer + baseline security headers'
+        CorsConfig:
+          AccessControlAllowOrigins:
+            Items: ['*']
+          AccessControlAllowHeaders:
+            Items: ['*']
+          AccessControlAllowMethods:
+            Items: ['GET', 'HEAD', 'OPTIONS']
+          AccessControlAllowCredentials: false
+          AccessControlMaxAgeSec: 86400
+          OriginOverride: false
+        CustomHeadersConfig:
+          Items:
+            - Header: Cross-Origin-Opener-Policy
+              Value: same-origin
+              Override: true
+            - Header: Cross-Origin-Embedder-Policy
+              Value: require-corp
+              Override: true
+            - Header: Cross-Origin-Resource-Policy
+              Value: cross-origin
+              Override: true
+            - Header: X-Content-Type-Options
+              Value: nosniff
+              Override: true
+            - Header: Referrer-Policy
+              Value: strict-origin-when-cross-origin
+              Override: true
+            - Header: X-Frame-Options
+              Value: DENY
+              Override: true
+        SecurityHeadersConfig:
+          FrameOptions:
+            FrameOption: DENY
+          ContentTypeOptions:
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+
+  # ---------------------------------------------------------------------------
+  # Response Headers Policy WITHOUT COOP/COEP — §5 fallback.
+  # The dashboard is served with COEP: require-corp for SharedArrayBuffer. If
+  # the WAF Challenge interstitial's script turns out to be cross-origin
+  # without CORP, require-corp blocks it and the site breaks for every
+  # visitor. This policy omits COOP/COEP (keeps all the security headers:
+  # HSTS, nosniff, referrer policy, frame options, CORP) so a small
+  # /bootstrap.html can be challenged + mint the token on a page that does
+  # NOT need cross-origin isolation, then redirect to the dashboard. Tokens
+  # are scoped to the origin, so the dashboard inherits the token. See
+  # docs/pacs-access-control-design.md §5.
+  #
+  # DORMANT INSURANCE: nothing routes here until the /bootstrap.html cache
+  # behavior below is added to CacheBehaviors. The deploy-time check that
+  # decides: load /bootstrap.html in a real browser after enabling WAF; if
+  # the interstitial runs and redirects cleanly with this policy, COEP is
+  # compatible and this fallback is unnecessary. If the interstitial is
+  # blocked, switch the dashboard to load via /bootstrap.html first.
+  # ---------------------------------------------------------------------------
+  NoCoepResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: mic-pacs-demo-no-coep
+        Comment: 'No COOP/COEP — §5 WAF-challenge fallback for bootstrap.html'
+        CorsConfig:
+          AccessControlAllowOrigins:
+            Items: ['*']
+          AccessControlAllowHeaders:
+            Items: ['*']
+          AccessControlAllowMethods:
+            Items: ['GET', 'HEAD', 'OPTIONS']
+          AccessControlAllowCredentials: false
+          AccessControlMaxAgeSec: 86400
+          OriginOverride: false
+        CustomHeadersConfig:
+          Items:
+            - Header: Cross-Origin-Resource-Policy
+              Value: cross-origin
+              Override: true
+            - Header: X-Content-Type-Options
+              Value: nosniff
+              Override: true
+            - Header: Referrer-Policy
+              Value: strict-origin-when-cross-origin
+              Override: true
+            - Header: X-Frame-Options
+              Value: DENY
+              Override: true
+        SecurityHeadersConfig:
+          FrameOptions:
+            FrameOption: DENY
+          ContentTypeOptions:
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+
+  # ---------------------------------------------------------------------------
+  # Cache policies. One for immutable codec blobs (long TTL), one for manifests
+  # (short TTL so re-ingests surface fast), one for the app shell (medium).
+  # ---------------------------------------------------------------------------
+  DataCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: mic-pacs-demo-data-immutable
+        Comment: 'Long TTL for immutable codec blobs under /data/*'
+        DefaultTTL: !Ref DataCacheTTL
+        MaxTTL: 31536000
+        MinTTL: 60
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig: { CookieBehavior: none }
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+
+  ManifestCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: mic-pacs-demo-manifest-short
+        Comment: 'Short TTL for manifest.json so re-ingests surface quickly'
+        DefaultTTL: !Ref ManifestCacheTTL
+        MaxTTL: 3600
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig: { CookieBehavior: none }
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+
+  AppCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: mic-pacs-demo-app-shell
+        Comment: 'App HTML/JS/WASM — versioned filenames, medium TTL'
+        DefaultTTL: 3600
+        MaxTTL: 86400
+        MinTTL: 60
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig: { CookieBehavior: none }
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+
+  # Origin request policy for /data/* — strip the /data prefix before hitting S3.
+  DataOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: mic-pacs-demo-strip-data-prefix
+        Comment: 'Forward query strings; /data prefix stripped via origin path'
+        CookiesConfig: { CookieBehavior: none }
+        HeadersConfig: { HeaderBehavior: none }
+        QueryStringsConfig: { QueryStringBehavior: all }
+
+  # ---------------------------------------------------------------------------
+  # Lambda: pacs-demo-api. Thin API only — /api/health + /api/studies.
+  # Manifest-proxy default: fetch + filter the root manifest.json. No
+  # ListObjectsV2 permission needed (see design §8).
+  # ---------------------------------------------------------------------------
+  ApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: pacs-demo-api-read-studies-manifest
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Only the root manifest + per-study manifest fragments — never
+              # raw DICOM or codec blobs. The API never proxies blob bytes.
+              - Effect: Allow
+                Action: 's3:GetObject'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${StudiesBucketName}/manifest.json'
+                  - !Sub 'arn:aws:s3:::${StudiesBucketName}/*/mic-manifest.json'
+                  - !Sub 'arn:aws:s3:::${StudiesBucketName}/*/ref-manifest.json'
+              # ListBucket is intentionally omitted for the manifest-proxy
+              # default. Add a scoped ListBucket + per-prefix GetObject only
+              # if /api/presign (deferred) is implemented later.
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: pacs-demo-api
+      Description: Thin read-only API for the MIC PACS demo — studies listing + health.
+      CodeUri: api/
+      Runtime: nodejs20.x
+      Handler: index.handler
+      MemorySize: 256
+      Timeout: 10
+      Role: !GetAtt ApiFunctionRole.Arn
+      Environment:
+        Variables:
+          STUDIES_BUCKET: !Ref StudiesBucketName
+          STUDIES_REGION: !Ref AWS::Region
+      AutoPublishAlias: live
+      FunctionUrlConfig:
+        AuthType: AWS_IAM
+        InvocationMode: BUFFERED
+      Tags:
+        project: mic-pacs-demo
+        component: api-lambda
+
+  # OAC for the Lambda Function URL origin — blocks direct calls to the
+  # raw *.lambda-url.*.on.aws endpoint; only this distribution can invoke it.
+  LambdaOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: mic-pacs-demo-lambda-oac
+        OriginAccessControlOriginType: lambda
+        SigningProtocol: sigv4
+        SigningBehavior: always
+
+  # ---------------------------------------------------------------------------
+  # CloudFront distribution — single public hostname, three behaviors.
+  # ---------------------------------------------------------------------------
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: 'MIC PACS public demo'
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        WebACLId: !Ref WebACLArn
+        Logging:
+          Bucket: !GetAtt AccessLogsBucket.RegionalDomainName
+          Prefix: cloudfront/
+          IncludeCookies: false
+        Origins:
+          - Id: app-s3
+            DomainName: !GetAtt AppBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !Ref S3OriginAccessControl
+          - Id: studies-s3
+            DomainName: !Sub '${StudiesBucketName}.s3.${AWS::Region}.amazonaws.com'
+            S3OriginConfig: {}
+            OriginAccessControlId: !Ref S3OriginAccessControl
+            OriginPath: '' # keys already include <id>/<codec>/<file>
+          - Id: api-lambda
+            DomainName: !GetAtt ApiFunctionUrl.FunctionUrlDomain
+            CustomOriginConfig:
+              HTTPPort: 443
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+            OriginAccessControlId: !Ref LambdaOriginAccessControl
+        CacheBehaviors:
+          # /bootstrap.html — §5 WAF-challenge fallback. Served WITHOUT
+          # COOP/COEP (NoCoepResponseHeadersPolicy) so the challenge
+          # interstitial can run even if it is cross-origin without CORP.
+          # DORMANT INSURANCE: nothing in the app links here unless the
+          # deploy-time check finds the interstitial is incompatible with
+          # COEP, at which point the dashboard entry point switches to
+          # /bootstrap.html first (it mints the token then redirects to
+          # /pacs-dashboard.html?source=s3). See design §5 and the comment
+          # on NoCoepResponseHeadersPolicy above.
+          - PathPattern: '/bootstrap.html'
+            TargetOriginId: app-s3
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: !Ref AppCachePolicy
+            ResponseHeadersPolicyId: !Ref NoCoepResponseHeadersPolicy
+            Compress: true
+          # /api/* -> Lambda. No caching (per-request). COOP/COEP/CORP applied.
+          - PathPattern: '/api/*'
+            TargetOriginId: api-lambda
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-95df-b08e38992ac4 # CachingDisabled (managed)
+            OriginRequestPolicyId: !Ref DataOriginRequestPolicy
+            ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+            Compress: true
+          # /data/* -> studies bucket. Strip /data via OriginPath? No — keys are
+          # already <id>/<codec>/<file>; we strip the literal "/data/" prefix by
+          # using a CloudFront Function (DataPathRewrite) on viewer-request.
+          - PathPattern: '/data/*'
+            TargetOriginId: studies-s3
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: !Ref DataCachePolicy
+            OriginRequestPolicyId: !Ref DataOriginRequestPolicy
+            ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+            Compress: true
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt DataPathRewrite.FunctionARN
+          # /manifest.json and per-study *-manifest.json at /data/* root use a
+          # dedicated short-TTL behavior. Declared after /data/* but CloudFront
+          # picks the most specific path match, so this wins for those paths.
+          - PathPattern: '/data/*/manifest.json'
+            TargetOriginId: studies-s3
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: !Ref ManifestCachePolicy
+            OriginRequestPolicyId: !Ref DataOriginRequestPolicy
+            ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+            Compress: true
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt DataPathRewrite.FunctionARN
+          - PathPattern: '/data/*/*-manifest.json'
+            TargetOriginId: studies-s3
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: !Ref ManifestCachePolicy
+            OriginRequestPolicyId: !Ref DataOriginRequestPolicy
+            ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+            Compress: true
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt DataPathRewrite.FunctionARN
+        DefaultCacheBehavior:
+          TargetOriginId: app-s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          CachePolicyId: !Ref AppCachePolicy
+          ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+          Compress: true
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt IndexPathRewrite.FunctionARN
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 404
+            ResponsePagePath: '/index.html'
+            ErrorCachingMinTTL: 10
+
+  # CloudFront Function: strip the /data/ prefix so /data/<id>/mic/x.mic maps to
+  # the S3 key <id>/mic/x.mic. Runs on viewer-request (cheap, edge, no cold start).
+  DataPathRewrite:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: mic-pacs-demo-data-path-rewrite
+      FunctionCode: |
+        function handler(event) {
+          var req = event.request;
+          var uri = req.uri;
+          if (uri.indexOf('/data/') === 0) {
+            req.uri = uri.substring(5); // strip leading "/data"
+          }
+          return req;
+        }
+      FunctionConfig:
+        Comment: 'Strip /data prefix so /data/<id>/mic/x.mic -> <id>/mic/x.mic'
+        Runtime: cloudfront-js-1.0
+
+  # CloudFront Function: SPA-style fallback for the app origin.
+  IndexPathRewrite:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: mic-pacs-demo-index-rewrite
+      FunctionCode: |
+        function handler(event) {
+          var req = event.request;
+          // Trailing-dir or empty path -> index.html
+          if (req.uri === '/' || req.uri === '') {
+            req.uri = '/index.html';
+          }
+          return req;
+        }
+      FunctionConfig:
+        Comment: 'Root path -> index.html for the app origin'
+        Runtime: cloudfront-js-1.0
+
+  # ---------------------------------------------------------------------------
+  # Access logs bucket for CloudFront + S3. Short lifecycle (template-level).
+  # ---------------------------------------------------------------------------
+  AccessLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'mic-pacs-demo-logs-${AWS::AccountId}-us-west-1'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-logs
+            Status: Enabled
+            ExpirationInDays: 30
+      Tags:
+        - { Key: project, Value: mic-pacs-demo }
+        - { Key: component, Value: access-logs }
+
+  # ---------------------------------------------------------------------------
+  # Cost guardrail — CloudWatch alarm on CloudFront BytesDownloaded.
+  # A tripwire for "someone found the demo and is mirroring it," not a hard cap.
+  # ---------------------------------------------------------------------------
+  EgressBudgetAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: mic-pacs-demo-cloudfront-egress
+      AlarmDescription: 'CloudFront data-transfer-out above the demo budget tripwire'
+      Namespace: AWS/CloudFront
+      MetricName: BytesDownloaded
+      Dimensions:
+        - Name: DistributionId
+          Value: !Ref Distribution
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 50000000000 # 50 GB per 5-min window — generous for real use, blocks a mirror
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: []
+
+Outputs:
+  DistributionDomainName:
+    Description: 'Public CloudFront hostname for the demo.'
+    Value: !GetAtt Distribution.DomainName
+  DistributionId:
+    Value: !Ref Distribution
+  AppBucketName:
+    Value: !Ref AppBucket
+  ApiFunctionUrl:
+    Description: 'Lambda Function URL (CloudFront-OAC gated — not directly callable).'
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  StudiesBucketName:
+    Value: !Ref StudiesBucketName

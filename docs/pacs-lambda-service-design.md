@@ -1,6 +1,9 @@
 # PACS Web Viewer — Public Demo Hosting Design (AWS)
 
-Status: proposed / not yet implemented. Target: `web/pacs-dashboard.html` and
+Status: **implemented in `infra/`** (SAM template, Lambda, WAF, deploy script)
+and wired into the front-end via `web/pacs-study-source.mjs`. See
+[`infra/README.md`](../infra/README.md) for the deploy guide. This document
+remains the architecture reference. Target: `web/pacs-dashboard.html` and
 friends, served publicly against the real S3 dataset in
 `mic-studies-594551578651-us-west-1-an` (us-west-1).
 

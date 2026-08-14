@@ -12,6 +12,42 @@
 // in the runner-specific files.
 
 // ---------------------------------------------------------------------------
+// AWS WAF Challenge detection.
+//
+// The deployed demo sits behind a WAF Challenge rule. A client whose token is
+// missing or expired gets HTTP 202 + `x-amzn-waf-action: challenge` with an
+// empty body — and `resp.ok` is TRUE for 202, so every fetch site must check
+// this explicitly. Skipping it lets an empty body reach a decoder, where it
+// surfaces as a checksum mismatch or a WASM/syntax error: indistinguishable
+// from a real codec bug in a tool whose entire output is correctness and
+// throughput claims. See docs/pacs-access-control-design.md §4.
+//
+// This lives here rather than in pacs-runner.mjs because the WASM/glue loaders
+// (codecs/emscripten-loader.mjs, mic-decoder-wasm.js) need it too, and they sit
+// BELOW the runner in the import graph — importing it from the runner would
+// create a cycle. This module is the shared leaf, and the helper is pure (it
+// only reads a response object), so it respects the no-fetch-globals rule above.
+//
+// Inert in local development: python3 serve.py never returns 202.
+// ---------------------------------------------------------------------------
+export class ChallengeExpiredError extends Error {
+  constructor(url) {
+    super(`AWS WAF challenge on ${url}`);
+    this.name = 'ChallengeExpiredError';
+    this.url = url;
+  }
+}
+
+// Throw if `resp` is a WAF challenge. Call before any `resp.ok` check.
+export function throwIfChallenged(resp, url) {
+  if (resp && resp.status === 202
+      && typeof resp.headers?.get === 'function'
+      && resp.headers.get('x-amzn-waf-action') === 'challenge') {
+    throw new ChallengeExpiredError(url);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Network profiles — representative PACS deployment scenarios, best to worst.
 // transferMs()/simulateStudy() model bandwidth-bound transfer plus one paid
 // RTT (persistent HTTP/2 connection to the PACS server).

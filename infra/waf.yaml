@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  MIC PACS demo — WAFv2 WebACL for CloudFront (CLOUDFRONT scope).
+  AWS requires CLOUDFRONT-scope WebACLs to live in us-east-1 regardless of
+  where the distribution's origins are. Deploy this stack first, then pass
+  the emitted WebACLArn into the us-west-1 stack (infra/template.yaml).
+
+  Coverage (see docs/pacs-access-control-design.md):
+    - Challenge rule on ALL paths (design §2/§3): a real browser mints a
+      72h token; curl/wget get 202 + empty body. All paths because only
+      Accept: text/html gets the interstitial that mints the token.
+    - rate-based rule: 3000 req / 5 min per IP (a runaway tripwire, not the
+      anti-bot mechanism — design §6).
+    - AWSManagedRulesCommonRuleSet + KnownBadInputsRuleSet: baseline.
+
+Resources:
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: mic-pacs-demo-cloudfront
+      Scope: CLOUDFRONT
+      Description: 'Rate-based + managed baseline protection for the MIC PACS public demo.'
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: mic-pacs-demo-waf
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: rate-limit-per-ip
+          Priority: 0
+          Action:
+            Block: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: rate-limit-per-ip
+            SampledRequestsEnabled: true
+          Statement:
+            RateBasedStatement:
+              # 3000 req / 5 min per IP. Sized from the actual worst case, not
+              # from browsing intuition: the dashboard measures 12 codec
+              # variants (pacs-model.mjs CODEC_REGISTRY) against EVERY frame,
+              # so one run over a 100-frame series is ~1200 fetches, and a user
+              # comparing two studies can legitimately double that.
+              #
+              # This rule is no longer the anti-bot mechanism — the Challenge
+              # rule below is — so it can afford to be generous. Its remaining
+              # job is a runaway tripwire ahead of the egress-budget alarm.
+              # Lowering it into the hundreds would block real benchmark runs
+              # partway through, and a mid-run 403 surfaces as "file missing"
+              # in the results table rather than as an obvious network error.
+              Limit: 3000
+              AggregateKeyType: IP
+              EvaluationWindowSec: 300
+        - Name: aws-managed-common
+          Priority: 1
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: aws-managed-common
+            SampledRequestsEnabled: true
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+        - Name: aws-managed-known-bad-inputs
+          Priority: 2
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: aws-managed-known-bad-inputs
+            SampledRequestsEnabled: true
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+        # -------------------------------------------------------------------------
+        # Challenge rule — challenge EVERY request. This is the bot-mitigation
+        # core (design §2, §3). A real browser solves the silent JS
+        # interrogation, mints a token cookie (immunity 72h — the documented
+        # maximum, chosen to minimise mid-session expiry and cost), and the
+        # rest of the session passes. curl/wget/HTTP libraries cannot run JS
+        # and get a 202 + x-amzn-waf-action: challenge with an empty body.
+        #
+        # Applied to ALL paths, including the dashboard HTML, NOT just /data/*.
+        # Only a request with Accept: text/html receives the interstitial that
+        # MINTS the token; a bare fetch() for a .mic blob sends Accept: */*
+        # and would get a naked 202 with no way to solve anything. The token
+        # must already exist before the first data fetch, and the only request
+        # that can create it is the document load. Challenging only /data/*
+        # breaks the viewer for every human visitor. See design §3.
+        #
+        # Priority 3 = after the managed rule groups (0-2) so known-bad-input
+        # and rate-limit blocks still take precedence over the challenge.
+        # -------------------------------------------------------------------------
+        - Name: challenge-all-requests
+          Priority: 3
+          Action:
+            Challenge: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: challenge-all-requests
+            SampledRequestsEnabled: true
+          # WAFv2 has no literal "match everything" statement. A
+          # ByteMatchStatement on the URI path with PositionalConstraint
+          # CONTAINS and SearchString "/" matches every request (every URI
+          # path contains at least one "/") — this is the always-true
+          # statement. See design §3 implementation note.
+          Statement:
+            ByteMatchStatement:
+              SearchString: '/'
+              FieldToMatch:
+                UriPath: {}
+              TextTransformations:
+                - Priority: 0
+                  Type: NONE
+              PositionalConstraint: CONTAINS
+          ChallengeConfig:
+            ImmunityTimeProperty:
+              ImmunityTime: 259200 # 72h — the documented maximum (design §2)
+
+Outputs:
+  WebACLArn:
+    Description: 'Pass this into the us-west-1 stack as WebACLArn.'
+    Value: !GetAtt WebACL.Arn

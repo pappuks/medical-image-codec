@@ -1,3 +1,5 @@
+import { throwIfChallenged } from './pacs-model.mjs';
+
 // MIC WASM Decoder Loader
 // Loads the Go WebAssembly binary and provides the same API as mic-decoder.js.
 //
@@ -24,8 +26,14 @@ export async function loadMICWasm(wasmPath = 'mic-decoder.wasm') {
   }
 
   const go = new Go();
+  // Fetch first rather than handing the promise straight to
+  // instantiateStreaming: a WAF challenge returns 202 with an empty body,
+  // which would fail inside instantiateStreaming as an opaque WASM-parse
+  // error instead of the dashboard's re-verify-and-reload path.
+  const wasmResp = await fetch(wasmPath);
+  throwIfChallenged(wasmResp, wasmPath);
   const result = await WebAssembly.instantiateStreaming(
-    fetch(wasmPath),
+    wasmResp,
     go.importObject
   );
 

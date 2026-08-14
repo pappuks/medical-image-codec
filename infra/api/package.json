@@ -1,0 +1,10 @@
+{
+  "name": "mic-pacs-demo-api",
+  "version": "1.0.0",
+  "description": "Thin read-only API for the MIC PACS public demo (Lambda Function URL).",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.620.0"
+  }
+}
