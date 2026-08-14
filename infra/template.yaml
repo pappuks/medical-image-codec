@@ -144,6 +144,14 @@ Resources:
           AccessControlAllowCredentials: false
           AccessControlMaxAgeSec: 86400
           OriginOverride: false
+        # ONLY headers CloudFront does not manage itself may appear here.
+        # X-Content-Type-Options, X-Frame-Options, Referrer-Policy,
+        # Strict-Transport-Security, Content-Security-Policy and
+        # X-XSS-Protection are "security headers" owned by
+        # SecurityHeadersConfig below; listing any of them here is rejected at
+        # create time with "contains <header> that is a security header and
+        # cannot be set as custom header". The cross-origin isolation trio is
+        # not in that managed set, so it belongs here.
         CustomHeadersConfig:
           Items:
             - Header: Cross-Origin-Opener-Policy
@@ -154,15 +162,6 @@ Resources:
               Override: true
             - Header: Cross-Origin-Resource-Policy
               Value: cross-origin
-              Override: true
-            - Header: X-Content-Type-Options
-              Value: nosniff
-              Override: true
-            - Header: Referrer-Policy
-              Value: strict-origin-when-cross-origin
-              Override: true
-            - Header: X-Frame-Options
-              Value: DENY
               Override: true
         SecurityHeadersConfig:
           FrameOptions:
@@ -214,19 +213,13 @@ Resources:
           AccessControlAllowCredentials: false
           AccessControlMaxAgeSec: 86400
           OriginOverride: false
+        # Same rule as the policy above: only non-managed headers here. CORP is
+        # kept (it is not a CloudFront-managed security header); COOP/COEP are
+        # deliberately absent — that omission is the entire point of this policy.
         CustomHeadersConfig:
           Items:
             - Header: Cross-Origin-Resource-Policy
               Value: cross-origin
-              Override: true
-            - Header: X-Content-Type-Options
-              Value: nosniff
-              Override: true
-            - Header: Referrer-Policy
-              Value: strict-origin-when-cross-origin
-              Override: true
-            - Header: X-Frame-Options
-              Value: DENY
               Override: true
         SecurityHeadersConfig:
           FrameOptions:
