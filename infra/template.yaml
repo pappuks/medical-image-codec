@@ -507,6 +507,11 @@ Resources:
     Type: AWS::CloudFront::Function
     Properties:
       Name: mic-pacs-demo-data-path-rewrite
+      # Required. Without it the function is created in the DEVELOPMENT stage
+      # only, and associating it with a distribution fails at create time with
+      # "FunctionAssociationArn is invalid; ... was not found or is not
+      # published."
+      AutoPublish: true
       FunctionCode: |
         function handler(event) {
           var req = event.request;
@@ -525,6 +530,7 @@ Resources:
     Type: AWS::CloudFront::Function
     Properties:
       Name: mic-pacs-demo-index-rewrite
+      AutoPublish: true # see DataPathRewrite above
       FunctionCode: |
         function handler(event) {
           var req = event.request;
