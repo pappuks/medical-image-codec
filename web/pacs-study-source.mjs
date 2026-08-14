@@ -52,6 +52,20 @@ function codecDir(codec) {
 const frameSuffix = (i) => `_f${String(i).padStart(3, '0')}`;
 const frameImgName = (studyId, i) => `${studyId}${frameSuffix(i)}`;
 
+// Recover the OUTPUT frame index from an artifact's key/filename.
+//
+// Manifests record two different numbers and they are NOT interchangeable:
+// `frame` is the index of the slice in the original DICOM series, while the
+// filename carries the index within the encoded output. They coincide only
+// when every slice was encoded. Deep series are sampled (16 frames out of a
+// 116-slice MR), so the manifest says frame=108 while the file is _f015.
+// Paths must always be built from this, never from `frame`.
+function outFrameFromPath(pathOrKey) {
+  if (!pathOrKey) return null;
+  const m = /_f(\d+)/.exec(String(pathOrKey).split('/').pop());
+  return m ? parseInt(m[1], 10) : null;
+}
+
 // Build the path resolver closure for one study. Same signature as
 // pacs-runner.mjs's candidatePaths(codec, imgName) — returns an array of
 // candidate paths (first existing wins in fetchBytes). S3 layout is exact, so
@@ -207,9 +221,17 @@ export async function loadStudy(studyId, {
   // absent) means single-frame OR the multi-frame MIC2 container artifact;
   // frame >= 0 means per-frame MIC1 (multiframe or series-as-frames). We take
   // the union of frames seen across all artifacts.
+  //
+  // CRITICAL: the artifact's `frame` field is the SOURCE slice index, but the
+  // file on disk is numbered by OUTPUT index. Deep series are sampled — a
+  // 116-slice MR yields 16 encoded frames, so source frames 0,7,14…108 are
+  // written as _f000…_f015. Naming images from `frame` asks for _f108, which
+  // has never existed, and every fetch 404s ("no artifact for this codec", for
+  // every codec and every frame). Read the output index off the artifact's own
+  // key, which is authoritative.
   const frameSet = new Set();
   for (const a of micManifest.artifacts || []) {
-    const fr = a.frame ?? -1;
+    const fr = outFrameFromPath(a.key) ?? a.frame ?? -1;
     frameSet.add(fr);
   }
   // If per-frame artifacts exist, drop the frame=-1 container from the per-
@@ -263,7 +285,10 @@ export async function loadStudy(studyId, {
   // the same frame share the same checksum, so take the first per frame.
   const rawImages = {};
   for (const a of micManifest.artifacts || []) {
-    const fr = a.frame ?? -1;
+    // Output index, not a.frame — see outFrameFromPath. Keying by the source
+    // index would file every checksum under a name no image ever has, so
+    // verification would silently report "no checksum" for the whole study.
+    const fr = outFrameFromPath(a.key) ?? a.frame ?? -1;
     const imgName = fr < 0 ? studyId : frameImgName(studyId, fr);
     if (rawImages[imgName]) continue; // first wins
     let checksum = a.pixelChecksum;
@@ -290,7 +315,12 @@ export async function loadStudy(studyId, {
   const refImages = {};
   if (refManifestRaw && Array.isArray(refManifestRaw.frames)) {
     for (const fr of refManifestRaw.frames) {
-      const frameName = frameImgName(studyId, fr.frame);
+      // Same source-vs-output skew as the mic manifest: fr.frame is the source
+      // slice index while fr.<codec>.file carries the output index. Prefer the
+      // filename from whichever codec recorded one.
+      const outIdx = outFrameFromPath(fr.htj2k?.file || fr.jls?.file || fr.jxl?.file)
+        ?? fr.frame;
+      const frameName = frameImgName(studyId, outIdx);
       const entry = {};
       for (const key of ['htj2k', 'jls', 'jxl']) {
         const c = fr[key];
@@ -299,7 +329,7 @@ export async function loadStudy(studyId, {
       refImages[frameName] = entry;
       // Single-frame study (mic frame=-1 -> imgName=studyId): also key the ref
       // entry under the bare studyId so the runner's image name resolves.
-      if (fr.frame === 0 && !isMulti) {
+      if (outIdx === 0 && !isMulti) {
         refImages[studyId] = entry;
       }
     }
