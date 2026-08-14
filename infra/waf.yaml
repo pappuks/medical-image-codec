@@ -103,20 +103,50 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: challenge-all-requests
             SampledRequestsEnabled: true
-          # WAFv2 has no literal "match everything" statement. A
-          # ByteMatchStatement on the URI path with PositionalConstraint
-          # CONTAINS and SearchString "/" matches every request (every URI
-          # path contains at least one "/") — this is the always-true
-          # statement. See design §3 implementation note.
+          # Scoped to the data and API paths plus the bootstrap page — NOT the
+          # app HTML. Challenging every path was the original design, but it
+          # cannot work: AWS serves the interstitial with a cross-origin
+          # <script src="...awswaf.com/challenge.js"> that carries no
+          # Cross-Origin-Resource-Policy header and no crossorigin attribute,
+          # so any page under COEP: require-corp blocks it, AwsWafIntegration
+          # never defines, and the visitor gets a blank page. The dashboard
+          # needs require-corp for SharedArrayBuffer, so it can never be the
+          # request that receives an interstitial.
+          #
+          # Instead /bootstrap.html — served WITHOUT COEP — is the minting
+          # point, and the app shell is left unchallenged. That shell is
+          # public HTML/JS with no secrets in it; the 17 GB dataset behind
+          # /data/* is the asset worth protecting, and it stays challenged.
+          # A visitor who deep-links to the dashboard gets it, its first
+          # /data/* fetch returns 202, and the front-end guard bounces them
+          # through /bootstrap.html and back. See design §3/§5.
           Statement:
-            ByteMatchStatement:
-              SearchString: '/'
-              FieldToMatch:
-                UriPath: {}
-              TextTransformations:
-                - Priority: 0
-                  Type: NONE
-              PositionalConstraint: CONTAINS
+            OrStatement:
+              Statements:
+                - ByteMatchStatement:
+                    SearchString: '/data/'
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: '/api/'
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: '/bootstrap.html'
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: EXACTLY
           ChallengeConfig:
             ImmunityTimeProperty:
               ImmunityTime: 259200 # 72h — the documented maximum (design §2)

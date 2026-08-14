@@ -42,7 +42,14 @@
     // already solved, and the delay below is only so the message is legible.
     // location.replace avoids a back-button loop.
     setTimeout(function () {
-      location.replace('/pacs-dashboard.html?source=s3');
+      // Return to wherever the dashboard bounced us from, if it said so.
+      // Only same-origin absolute paths are honoured: a value must start with
+      // a single "/" followed by neither "/" nor "\". Both are rejected because
+      // browsers normalise "/\evil.com" to "//evil.com" and treat it as
+      // protocol-relative — so allowing the backslash would be an open redirect.
+      var next = new URLSearchParams(location.search).get('next') || '';
+      var safe = /^\/(?![\/\\])/.test(next) ? next : '/pacs-dashboard.html?source=s3';
+      location.replace(safe);
     }, 800);
   </script>
 </body>

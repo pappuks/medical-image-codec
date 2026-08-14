@@ -275,11 +275,13 @@ function handleChallengeExpired(e, origin) {
     window.__pacsBenchDone = true;
     return;
   }
-  // Reload to re-mint the token — a document navigation carries
-  // Accept: text/html and gets the interstitial. Cap the attempts: if
-  // verification keeps failing (e.g. the interstitial is blocked by
-  // require-corp, design §5), an unbounded retry would trap the user in a
-  // reload loop with no way to read the error. Two tries, then stop and say so.
+  // Bounce through /bootstrap.html to mint a token, then come back here.
+  // NOT location.reload(): this page is served with COEP: require-corp, which
+  // blocks the cross-origin script in AWS's challenge interstitial, so
+  // reloading here would just render blank. /bootstrap.html is served without
+  // COEP precisely so the interstitial can run (design §5). Cap the attempts:
+  // if verification keeps failing, an unbounded retry would trap the user in a
+  // redirect loop with no way to read the error. Two tries, then stop and say so.
   let tries = 0;
   try { tries = Number(sessionStorage.getItem('wafReloadTries') || 0); } catch { /* private mode */ }
   if (tries >= 2) {
@@ -290,7 +292,8 @@ function handleChallengeExpired(e, origin) {
     return;
   }
   try { sessionStorage.setItem('wafReloadTries', String(tries + 1)); } catch { /* ignore */ }
-  setTimeout(() => location.reload(), 1500); // legible before reload
+  const next = encodeURIComponent(location.pathname + location.search);
+  setTimeout(() => location.replace(`/bootstrap.html?next=${next}`), 1500);
 }
 
 async function start() {
