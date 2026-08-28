@@ -515,14 +515,27 @@ function renderAI(aiRecords, env) {
   const gDec = geo(ok.map((r) => r.decodeMs));
   const gInf = geo(ok.map((r) => r.inferMs));
   const gPipe = geo(ok.map((r) => r.pipelineMs));
+
+  // per-codec geomeans — the decode-time story (PICS-C-WASM should win)
+  const byCodec = new Map();
+  for (const r of ok) {
+    if (!byCodec.has(r.codecId)) byCodec.set(r.codecId, { label: r.codecLabel || r.codecId, recs: [] });
+    byCodec.get(r.codecId).recs.push(r);
+  }
+  const codecSummary = [...byCodec.values()].map(({ label, recs }) => {
+    const pipe = geo(recs.map((r) => r.pipelineMs));
+    return `${escapeHtml(label)}: ${pipe.toFixed(1)} ms`;
+  }).join(' · ');
+
   summary.innerHTML =
-    `${ok.length} images · inference backend: <strong>${escapeHtml(backend)}</strong> · ` +
-    `geomean decode ${gDec.toFixed(1)} ms + infer ${gInf.toFixed(1)} ms = pipeline ${gPipe.toFixed(1)} ms ` +
+    `${ok.length} measurements · inference backend: <strong>${escapeHtml(backend)}</strong><br>` +
+    `geomean pipeline per codec — ${codecSummary}<br>` +
+    `overall: decode ${gDec.toFixed(1)} ms + infer ${gInf.toFixed(1)} ms = pipeline ${gPipe.toFixed(1)} ms ` +
     `(${(1000 / gPipe).toFixed(1)} slices/s end-to-end)`;
 
   const rows = ok.map((r) => `<tr>
     <td>${escapeHtml(r.image)}</td>
-    <td>${escapeHtml(r.codecLabel || r.codecId)}</td>
+    <td>${escapeHtml(r.codecLabel || r.codecId)}${r.note ? ` <span class="note" title="${escapeHtml(r.note)}">⚠</span>` : ''}</td>
     <td>${r.compressedBytes != null ? fmtKB(r.compressedBytes) : '—'}</td>
     <td>${r.ratio != null ? fmtRatio(r.ratio) : '—'}</td>
     <td>${fmtMs(r.decodeMs)}</td>
@@ -530,10 +543,12 @@ function renderAI(aiRecords, env) {
     <td><strong>${fmtMs(r.pipelineMs)}</strong></td>
     <td>${fmtFps(r.fps)}</td>
   </tr>`).join('');
+  const missing = aiRecords.length - ok.length;
   table.innerHTML = `<thead><tr>
       <th>Image</th><th>Codec</th><th>Size</th><th>Ratio</th>
       <th>Decode</th><th>AI infer</th><th>Pipeline</th><th>Slices/s</th>
-    </tr></thead><tbody>${rows}</tbody>`;
+    </tr></thead><tbody>${rows}</tbody>` +
+    (missing ? `<tfoot><tr><td colspan="8" class="note">${missing} image/codec pairs skipped (no artifact)</td></tr></tfoot>` : '');
   panel.hidden = false;
 }
 

@@ -344,20 +344,27 @@ async function timeMedianAsync(fn, iterations, warmup) {
   return times[Math.floor(times.length / 2)];
 }
 
-// runAIInference — decode each image with the selected codec, then run the
-// ONNX model on the decoded pixels, timing the full pipeline. Reuses the
-// same fetch/resolve machinery as the codec benchmark; inference uses the
-// same warmup+median discipline. The model is a real pretrained brain-U-Net
-// (MIT) — see web/pacs-ai-model.md; NOT for clinical use.
+// runAIInference — decode each image with each live codec, then run the ONNX
+// model on the decoded pixels, timing the full pipeline. Defaults to the
+// live codec set with PICS-C-WASM-8 (the fastest browser decoder — the repo's
+// own web benchmark: ~4 ms CR decode vs ~140 ms pure-JS 4-state) first, so
+// the pipeline numbers reflect decode time. Reuses the same fetch/resolve
+// machinery as the codec benchmark; inference uses the same warmup+median
+// discipline. The model is a real pretrained brain-U-Net (MIT) — see
+// web/pacs-ai-model.md; NOT for clinical use.
 //
-//   opts.aiCodec  : one CODEC_REGISTRY entry (default MIC-4state)
-//   opts.images   : as runBenchmark
+//   opts.aiCodecIds : codec ids to run (default AI_DEFAULT_CODEC_IDS)
+//   opts.images     : as runBenchmark
 //   opts.aiIterations / opts.warmup : timing knobs
 // Returns { aiRecords: [{ image, codecId, decodeMs, inferMs, pipelineMs, fps,
-//                          backend, compressedBytes, ratio }] , env }
+//                          backend, compressedBytes, ratio, note }] , env }
+export const AI_DEFAULT_CODEC_IDS = ['pics-c-wasm-8', 'mic-4state', 'htj2k', 'jpegls'];
+
 export async function runAIInference(opts = {}) {
   const images = opts.images ?? IMAGES;
-  const aiCodec = opts.aiCodec ?? CODEC_REGISTRY.find((c) => c.id === 'mic-4state');
+  const codecs = (opts.aiCodecIds ?? AI_DEFAULT_CODEC_IDS)
+    .map((id) => CODEC_REGISTRY.find((c) => c.id === id))
+    .filter((c) => c && c.liveDecodeSupported !== false);
   const iterations = opts.aiIterations ?? 5;
   const warmup = opts.warmup ?? 2;
   const baseUrl = opts.baseUrl ?? (typeof location !== 'undefined' ? location.href : 'http://localhost/');
@@ -368,50 +375,88 @@ export async function runAIInference(opts = {}) {
   // lazy-import the adapter (and ort-web) only when AI mode runs
   const { makeOnnxAdapter } = await import('./codecs/onnx-adapter.mjs');
 
-  const codecAdapter = makeAdapter(aiCodec);
-  await codecAdapter.init();
-  const aiAdapter = makeOnnxAdapter();
-  await aiAdapter.init();
-
-  const ctx = { baseUrl, fetchFn, iterations, warmup, verify: false, rawManifest: null, refManifest: null, resolvePath };
-  const aiRecords = [];
+  const codecAdapters = new Map();
+  let aiAdapter = null;
   try {
-    for (const img of images) {
-      onProgress({ done: aiRecords.length, total: images.length, label: `AI: ${img.name}` });
-      // 1) fetch + decode (timed the same way as the codec tables)
-      const paths = resolvePath(aiCodec, img.name);
-      let bytes = null;
-      for (const p of paths) {
-        bytes = await fetchBytes(baseUrl, p, fetchFn);
-        if (bytes) break;
-      }
-      if (!bytes) {
-        aiRecords.push({ image: img.name, codecId: aiCodec.id, note: 'file missing', decodeMs: null, inferMs: null, pipelineMs: null, fps: null });
-        continue;
-      }
-      const decodeMs = await timeMedian(codecAdapter, bytes, iterations, warmup);
-      // decode once more (untimed) to have pixels for inference
-      const { pixels } = await codecAdapter.decode(bytes);
-
-      // 2) preprocess + inference, warmup+median
-      const inferMs = await timeMedianAsync(
-        () => aiAdapter.infer(pixels, img.w, img.h), iterations, warmup);
-
-      const pipelineMs = decodeMs + inferMs;
-      aiRecords.push({
-        image: img.name, modality: img.modality, w: img.w, h: img.h,
-        codecId: aiCodec.id, codecLabel: aiCodec.label,
-        compressedBytes: bytes.length,
-        ratio: (img.w * img.h * 2) / bytes.length,
-        decodeMs, inferMs, pipelineMs,
-        fps: inferMs ? 1000 / pipelineMs : null,
-        backend: aiAdapter.backend ?? null,
-      });
+    for (const codec of codecs) {
+      const a = makeAdapter(codec);
+      await a.init();
+      codecAdapters.set(codec.id, a);
     }
-  } finally {
-    if (typeof codecAdapter.dispose === 'function') codecAdapter.dispose();
-    aiAdapter.dispose();
-  }
+    aiAdapter = makeOnnxAdapter();
+    await aiAdapter.init();
 
-  return { aiRecords, env: collectEnv() };
+    const total = images.length * codecs.length;
+    let done = 0;
+    const aiRecords = [];
+
+    for (const img of images) {
+      for (const codec of codecs) {
+        onProgress({ done, total, label: `AI: ${img.name} / ${codec.label}` });
+        const adapter = codecAdapters.get(codec.id);
+
+        // 1) fetch (primary path; PICS blobs may only exist in the other
+        //    strip-count variant — fall back and record it, never silently)
+        const paths = resolvePath(codec, img.name);
+        let bytes = null;
+        for (const p of paths) {
+          bytes = await fetchBytes(baseUrl, p, fetchFn);
+          if (bytes) break;
+        }
+        let note = null;
+        if (!bytes) {
+          // try the other PICS strip-count variant (small images ship _pics4,
+          // large ones _pics8 — both decode fine, the count is in the header)
+          const alt = paths
+            .map((p) => p.endsWith('_pics8.mic') ? p.replace('_pics8', '_pics4')
+               : p.endsWith('_pics4.mic') ? p.replace('_pics4', '_pics8') : p)
+            .filter((p) => !paths.includes(p));
+          for (const p of alt) {
+            bytes = await fetchBytes(baseUrl, p, fetchFn);
+            if (bytes) {
+              const variant = /_pics\d+/.exec(p)?.[0] ?? 'alternate PICS';
+              note = `used ${variant} artifact (no ${codec.suffix || codec.id} file for this image)`;
+              break;
+            }
+          }
+        }
+        if (!bytes) {
+          aiRecords.push({
+            image: img.name, codecId: codec.id, codecLabel: codec.label,
+            note: 'file missing', decodeMs: null, inferMs: null, pipelineMs: null, fps: null,
+          });
+          done++;
+          continue;
+        }
+
+        // 2) decode, timed exactly like the codec tables (warmup + median)
+        const decodeMs = await timeMedian(adapter, bytes, iterations, warmup);
+        // decode once more (untimed) to have pixels for inference
+        const { pixels } = await adapter.decode(bytes);
+
+        // 3) preprocess + inference, warmup+median
+        const inferMs = await timeMedianAsync(
+          () => aiAdapter.infer(pixels, img.w, img.h), iterations, warmup);
+
+        const pipelineMs = decodeMs + inferMs;
+        aiRecords.push({
+          image: img.name, modality: img.modality, w: img.w, h: img.h,
+          codecId: codec.id, codecLabel: codec.label,
+          compressedBytes: bytes.length,
+          ratio: (img.w * img.h * 2) / bytes.length,
+          decodeMs, inferMs, pipelineMs,
+          fps: pipelineMs ? 1000 / pipelineMs : null,
+          backend: aiAdapter.backend ?? null,
+          note,
+        });
+        done++;
+      }
+    }
+    return { aiRecords, env: collectEnv() };
+  } finally {
+    for (const a of codecAdapters.values()) {
+      if (typeof a.dispose === 'function') a.dispose();
+    }
+    if (aiAdapter) aiAdapter.dispose();
+  }
 }
