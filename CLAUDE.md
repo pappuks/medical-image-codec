@@ -114,6 +114,43 @@ cd web && python3 serve.py 8080                         # open http://localhost:
 cd web && npx playwright install chromium && npx playwright test
 ```
 
+## AI Pipeline Build & Test
+
+MIC as an AI data-plane codec, proven on two fronts (full doc:
+[`docs/ai-pipeline.md`](docs/ai-pipeline.md); design/plan:
+`.hermes/plans/2026-08-27_mic-ai-pipeline.md`):
+
+- **Part A — PyTorch adapter over the C PICS-8 decoder** (`ai/`): decode
+  PICS blobs via `libmic_pics.{dylib,so}` (built from `ojph/*.c`) inside a
+  `torch.utils.data.Dataset`; GPU-feed benchmark with a headroom verdict.
+  MPS measured: decode 1.6–3.2 GB/s vs 0.35 GB/s device consume → **4.7–9.0×
+  headroom, decode NOT the bottleneck**. CUDA: run `--device cuda` on the
+  Linux GPU box (runbook in `ai/README.md`).
+- **Part B — in-browser AI inference** (`web/pacs-dashboard.html?ai=1`):
+  MIC decode → preprocess → ONNX inference (WebGPU, WASM fallback) entirely
+  in the browser. Runs the live codec set (`AI_DEFAULT_CODEC_IDS` =
+  pics-c-wasm-8, mic-4state, htj2k, jpegls). Headless Chromium measured:
+  PICS-C-WASM-8 decodes CR 7.2 MB in ~4 ms (31× faster than pure-JS),
+  pipeline 289→157 ms. Model: MIT-licensed brain-MRI U-Net (7.76M params,
+  `web/models/brain-segmentation-unet.onnx`) — demo only, **not for
+  clinical use** (`web/pacs-ai-model.md`).
+
+```bash
+# --- Part A (PyTorch; .venv at repo root) ---
+make -C ai                                          # build libmic_pics.{dylib,so} from ojph/*.c
+.venv/bin/pip install torch numpy pytest            # torch 2.13 has MPS on Apple Silicon
+.venv/bin/python -m pytest ai/tests/ -v             # 22 tests; bit-exact vs fnv1a32 ground truth
+.venv/bin/python ai/benchmark_feed.py --device mps --iterations 30 --threads 8
+.venv/bin/python ai/benchmark_feed.py --device auto --iterations 30 --workers -1  # + worker sweep
+# CUDA machine: make && pytest, then --device cuda (see ai/README.md)
+
+# --- Part B (browser AI) ---
+cd web && npm install && bash scripts/vendor-onnx.sh # one-time: vendor ort-web bundle into vendor/onnx/
+cd web && node scripts/probe-onnx.mjs                # Node WASM smoke test ([1,3,256,256] -> [1,1,256,256])
+cd web && python3 serve.py 8080                      # open .../pacs-dashboard.html?ai=1 → Start
+cd web && npx playwright test tests/onnx-adapter.spec.mjs tests/pacs-ai.spec.mjs
+```
+
 ## Web / JavaScript Minification
 
 The `web/` directory ships pre-minified JS files alongside the sources. After editing any of the three source files, regenerate the minified versions:
@@ -380,3 +417,76 @@ Test images in `testdata/`:
 - MG_TOMO (2457x1890, 69 frames) — Breast Tomosynthesis multiframe DICOM, 10-bit depth
 - wsi_tissue_512x384.rgb — Synthetic H&E-stained tissue (RGB, 8-bit)
 - wsi_background_256x256.rgb — White background tile (RGB, 8-bit)
+
+## AI Pipeline (MIC as an AI data plane)
+
+Two consumers of the codec beyond the PACS viewer; both prove the same
+property — **decode is never the bottleneck** for medical-AI workloads.
+Canonical doc: [`docs/ai-pipeline.md`](docs/ai-pipeline.md); measured
+numbers: `ai/benchmark-notes.md`.
+
+### Part A — PyTorch training ingest (`ai/`)
+
+The C PICS-8 decoder (`ojph/mic_parallel.c` → `mic_decompress_parallel`,
+the paper's fastest decoder) is built into a shared library and called from
+Python via ctypes — **no codec code is reimplemented in Python**; bit-exact
+round-trips against `fnv1a32`-verified ground truth are enforced by tests.
+
+```
+web/testdata/<NAME>_pics8.mic (or _pics4)  →  libmic_pics.dylib/.so  →  uint16 numpy
+    → PICSDataset (torch)  →  .to(mps/cuda)  →  model
+```
+
+Key files:
+
+| File | Purpose |
+|------|---------|
+| `ai/Makefile` | Builds `libmic_pics.{dylib,so}` from `../ojph/mic_decompress_c.c` + `mic_parallel.c` (no new codec code) |
+| `ai/mic_loader.py` | ctypes wrapper over `mic_decompress_parallel`; per-platform lib resolution; **rejects plain MIC1** (PICS blobs only) |
+| `ai/mic_dataset.py` | `PICSDataset`/`RawDataset`; module-level `passthrough_collate` + `_worker_init` so `num_workers>0` works with variable-size samples |
+| `ai/benchmark_feed.py` | Raw-vs-MIC feed benchmark; `--device {auto,mps,cuda,cpu}`, `--threads` (PICS strip count), `--workers -1` sweep |
+| `ai/tests/` | 22 tests: ABI round-trips bit-exact vs ground-truth bins / manifest checksums |
+
+Measured (MPS, Apple Silicon, torch 2.13): decode **1.6–3.2 GB/s** vs device
+consume **0.35 GB/s** (24-conv pacer @ 512²) → **headroom 4.7–9.0×, decode
+NOT the bottleneck**; `num_workers=2` optimal in the sweep. CUDA runbook in
+`ai/README.md` (build the `.so`, install cuXXX torch, `--device cuda`).
+
+Gotchas: the C decoder reads **PICS blobs only** (never plain MIC1);
+small images ship `_pics4`, large `_pics8`; metric definitions matter —
+`consume_gbps` is compute-only (the honest headroom baseline), `gbps_fed`
+is loop-inclusive, and the paper's MB/s is in-process. Don't mix them.
+
+### Part B — Browser AI inference (`web/`, `?ai=1`)
+
+`runAIInference()` in `web/pacs-runner.mjs` decodes each image with each
+live codec (`AI_DEFAULT_CODEC_IDS = ['pics-c-wasm-8', 'mic-4state',
+'htj2k', 'jpegls']` — PICS-C-WASM-8 first, the fastest browser decoder),
+then runs an ONNX model on the decoded pixels, using the same
+warmup+median timing discipline as the codec tables.
+
+```
+PICS blob → codec adapter decode (timed) → preprocess (grayscale → 3ch, 256×256, [0,1])
+    → onnxruntime-web session.run (WebGPU, WASM fallback) → mask [1,1,256,256]
+```
+
+Key files:
+
+| File | Purpose |
+|------|---------|
+| `web/codecs/onnx-adapter.mjs` | ort-web adapter: WebGPU → WASM fallback; **lazy-imported** so the decode dashboard never loads the runtime without `?ai=1`; browser path uses the vendored bundle (no bare imports — no bundler in this repo) |
+| `web/scripts/vendor-onnx.sh` | Vendors `ort.all.bundle.min.mjs` + jsep/plain `.wasm` into `web/vendor/onnx/` (mirrors `vendor-wasm.sh`) |
+| `web/models/brain-segmentation-unet.onnx` | MIT-licensed pretrained brain-MRI U-Net (`mateuszbuda/brain-segmentation-pytorch`), 7.76M params, opset 17, self-contained 31 MB; export verified to 1.28e-07 vs torch |
+| `web/pacs-ai-model.md` | Model provenance, I/O contract, export recipe; **demo only — not for clinical use** |
+| `web/tests/pacs-ai.spec.mjs`, `web/tests/onnx-adapter.spec.mjs` | Headless end-to-end AI specs (part of the 3-test Playwright suite) |
+
+Measured (headless Chromium, WASM): on CR 7.2 MB, PICS-C-WASM-8 decodes in
+**~4.3 ms** (31× faster than pure-JS MIC-4state's 134 ms) → AI pipeline
+**157 ms vs 289 ms**. Inference (~150 ms WASM) dominates small slices;
+WebGPU (headful Chrome/Edge) is the regime where decode differences matter
+again. CI/headless numbers are WASM — don't quote them as WebGPU.
+
+Gotchas: ort-web must be **vendored** (`scripts/vendor-onnx.sh`) because
+the repo serves raw ES modules; the model's input is **3-channel
+[1,3,256,256]**, so the preprocessor triplicates grayscale; PICS blobs may
+need the `_pics8`↔`_pics4` fallback (recorded as a ⚠ note, never silent).
