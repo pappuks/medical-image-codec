@@ -80,12 +80,23 @@ make            # produces libmic_pics.so
 # 3. sanity: torch sees the GPU
 .venv/bin/python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 
-# 4. run the benchmark
+# 4. run the tests (bit-exact ground-truth round-trips)
+.venv/bin/python -m pytest ai/tests/ -v
+
+# 5. run the benchmark (headroom verdict + optional worker sweep via --workers -1)
 .venv/bin/python ai/benchmark_feed.py --device cuda --iterations 30 --threads 8
+.venv/bin/python ai/benchmark_feed.py --device cuda --iterations 30 --threads 8 --workers -1
 ```
 
 The Python loader resolves the lib per-platform (`.dylib` on macOS, `.so`
 on Linux) or takes an explicit path (`--lib`).
+
+## Measured reference (MPS, Apple Silicon, 2026-08-27)
+
+C PICS-8 decode: 1.6–3.2 GB/s (CR 7.18 MB; paper: 3.23 GB/s) vs. device
+consume rate 0.35 GB/s (24-layer conv pacer @512²) → **headroom 4.7–9.0×,
+decode NOT the bottleneck**. DataLoader `num_workers=2` recovers +25%
+samples/s on the serial loop. Full numbers: `benchmark-notes.md`.
 
 ## Layout
 
