@@ -11,9 +11,12 @@
     "bench": "node bench-pacs-viewer.mjs"
   },
   "devDependencies": {
-    "@cornerstonejs/codec-openjph": "^2.4.7",
     "@cornerstonejs/codec-charls": "^1.2.3",
+    "@cornerstonejs/codec-openjph": "^2.4.7",
     "@jsquash/jxl": "^1.3.0",
     "@playwright/test": "^1.48.0"
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.29.0"
   }
 }

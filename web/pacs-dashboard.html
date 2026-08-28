@@ -131,6 +131,17 @@
 
     <section id="results"></section>
 
+    <section class="panel" id="ai-panel" hidden>
+      <h3 style="margin:0 0 6px; font-size:14px">AI inference — browser decode + ONNX segmentation</h3>
+      <div class="note" style="font-size:12px; margin-bottom:10px">
+        Runs a real pretrained brain-MRI U-Net (MIT, <code>mateuszbuda/brain-segmentation-pytorch</code>)
+        on the decoded pixels, in this browser. <strong>Demo only — not for clinical use.</strong>
+        See <a href="./pacs-ai-model.md">pacs-ai-model.md</a>.
+      </div>
+      <div class="note" id="ai-summary" style="font-size:13px; margin-bottom:8px"></div>
+      <div class="tbl-wrap"><table id="ai-table"></table></div>
+    </section>
+
     <section class="panel" id="charts-panel" hidden>
       <h3 style="margin:0 0 14px; font-size:14px">Charts</h3>
       <div class="charts" id="charts"></div>

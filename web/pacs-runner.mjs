@@ -324,3 +324,94 @@ function collectEnv() {
   if (typeof crossOriginIsolated !== 'undefined') env.crossOriginIsolated = crossOriginIsolated;
   return env;
 }
+
+// ---------------------------------------------------------------------------
+// AI inference stage (?ai=1)
+// ---------------------------------------------------------------------------
+
+// timeMedianAsync — warmup + median for any async fn (generalises timeMedian,
+// which is bound to the codec-adapter decode signature).
+async function timeMedianAsync(fn, iterations, warmup) {
+  for (let i = 0; i < warmup; i++) await fn();
+  const times = [];
+  for (let i = 0; i < iterations; i++) {
+    const t0 = performance.now();
+    await fn();
+    times.push(performance.now() - t0);
+    await nextFrame();
+  }
+  times.sort((a, b) => a - b);
+  return times[Math.floor(times.length / 2)];
+}
+
+// runAIInference — decode each image with the selected codec, then run the
+// ONNX model on the decoded pixels, timing the full pipeline. Reuses the
+// same fetch/resolve machinery as the codec benchmark; inference uses the
+// same warmup+median discipline. The model is a real pretrained brain-U-Net
+// (MIT) — see web/pacs-ai-model.md; NOT for clinical use.
+//
+//   opts.aiCodec  : one CODEC_REGISTRY entry (default MIC-4state)
+//   opts.images   : as runBenchmark
+//   opts.aiIterations / opts.warmup : timing knobs
+// Returns { aiRecords: [{ image, codecId, decodeMs, inferMs, pipelineMs, fps,
+//                          backend, compressedBytes, ratio }] , env }
+export async function runAIInference(opts = {}) {
+  const images = opts.images ?? IMAGES;
+  const aiCodec = opts.aiCodec ?? CODEC_REGISTRY.find((c) => c.id === 'mic-4state');
+  const iterations = opts.aiIterations ?? 5;
+  const warmup = opts.warmup ?? 2;
+  const baseUrl = opts.baseUrl ?? (typeof location !== 'undefined' ? location.href : 'http://localhost/');
+  const fetchFn = opts.fetchFn ?? fetch;
+  const resolvePath = opts.resolvePath ?? candidatePaths;
+  const onProgress = opts.onProgress ?? (() => {});
+
+  // lazy-import the adapter (and ort-web) only when AI mode runs
+  const { makeOnnxAdapter } = await import('./codecs/onnx-adapter.mjs');
+
+  const codecAdapter = makeAdapter(aiCodec);
+  await codecAdapter.init();
+  const aiAdapter = makeOnnxAdapter();
+  await aiAdapter.init();
+
+  const ctx = { baseUrl, fetchFn, iterations, warmup, verify: false, rawManifest: null, refManifest: null, resolvePath };
+  const aiRecords = [];
+  try {
+    for (const img of images) {
+      onProgress({ done: aiRecords.length, total: images.length, label: `AI: ${img.name}` });
+      // 1) fetch + decode (timed the same way as the codec tables)
+      const paths = resolvePath(aiCodec, img.name);
+      let bytes = null;
+      for (const p of paths) {
+        bytes = await fetchBytes(baseUrl, p, fetchFn);
+        if (bytes) break;
+      }
+      if (!bytes) {
+        aiRecords.push({ image: img.name, codecId: aiCodec.id, note: 'file missing', decodeMs: null, inferMs: null, pipelineMs: null, fps: null });
+        continue;
+      }
+      const decodeMs = await timeMedian(codecAdapter, bytes, iterations, warmup);
+      // decode once more (untimed) to have pixels for inference
+      const { pixels } = await codecAdapter.decode(bytes);
+
+      // 2) preprocess + inference, warmup+median
+      const inferMs = await timeMedianAsync(
+        () => aiAdapter.infer(pixels, img.w, img.h), iterations, warmup);
+
+      const pipelineMs = decodeMs + inferMs;
+      aiRecords.push({
+        image: img.name, modality: img.modality, w: img.w, h: img.h,
+        codecId: aiCodec.id, codecLabel: aiCodec.label,
+        compressedBytes: bytes.length,
+        ratio: (img.w * img.h * 2) / bytes.length,
+        decodeMs, inferMs, pipelineMs,
+        fps: inferMs ? 1000 / pipelineMs : null,
+        backend: aiAdapter.backend ?? null,
+      });
+    }
+  } finally {
+    if (typeof codecAdapter.dispose === 'function') codecAdapter.dispose();
+    aiAdapter.dispose();
+  }
+
+  return { aiRecords, env: collectEnv() };
+}

@@ -378,7 +378,12 @@ async function start() {
 
   let result;
   try {
-    result = await runBenchmark(opts);
+    if (AI_MODE) {
+      // AI mode: skip the full codec matrix; run decode→infer per image.
+      result = await startAI(opts);
+    } else {
+      result = await runBenchmark(opts);
+    }
   } catch (e) {
     if (e instanceof ChallengeExpiredError) { handleChallengeExpired(e, 'runBenchmark'); return; }
     $('status').textContent = 'Error: ' + e.message;
@@ -392,13 +397,16 @@ async function start() {
   try { sessionStorage.removeItem('wafReloadTries'); } catch { /* private mode */ }
 
   renderEnv(result.env);
-  renderResults(result);
-  await renderChartsIfAvailable(result);
-
-  $('status').textContent = `Done — ${result.records.length} image + ${(result.cineRecords || []).length} cine measurements`
-    + `, iterations=${result.iterations}, warmup=${result.warmup}`
-    + (result.verify ? ', verify=on' : '');
-  $('foot').innerHTML = footNote(result);
+  if (!AI_MODE) {
+    renderResults(result);
+    await renderChartsIfAvailable(result);
+    $('status').textContent = `Done — ${result.records.length} image + ${(result.cineRecords || []).length} cine measurements`
+      + `, iterations=${result.iterations}, warmup=${result.warmup}`
+      + (result.verify ? ', verify=on' : '');
+    $('foot').innerHTML = footNote(result);
+  } else {
+    $('status').textContent = `AI run done — ${result.aiRecords.length} images`;
+  }
 
   running = false;
   $('start').disabled = false;
@@ -484,6 +492,57 @@ async function initS3Mode() {
     sel.innerHTML = '<option value="">Error loading studies</option>';
     $('status').textContent = 'S3 mode error: ' + e.message;
   }
+}
+
+// ---------------------------------------------------------------------------
+// AI inference section (?ai=1)
+// ---------------------------------------------------------------------------
+
+const AI_MODE = params.get('ai') === '1';
+
+function renderAI(aiRecords, env) {
+  const panel = $('ai-panel');
+  const table = $('ai-table');
+  const summary = $('ai-summary');
+  const ok = aiRecords.filter((r) => r.pipelineMs != null);
+  if (!ok.length) {
+    panel.hidden = false;
+    summary.textContent = 'No AI records (no decodable images for the selected codec).';
+    return;
+  }
+  const backend = ok[0].backend || '—';
+  const geo = (arr) => Math.exp(arr.reduce((a, b) => a + Math.log(b), 0) / arr.length);
+  const gDec = geo(ok.map((r) => r.decodeMs));
+  const gInf = geo(ok.map((r) => r.inferMs));
+  const gPipe = geo(ok.map((r) => r.pipelineMs));
+  summary.innerHTML =
+    `${ok.length} images · inference backend: <strong>${escapeHtml(backend)}</strong> · ` +
+    `geomean decode ${gDec.toFixed(1)} ms + infer ${gInf.toFixed(1)} ms = pipeline ${gPipe.toFixed(1)} ms ` +
+    `(${(1000 / gPipe).toFixed(1)} slices/s end-to-end)`;
+
+  const rows = ok.map((r) => `<tr>
+    <td>${escapeHtml(r.image)}</td>
+    <td>${escapeHtml(r.codecLabel || r.codecId)}</td>
+    <td>${r.compressedBytes != null ? fmtKB(r.compressedBytes) : '—'}</td>
+    <td>${r.ratio != null ? fmtRatio(r.ratio) : '—'}</td>
+    <td>${fmtMs(r.decodeMs)}</td>
+    <td>${fmtMs(r.inferMs)}</td>
+    <td><strong>${fmtMs(r.pipelineMs)}</strong></td>
+    <td>${fmtFps(r.fps)}</td>
+  </tr>`).join('');
+  table.innerHTML = `<thead><tr>
+      <th>Image</th><th>Codec</th><th>Size</th><th>Ratio</th>
+      <th>Decode</th><th>AI infer</th><th>Pipeline</th><th>Slices/s</th>
+    </tr></thead><tbody>${rows}</tbody>`;
+  panel.hidden = false;
+}
+
+async function startAI(opts) {
+  $('status').textContent = 'Loading AI model (31 MB, first run)…';
+  const { runAIInference } = await import('./pacs-runner.mjs');
+  const result = await runAIInference(opts);
+  renderAI(result.aiRecords, result.env);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
