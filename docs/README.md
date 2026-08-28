@@ -50,8 +50,19 @@ The dataset pipeline and the public-demo hosting architecture.
 | [pacs-lambda-service-design.md](pacs-lambda-service-design.md) | **Online demo hosting** — CloudFront + Lambda + private S3, cross-origin-isolation strategy, IAM, cost, IaC |
 | [pacs-access-control-design.md](pacs-access-control-design.md) | **Bot mitigation** — WAF Challenge, token minting order, the 202 failure mode, COEP interaction; identity options in the appendix |
 
+## AI pipeline (MIC as an AI data plane)
+
+MIC feeding GPU training and in-browser inference — architecture, measured
+verdicts, and runbooks.
+
+| Doc | What it covers |
+|-----|----------------|
+| [ai-pipeline.md](ai-pipeline.md) | **MIC → AI pipeline** — Part A: PyTorch adapter over the C PICS-8 decoder (MPS/CUDA benchmark, headroom verdict); Part B: in-browser ONNX/WebGPU inference (`?ai=1`), the brain-U-Net model, codec comparison. Start here. |
+
 Related tooling READMEs outside `docs/`:
 [`infra/README.md`](../infra/README.md) (AWS hosting stack — SAM/CloudFront/Lambda/WAF) ·
 [scripts/pacs-ingest/README.md](../scripts/pacs-ingest/README.md) (ingest/encode/upload pipeline) ·
 [scripts/aws/README.md](../scripts/aws/README.md) (EC2 benchmark runbook) ·
-[web/README.md](../web/README.md) (dashboard + Node/Playwright benchmark).
+[web/README.md](../web/README.md) (dashboard + Node/Playwright benchmark) ·
+[ai/README.md](../ai/README.md) (PyTorch adapter + GPU-feed benchmark) ·
+[web/pacs-ai-model.md](../web/pacs-ai-model.md) (AI model provenance + license).
