@@ -1,0 +1,421 @@
+// Copyright 2021 Kuldeep Singh
+// This source code is licensed under a MIT-style
+// license that can be found in the LICENSE file.
+// Based on work Copyright 2018 Klaus Post, released user BSD License.
+// Based on work Copyright (c) 2013, Yann Collet, released under BSD License.
+
+package mic
+
+import (
+	"errors"
+	"fmt"
+)
+
+const (
+	tablelogAbsoluteMax = 17
+)
+
+// Decompress a block of data.
+// You can provide a scratch buffer to avoid allocations.
+// If nil is provided a temporary one will be allocated.
+// It is possible, but by no way guaranteed that corrupt data will
+// return an error.
+// It is up to the caller to verify integrity of the returned data.
+// Use a predefined Scrach to set maximum acceptable output size.
+func FSEDecompressU16(b []byte, s *ScratchU16) ([]uint16, error) {
+	s, err := s.prepare(nil, b)
+	if err != nil {
+		return nil, err
+	}
+	s.OutU16 = s.OutU16[:0]
+	err = s.readNCount()
+	if err != nil {
+		return nil, err
+	}
+	err = s.buildDtable()
+	if err != nil {
+		return nil, err
+	}
+	err = s.decompress()
+	if err != nil {
+		return nil, err
+	}
+
+	return s.OutU16, nil
+}
+
+// readNCount will read the symbol distribution so decoding tables can be constructed.
+func (s *ScratchU16) readNCount() error {
+	var (
+		charnum   uint32
+		previous0 bool
+		b         = &s.brForDecomp
+	)
+	iend := b.remain()
+	if iend < 4 {
+		return errors.New("input too small")
+	}
+	bitStream := b.Uint32()
+	nbBits := uint((bitStream & 0xF) + minTablelog) // extract tableLog
+	if nbBits > tablelogAbsoluteMax {
+		return errors.New("tableLog too large")
+	}
+	bitStream >>= 4
+	bitCount := uint(4)
+
+	s.actualTableLog = uint8(nbBits)
+	remaining := int32((1 << nbBits) + 1)
+	threshold := int32(1 << nbBits)
+	gotTotal := int32(0)
+	nbBits++
+
+	for remaining > 1 {
+		if previous0 {
+			n0 := charnum
+			for (bitStream & 0xFFFF) == 0xFFFF {
+				n0 += 24
+				if b.off < iend-5 {
+					b.advance(2)
+					bitStream = b.Uint32() >> bitCount
+				} else {
+					bitStream >>= 16
+					bitCount += 16
+				}
+			}
+			for (bitStream & 3) == 3 {
+				n0 += 3
+				bitStream >>= 2
+				bitCount += 2
+			}
+			n0 += uint32(bitStream & 3)
+			bitCount += 2
+			if n0 > maxSymbolValue {
+				return errors.New("maxSymbolValue too small")
+			}
+			for charnum < n0 {
+				s.norm[charnum&0xffff] = 0
+				charnum++
+			}
+
+			if b.off <= iend-7 || b.off+int(bitCount>>3) <= iend-4 {
+				b.advance(bitCount >> 3)
+				bitCount &= 7
+				bitStream = b.Uint32() >> bitCount
+			} else {
+				bitStream >>= 2
+			}
+		}
+
+		max := (2*(threshold) - 1) - (remaining)
+		var count int32
+
+		if (int32(bitStream) & (threshold - 1)) < max {
+			count = int32(bitStream) & (threshold - 1)
+			bitCount += nbBits - 1
+		} else {
+			count = int32(bitStream) & (2*threshold - 1)
+			if count >= threshold {
+				count -= max
+			}
+			bitCount += nbBits
+		}
+
+		count-- // extra accuracy
+		if count < 0 {
+			// -1 means +1
+			remaining += count
+			gotTotal -= count
+		} else {
+			remaining -= count
+			gotTotal += count
+		}
+		s.norm[charnum&0xffff] = int32(count)
+		charnum++
+		previous0 = count == 0
+		for remaining < threshold {
+			nbBits--
+			threshold >>= 1
+		}
+		if b.off <= iend-7 || b.off+int(bitCount>>3) <= iend-4 {
+			b.advance(bitCount >> 3)
+			bitCount &= 7
+		} else {
+			bitCount -= (uint)(8 * (len(b.b) - 4 - b.off))
+			b.off = len(b.b) - 4
+		}
+		bitStream = b.Uint32() >> (bitCount & 31)
+	}
+	s.symbolLen = uint32(charnum)
+
+	if s.symbolLen <= 1 {
+		return fmt.Errorf("symbolLen (%d) too small", s.symbolLen)
+	}
+	if s.symbolLen > maxSymbolValue+1 {
+		return fmt.Errorf("symbolLen (%d) too big", s.symbolLen)
+	}
+	if remaining != 1 {
+		return fmt.Errorf("corruption detected (remaining %d != 1)", remaining)
+	}
+	if bitCount > 32 {
+		return fmt.Errorf("corruption detected (bitCount %d > 32)", bitCount)
+	}
+	if gotTotal != 1<<s.actualTableLog {
+		return fmt.Errorf("corruption detected (total %d != %d)", gotTotal, 1<<s.actualTableLog)
+	}
+	b.advance((bitCount + 7) >> 3)
+	return nil
+}
+
+// allocDtable will allocate decoding tables if they are not big enough.
+// Sizes the symbolNext (stateTable) and temp buffer (tableSymbol) to the
+// actual symbol range when possible, improving cache efficiency for 8-bit data.
+func (s *ScratchU16) allocDtable() {
+	tableSize := 1 << s.actualTableLog
+	if cap(s.decTable) < tableSize {
+		s.decTable = make([]decSymbolU16, tableSize)
+	}
+	s.decTable = s.decTable[:tableSize]
+
+	// tableSymbol is used as a temporary output buffer in decompress().
+	// It needs to hold up to 65536 entries (uint16 overflow counter).
+	if cap(s.ct.tableSymbol) < 65536 {
+		s.ct.tableSymbol = make([]uint16, 65536)
+	}
+	s.ct.tableSymbol = s.ct.tableSymbol[:65536]
+
+	// stateTable (used as symbolNext during build) only needs symbolLen entries.
+	symSize := int(s.symbolLen)
+	if symSize < 256 {
+		symSize = 256
+	}
+	if cap(s.ct.stateTable) < symSize {
+		s.ct.stateTable = make([]uint32, symSize)
+	}
+	s.ct.stateTable = s.ct.stateTable[:symSize]
+}
+
+// buildDtable will build the decoding table.
+func (s *ScratchU16) buildDtable() error {
+	tableSize := uint32(1 << s.actualTableLog)
+	highThreshold := tableSize - 1
+	s.allocDtable()
+	symbolNext := s.ct.stateTable[:s.symbolLen]
+
+	// Init, lay down lowprob symbols
+	s.zeroBits = false
+	{
+		largeLimit := int32(1 << (s.actualTableLog - 1))
+		for i, v := range s.norm[:s.symbolLen] {
+			if v == -1 {
+				s.decTable[highThreshold].symbol = uint16(i)
+				highThreshold--
+				symbolNext[i] = 1
+			} else {
+				if v >= largeLimit {
+					s.zeroBits = true
+				}
+				symbolNext[i] = uint32(v)
+			}
+		}
+	}
+	// Spread symbols
+	{
+		tableMask := tableSize - 1
+		step := tableStep(tableSize)
+		position := uint32(0)
+		for ss, v := range s.norm[:s.symbolLen] {
+			for i := 0; i < int(v); i++ {
+				s.decTable[position].symbol = uint16(ss)
+				position = (position + step) & tableMask
+				for position > highThreshold {
+					// lowprob area
+					position = (position + step) & tableMask
+				}
+			}
+		}
+		if position != 0 {
+			// position must reach all cells once, otherwise normalizedCounter is incorrect
+			return errors.New("corrupted input (position != 0)")
+		}
+	}
+
+	// Build Decoding table
+	{
+		tableSize := uint32(1 << s.actualTableLog)
+		for u, v := range s.decTable {
+			symbol := v.symbol
+			nextState := symbolNext[symbol]
+			symbolNext[symbol] = nextState + 1
+			nBits := s.actualTableLog - byte(highBits(uint32(nextState)))
+			s.decTable[u].nbBits = nBits
+			newState := (nextState << nBits) - uint32(tableSize)
+			if newState >= uint32(tableSize) {
+				return fmt.Errorf("newState (%d) outside table size (%d)", newState, tableSize)
+			}
+			if newState == uint32(u) && nBits == 0 {
+				// Seems weird that this is possible with nbits > 0.
+				return fmt.Errorf("newState (%d) == oldState (%d) and no bits", newState, u)
+			}
+			s.decTable[u].newState = newState
+		}
+	}
+	return nil
+}
+
+// decompress will decompress the bitstream.
+// If the buffer is over-read an error is returned.
+func (s *ScratchU16) decompress() error {
+	br := &s.bits
+	br.init(s.brForDecomp.unread())
+
+	var s1 decoderU16
+	// Initialize and decode first state and symbol.
+	s1.init(br, s.decTable, s.actualTableLog)
+
+	// Use temp table to avoid bound checks/append penalty.
+	var tmp = s.ct.tableSymbol[:65536]
+	var off uint16
+
+	// Cache the decode table slice locally for fewer indirections in the hot loop.
+	dt := s.decTable
+
+	// Main part - inline state transitions to reduce function call overhead
+	// and improve instruction-level parallelism.
+	if !s.zeroBits {
+		for br.off >= 8 {
+			// Refill bit buffer once - guaranteed to provide at least 32 fresh bits.
+			br.fillFast()
+
+			// Decode 2 symbols: inlined nextFast with local dt reference
+			n0 := dt[s1.state]
+			lowBits0 := br.getBitsFast32(n0.nbBits)
+			s1.state = n0.newState + lowBits0
+
+			n1 := dt[s1.state]
+			lowBits1 := br.getBitsFast32(n1.nbBits)
+			s1.state = n1.newState + lowBits1
+
+			// Refill again before next 2 symbols
+			br.fillFast()
+
+			n2 := dt[s1.state]
+			lowBits2 := br.getBitsFast32(n2.nbBits)
+			s1.state = n2.newState + lowBits2
+
+			n3 := dt[s1.state]
+			lowBits3 := br.getBitsFast32(n3.nbBits)
+			s1.state = n3.newState + lowBits3
+
+			tmp[off+0] = n0.symbol
+			tmp[off+1] = n1.symbol
+			tmp[off+2] = n2.symbol
+			tmp[off+3] = n3.symbol
+			off += 4
+
+			// When off is 0, we have overflowed and should write.
+			if off == 0 {
+				s.OutU16 = append(s.OutU16, tmp...)
+				if len(s.OutU16) >= s.DecompressLimit {
+					return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.OutU16), s.DecompressLimit)
+				}
+			}
+		}
+	} else {
+		for br.off >= 8 {
+			br.fillFast()
+
+			n0 := &dt[s1.state]
+			lowBits0 := br.getBits32(n0.nbBits)
+			s1.state = n0.newState + lowBits0
+
+			n1 := &dt[s1.state]
+			lowBits1 := br.getBits32(n1.nbBits)
+			s1.state = n1.newState + lowBits1
+
+			br.fillFast()
+
+			n2 := &dt[s1.state]
+			lowBits2 := br.getBits32(n2.nbBits)
+			s1.state = n2.newState + lowBits2
+
+			n3 := &dt[s1.state]
+			lowBits3 := br.getBits32(n3.nbBits)
+			s1.state = n3.newState + lowBits3
+
+			tmp[off+0] = n0.symbol
+			tmp[off+1] = n1.symbol
+			tmp[off+2] = n2.symbol
+			tmp[off+3] = n3.symbol
+			off += 4
+			if off == 0 {
+				s.OutU16 = append(s.OutU16, tmp...)
+				// When off is 0, we have overflowed and should write.
+				if len(s.OutU16) >= s.DecompressLimit {
+					return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.OutU16), s.DecompressLimit)
+				}
+			}
+		}
+	}
+	s.OutU16 = append(s.OutU16, tmp[:off]...)
+
+	// Final bits, a bit more expensive check
+	for {
+		if s1.finished() {
+			if s1.state != 0 {
+				// Adding the final symbol if the state is not zero.
+				s.OutU16 = append(s.OutU16, s1.final())
+			}
+			break
+		}
+		br.fill()
+		s.OutU16 = append(s.OutU16, s1.next())
+		if len(s.OutU16) >= s.DecompressLimit {
+			return fmt.Errorf("output size (%d) > DecompressLimit (%d)", len(s.OutU16), s.DecompressLimit)
+		}
+	}
+	return br.close()
+}
+
+// decoder keeps track of the current state and updates it from the bitstream.
+type decoderU16 struct {
+	state uint32
+	br    *bitReader
+	dt    []decSymbolU16
+}
+
+// init will initialize the decoder and read the first state from the stream.
+func (d *decoderU16) init(in *bitReader, dt []decSymbolU16, tableLog uint8) {
+	d.dt = dt
+	d.br = in
+	d.state = in.getBits32(tableLog)
+}
+
+// next returns the next symbol and sets the next state.
+// At least tablelog bits must be available in the bit reader.
+func (d *decoderU16) next() uint16 {
+	n := &d.dt[d.state]
+	lowBits := d.br.getBits32(n.nbBits)
+	d.state = n.newState + lowBits
+	return n.symbol
+}
+
+// finished returns true if all bits have been read from the bitstream
+// and the next state would require reading bits from the input.
+func (d *decoderU16) finished() bool {
+	return d.br.finished() && d.dt[d.state].nbBits > 0
+}
+
+// final returns the current state symbol without decoding the next.
+func (d *decoderU16) final() uint16 {
+	return d.dt[d.state].symbol
+}
+
+// nextFast returns the next symbol and sets the next state.
+// This can only be used if no symbols are 0 bits.
+// At least tablelog bits must be available in the bit reader.
+func (d *decoderU16) nextFast() uint16 {
+	n := d.dt[d.state]
+	lowBits := d.br.getBitsFast32(n.nbBits)
+	d.state = n.newState + lowBits
+	return n.symbol
+}

@@ -1,0 +1,1467 @@
+% IEEE-format edition of the MIC paper.
+% Tables (no figures) are reproduced from mic-paper-v9-ieee-tmi.tex;
+% references are the cited subset of the v9 bibliography.
+% Compile: pdflatex -> pdflatex
+\documentclass[journal]{IEEEtran}
+
+% ---- Math / fonts ----
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{newtxtext,newtxmath}
+
+% ---- Graphics / tables ----
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+
+% ---- Utilities ----
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{cite}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!70!black,
+  citecolor=green!50!black,
+  urlcolor=blue!70!black,
+}
+
+% --------------------------------------------------
+\title{A 16-Bit-Native Lossless Compression Pipeline\\
+       for Medical Images}
+
+\author{Kuldeep~Singh%
+\thanks{K.\ Singh is with Innovaccer Inc.
+E-mail: kuldeep.singh@innovaccer.com.
+ORCID: 0009-0004-8476-0118.
+Code: \url{https://github.com/pappuks/medical-image-codec}.}%
+}
+
+% --------------------------------------------------
+\begin{document}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Medical images must be stored and transmitted losslessly, since a radiologist
+must see exactly what the scanner produced, and they are ``wide,'' carrying
+10--16 bits per pixel rather than the 8 bits of an ordinary photo. That wide
+format is where most compression tools perform poorly, because nearly all of
+them were adapted from photographic and general-purpose imaging, where pixels
+are 8 bits, rather than designed for medical data. This paper describes MIC
+(Medical Image Codec), a lossless codec designed natively for medical imaging
+that works directly on 16-bit data instead of splitting each pixel into two
+bytes. MIC chains three simple stages, a spatial predictor, a
+16-bit run-length encoder, and a large-alphabet entropy coder called Finite
+State Entropy (FSE, a fast table-driven form of asymmetric numeral systems),
+and adds a multi-state decoder that keeps the CPU more fully utilized to speed
+up decompression. On 39 real DICOM images across eleven modalities, MIC
+compresses about 10\% better on average (better on 34 of the 39 images) than a
+strong general-purpose baseline (Delta\,+\,Zstandard), reaches a geometric-mean
+compression ratio of 3.36$\times$ (within about 2\% of High-Throughput
+JPEG~2000 at 3.42$\times$ and about 88\% of JPEG-LS at 3.84$\times$), and is the
+fastest decoder of the four tested codecs on all 39 images on ARM64 and 36 of 39
+on AMD64. A 20\,KB pure-JavaScript decoder lets the format be decoded directly
+in a web browser.
+\end{abstract}
+
+\begin{IEEEkeywords}
+medical image compression, lossless compression, entropy coding, asymmetric
+numeral systems (ANS), finite state entropy (FSE), DICOM, high-bit-depth
+imaging.
+\end{IEEEkeywords}
+
+% ============================================================
+\section{Why Medical Images Need a Different Codec}
+\label{sec:intro}
+
+\IEEEPARstart{M}{edical} imaging plays a central role in understanding the human
+body, and as the instruments that capture these images improve, both their
+resolution and the volume of imaging data they generate continue to rise. A
+modern scanner produces a great deal of data: a single digital breast
+tomosynthesis view can comprise 60 or more image slices and over 600\,MB, and a
+full screening study can exceed 2\,GB uncompressed. Hospitals store and move
+very large volumes of this data every day, so effective compression directly
+affects storage cost, network load, and how quickly images appear in a viewer.
+Because a radiologist must see exactly what the scanner produced, this
+compression must be lossless: the reconstructed image has to match the original
+bit for bit, with no loss of fidelity.
+
+DICOM~\cite{dicom}, the medical imaging standard, already supports several
+lossless formats---JPEG~2000~\cite{taubman2002}, HTJ2K~\cite{htj2k2019},
+JPEG-LS~\cite{loco1}, and a basic run-length scheme. Each makes a different
+trade-off between how small the file gets, how fast it decodes, and how complex
+it is to implement~\cite{liu2017,clunie2000}. JPEG~2000 and HTJ2K compress well
+but rely on fairly heavy machinery. JPEG-LS usually gets the smallest files.
+Plain run-length coding is simple but offers only modest compression, since it
+works on raw bytes with no prediction step.
+
+Lossless compression for medical images is not new, but a common thread runs
+through these standards. Their prediction and entropy stages were originally
+developed for photographic and general-purpose continuous-tone imaging, where
+pixels are typically 8 bits, and were later applied to the 10--16-bit data that
+medical scanners produce~\cite{liu2017,clunie2000}. Even JPEG-LS, the most
+widely deployed of them in medical imaging, derives from the LOCO-I design for
+general continuous-tone images~\cite{loco1}; its adoption for medical data came
+afterward. None of these standards was designed from the outset around the
+statistics of high-bit-depth medical images. MIC takes the opposite approach
+and is built from the ground up for medical images.
+
+\subsection{The core problem: most coders assume 8-bit data}
+
+This is the central observation behind the paper. The widely used entropy
+coders, including Huffman, arithmetic coding, the LZ77 family, and the FSE/ANS
+coder inside Zstandard~\cite{rfc8878}, were all designed for \textbf{8-bit byte
+streams}, where there are only 256 possible symbols. Medical images do not fit
+that assumption: a 16-bit pixel has up to 65,536 possible values.
+
+When an 8-bit coder is applied to 16-bit data, it has two poor options:
+
+\begin{enumerate}
+  \item \textbf{Split each pixel into a high byte and a low byte} and code them
+  separately. This doubles the number of coding steps and, more importantly,
+  discards the relationship between the two bytes.
+  \item \textbf{Cap the alphabet at 256 values} and store anything rarer as raw
+  data, which wastes space.
+\end{enumerate}
+
+Why does splitting hurt? Consider a tiny prediction error like $-2$, $-1$, 0,
+or $+1$. The low byte carries the real information, but the high byte is
+almost always the same (just a sign-extension). A byte-by-byte coder still
+spends bits encoding that high byte even though it is nearly fully
+determined by the low one. On the test images, the information shared
+between the two bytes ranges from 0.3 to 1.1 bits per pixel, which is the
+ceiling on how much a byte-splitting coder is wasting. This sets an
+expectation for how much can be recovered by keeping the two bytes together.
+Section~\ref{sec:results} reports that MIC produces files 5--22\% smaller than
+Delta + Zstandard, a strong byte-oriented baseline that codes the same residuals
+after splitting them into bytes; that measured per-image size advantage falls
+within the ceiling above, which is consistent with the shared-information
+argument being the main source of the gain.
+
+\paragraph{The residual stream} Throughout, a \emph{residual} is the
+difference between a pixel and a prediction of it. Example: if the predictor
+guesses 1020 and the true pixel is 1023, the residual is $+3$. Smooth regions
+of an image produce many residuals near zero, and the same small values recur
+frequently, which is exactly the pattern run-length and entropy coding exploit
+well.
+
+\subsection{What MIC is}
+
+MIC is designed around the characteristics of medical images themselves. Such
+images tend to contain large homogeneous regions and comparatively few sharp
+edges or abrupt changes in contrast, and their pixels are commonly 10--16 bits
+wide. Starting from these properties, we surveyed entropy-coding and
+signal-processing techniques to identify a combination that compresses this kind
+of data well while still decoding at high throughput. The result is a
+three-stage pipeline.
+
+MIC keeps the residuals at their native 16-bit width and combines (i)~a simple
+spatial predictor, (ii)~a 16-bit run-length encoder, and (iii)~an entropy coder
+(FSE) extended to handle large alphabets. Plus a multi-state decoder that
+improves decompression speed by letting the CPU work on several symbols at
+once.
+
+\subsection{Contributions, briefly}
+
+\begin{itemize}
+  \item A \textbf{16-bit-native pipeline} (Delta + 16-bit RLE + extended FSE)
+  that outperforms Delta + Zstandard on the large majority of images (34 of 39,
+  by about 10\% in geometric mean).
+  \item An \textbf{entropy coder for large alphabets}---up to 65,535 symbols,
+  versus the 4,096-symbol limit in Zstandard's FSE. Tables shrink
+  automatically to fit the data (as small as ${\sim}2$\,KB for 8-bit content).
+  \item A \textbf{multi-state decoder} that runs 2/4/8 independent decode chains
+  to use idle CPU capacity, with no cost to compression ratio.
+  \item An \textbf{evaluation} against HTJ2K, JPEG-LS, and Delta + Zstandard.
+  \item A \textbf{20\,KB JavaScript decoder} plus a WebAssembly build, for
+  client-side decoding in browsers.
+\end{itemize}
+
+\paragraph{Why this combination, not any single stage} Spatial prediction,
+run-length coding, and ANS/FSE entropy coding are each well established on
+their own, so the contribution here is not any individual stage but the
+combination. Pairing a 16-bit-native entropy stage with multi-state parallel
+ANS decoding removes a specific bottleneck: sustained, real-time,
+browser-based decoding of DICOM images at their native 16-bit depth. JPEG-LS's
+Golomb-Rice stage and HTJ2K's block coder both retain per-symbol
+data-dependent branches, and Zstandard's FSE is fixed at an 8-bit-oriented,
+4,096-symbol alphabet; none of the three was designed to be widened to a
+native 16-bit alphabet and interleaved into independent parallel decode chains
+without a change to its compressed format. Section~\ref{sec:results} shows
+this combination sustaining single-threaded and strip-parallel decode above
+the frame rates a clinical multi-frame viewer requires
+(Section~\ref{sec:clinical-workflow}); to the author's knowledge, that specific
+combination of native bit depth, decode speed, and browser deployment is not
+simultaneously targeted by JPEG-LS, HTJ2K, or Zstandard-based pipelines.
+
+\paragraph{Scope} This work covers lossless, single-frame, grayscale images
+only. Color and multi-frame extensions, lossy modes, and progressive decoding
+are out of scope.
+
+% ============================================================
+\section{Related Work}
+\label{sec:related}
+
+\textbf{The DICOM lossless codecs.} JPEG~2000~\cite{taubman2002} uses a wavelet
+transform plus a sophisticated block coder (EBCOT): strong ratios, but slow
+decoding. HTJ2K~\cite{htj2k2019,taubman2022} replaces the block coder with a
+faster one and decodes considerably quicker. JPEG-LS~\cite{loco1} uses a small
+predictor (Median Edge Detector) and Golomb-Rice coding; it is a widely
+deployed standard and a strong ratio baseline. The basic DICOM run-length
+scheme compresses little because it works on raw bytes with no prediction step.
+Research codecs such as CALIC~\cite{wu1997} and FLIF~\cite{sneyers2016}
+compress well on natural images but are not DICOM standards and lack browser
+decoders.
+
+\textbf{JPEG~XL.} JPEG~XL~\cite{jpegxl} is a general-purpose image format
+whose modular lossless mode also handles high-bit-depth data, and its absence
+from the quantitative comparison deserves an explicit explanation rather than
+a silent omission. In informal cross-checks using the reference \texttt{libjxl}
+encoder and decoder called in-process (effort level~7; the harness is included
+in the accompanying code as \texttt{ojph/jxl\_comparison\_test.go}), JPEG~XL
+reaches a modestly better compression ratio than MIC on the same images, while
+MIC encodes and decodes markedly faster; a full quantitative comparison on the
+reference platforms of Section~\ref{sec:methodology}, following the same
+in-process methodology used for HTJ2K and JPEG-LS, is left to future work
+(Section~\ref{sec:discussion}). The more important reason JPEG~XL is not a
+baseline here is that it is not a feasible option for the browser-viewer
+workflow this paper targets: the only mature browser-side JPEG~XL decoder
+available at the time of writing, \texttt{@jsquash/jxl}, returns an 8-bit RGBA
+\texttt{ImageData} object and so cannot represent lossless 16-bit grayscale
+medical pixels; no current browser can decode JPEG~XL losslessly at 16-bit
+depth. The comparison is therefore not only a matter of ratio versus speed but
+of baseline feasibility for a client-side, 16-bit lossless viewer. Newer
+learned lossless codecs, such as L3C~\cite{mentzer2019l3c} and
+SReC~\cite{cao2020srec}, and other autoregressive or hierarchical
+range-coding approaches, can reach still better ratios, but depend on
+neural-network runtimes and decode far more slowly, which makes them
+impractical for real-time web viewing; they are excluded from the
+quantitative comparison for the same reason.
+
+These are the codecs MIC is measured against. The goal is not to outperform
+them on every metric, but to explore a \textbf{simpler, residual-domain design}
+aimed at high-bit-depth images, with strong speed and easy deployment.
+
+\textbf{Entropy coding background.} Asymmetric Numeral Systems
+(ANS)~\cite{duda2009,duda2013} is a family of entropy coders that replaces
+arithmetic coding's interval math with simple integer state updates. FSE is a
+fast, table-driven version of ANS~\cite{fse} made popular by
+Zstandard~\cite{rfc8878}. Coding directly over a large, multi-symbol alphabet
+rather than a byte stream is not itself new; for example, Mahapatra and Singh
+built a multi-alphabet arithmetic coder in FPGA hardware~\cite{mahapatra2007}.
+The limitation is that the widely deployed software implementations are tuned
+for byte streams (Zstandard caps FSE at 4,096 symbols).
+
+\textbf{Parallel ANS.} Prior work has shown that ANS decoders run faster when
+several independent streams are decoded at once (Giesen on interleaved
+coders~\cite{giesen2014}; later work scaling this to many
+streams~\cite{lin2023} and to GPUs~\cite{weissenberger2019}). MIC does not claim
+to invent ANS or interleaving; it applies these known ideas inside a
+16-bit-native medical codec with a specific large-alphabet design.
+
+Table~\ref{tab:positioning} places MIC against the prior work across five
+dimensions relevant to medical image compression.
+
+\begin{table}[htbp]
+\centering
+\caption{Feature comparison of MIC with related codecs and entropy coders.
+``16-bit residual as one symbol'' concerns the entropy stage only: JPEG-LS and
+HTJ2K handle 16-bit images, but their entropy stages (Golomb--Rice, bit-plane
+coding) do not treat the predicted residual as a single 16-bit symbol.
+Source-line counts are order-of-magnitude context.}
+\label{tab:positioning}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{p{2.7cm}ccccc}
+\toprule
+Feature & JPEG-LS & HTJ2K & Zstd & rANS & MIC \\
+\midrule
+Lossless medical & Yes & Yes & General & General & Yes \\
+16-bit residual as one symbol & No & No & No & Configurable & Yes \\
+Large alphabet (symbol cap) & N/A & N/A & 4,096 & Configurable & 65,535 \\
+Adaptive table sizing & No & No & No & No & Yes \\
+Multi-state ILP & No & No & No & Yes & Yes \\
+Strip-parallel decode & No & Yes & Yes & Yes & Yes \\
+Browser decoder & Via WASM port & Via WASM port & Partial & No & Purpose-built JS \\
+Source lines & 5k & 20k & N/A & N/A & 1.1k \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+% ============================================================
+\section{How MIC Works}
+\label{sec:pipeline}
+
+The pipeline is three stages, each simple enough to decode in one
+straight-line pass with very few branches: raw 16-bit pixels go through
+spatial prediction (subtract a guess based on neighbors), then 16-bit
+run-length encoding (collapse repeated values), then FSE entropy coding
+(remove the remaining redundancy), producing compressed bytes.
+
+\subsection{Spatial prediction}
+
+For each pixel, MIC predicts its value as the \textbf{average of the pixel
+above and the pixel to the left}, then stores only the difference (the
+residual). Pixels on the top edge or left edge use whatever single neighbor is
+available; the very first pixel is stored as-is. Division rounds down, and
+the decoder repeats the exact same arithmetic so reconstruction is exact.
+
+This predictor was chosen because it is inexpensive, has almost no branches on
+the decode side, and works well on medical images.
+
+\paragraph{Other predictors we evaluated} We compared four predictors
+(left-only, average, Paeth from PNG~\cite{png}, and MED from JPEG-LS~\cite{loco1})
+through the full pipeline. MED gave the best ratio (about 2.4\% better than
+average) but decoded 1.5--2$\times$ slower because of its three-way branch and a
+diagonal dependency that blocks the fast branch-free loop. The average
+predictor was preferred for its consistency and speed, so it is the default.
+Table~\ref{tab:predictor-summary} summarizes the comparison.
+
+\begin{table}[htbp]
+\centering
+\caption{Predictor ablation summary: geometric means and win counts across all
+39 images.}
+\label{tab:predictor-summary}
+\begin{tabular}{lrrr}
+\toprule
+Predictor & Geo.\ Mean & Wins & Avg$\to$X \\
+\midrule
+Left-only & 3.22$\times$ & 2/39 & $-$4.4\% \\
+Average (MIC) & 3.36$\times$ & 11/39 & baseline \\
+Paeth & 3.39$\times$ & 0/39 & $+$0.8\% \\
+MED (JPEG-LS) & 3.44$\times$ & 26/39 & $+$2.4\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Handling large jumps: overflow coding}
+
+Most residuals are small, but occasionally a pixel jumps far from its
+prediction. Rather than widen the whole stream to 32 bits to handle rare large
+values, MIC reserves one special code as a \textbf{delimiter}: small, in-range
+residuals are stored directly as 16-bit codes (with zero mapped to a fixed
+midpoint value); a large, out-of-range residual is stored as the delimiter
+followed by the raw pixel value.
+
+On decode, the reader checks each value: if it is the delimiter, the next
+value is a raw pixel; otherwise it is a normal residual. The ranges are
+designed not to overlap, so there is never any ambiguity. In normal 8--16-bit
+clinical data the overflow path is rare; it exists to guarantee correctness,
+not for the common case. Table~\ref{tab:overflow-map} shows the mapping for a
+representative bit depth.
+
+\begin{table}[htbp]
+\centering
+\caption{Overflow coding example for $d=12$ bits
+(\texttt{deltaThreshold}$=2047$, delimiter $D=4095$).}
+\label{tab:overflow-map}
+\scriptsize
+\begin{tabular}{lll}
+\toprule
+Residual $r$ & Emitted code(s) & Notes \\
+\midrule
+$-2$ & $2045$ & in-range \\
+$-1$ & $2046$ & in-range \\
+$0$  & $2047$ & in-range (= threshold) \\
+$+1$ & $2048$ & in-range \\
+$+2$ & $2049$ & in-range \\
+$\pm 2047$ & $4095$, raw pixel & overflow \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{16-bit run-length encoding (RLE)}
+
+The residual stream is turned into two kinds of runs: \textbf{same runs} (a
+count plus one repeated value, used when a value appears at least three times
+in a row) and \textbf{literal runs} (a count followed by that many values
+copied verbatim; the values need not be distinct). A single header number tells
+the two apart using a midpoint trick: small header values mean ``same run of
+this length,'' large ones mean ``literal run.'' The longest single run is
+${\sim}32{,}767$ symbols; longer stretches are split across several headers
+automatically.
+
+\textbf{Why 16-bit RLE matters.} Suppose 1,000 identical 16-bit residuals
+appear in a row. MIC encodes that as just two numbers: a count and the value.
+A \emph{byte}-oriented RLE sees the high and low bytes interleaved, so no
+single byte repeats 1,000 times, so it is forced into two interleaved runs or
+falls back to literals. Working at 16 bits captures the repetition that
+byte-splitting hides.
+
+\textbf{Fast decode.} Same runs (often 80\% of all runs on smooth images) are
+fast-pathed: the decoder just hands back the cached value and decrements a
+counter, without touching the compressed data at all.
+
+\subsection{The entropy coder (FSE) for large alphabets}
+
+\textbf{FSE in one paragraph.} FSE keeps a single integer ``state.'' To decode
+one symbol, it looks up the current state in a table; the entry tells it which
+symbol to output, how many bits to read next, and how to compute the next
+state. So each symbol costs \textbf{one table lookup, one bit read, and one
+addition}---no multiplies or divides. (Encoding runs the symbols in reverse
+and builds the bitstream backwards; decoding reads forwards. That reversal is
+inherent to how ANS works.)
+
+MIC extends FSE to handle up to \textbf{65,535 symbols} instead of Zstandard's
+4,096, because high-bit-depth residuals genuinely require a large alphabet. It
+also \textbf{sizes its tables to the data}: an 8-bit image stored in 16-bit
+containers (common for MR) shrinks the working tables from ${\sim}512$\,KB down
+to about 2\,KB, which keeps everything in fast cache.
+
+\textbf{Picking the table size automatically.} FSE has a ``tableLog''
+parameter that sets the size of the probability table: the table has
+$2^{\textit{tableLog}}$ entries, so each increment of tableLog doubles it.
+A larger table represents each symbol's probability at finer granularity, which
+can improve the compression ratio, but it uses more memory and takes longer to
+build, and on a small or low-entropy image the extra precision is wasted. MIC
+sets tableLog from
+two measurements of the post-prediction symbol stream that the entropy stage is
+about to encode:
+\begin{itemize}
+  \item the \textbf{alphabet size} (written $\beta$): the number of distinct
+  symbol values that actually occur in the stream; and
+  \item the \textbf{symbol density} (written $C_r$): the average amount of data
+  backing each symbol, computed as the total number of symbols divided by the
+  alphabet size $\beta$.
+\end{itemize}
+MIC uses the larger table (tableLog~12 instead of the default~11) only when
+\emph{both} quantities are high enough, specifically more than 128 distinct
+symbols ($\beta > 128$) and more than 32 symbols of data per distinct value
+($C_r > 32$). The intuition is that a finer table pays off only when the
+alphabet is genuinely large \emph{and} each of its symbols is observed often
+enough to estimate the extra probabilities reliably; a large alphabet with
+little data per symbol ($C_r$ small) would instead produce noisy frequency
+estimates and waste header space. On the test set this rule turned on the
+larger table for exactly the nine images that benefit (1--10\% better ratio),
+with no effect on decode speed.
+Table~\ref{tab:tablelog-ablation} shows the ablation across selected images.
+
+\begin{table}[htbp]
+\centering
+\caption{TableLog ablation: forced TL=11/12/13 vs.\ adaptive selection
+(selected images, ARM64 reference platform).}
+\label{tab:tablelog-ablation}
+\scriptsize
+\begin{tabular}{lrrrr}
+\toprule
+Image & TL=11 & TL=12 & TL=13 & Adaptive \\
+\midrule
+CR  & 3.47$\times$ & 3.63$\times$ & 3.69$\times$ & 3.69$\times$ \\
+MG1 & 8.00$\times$ & 8.57$\times$ & 8.79$\times$ & 8.79$\times$ \\
+MG2 & 7.98$\times$ & 8.55$\times$ & 8.77$\times$ & 8.77$\times$ \\
+MR2 & 3.14$\times$ & 3.24$\times$ & 3.28$\times$ & 3.28$\times$ \\
+RG2 & 3.85$\times$ & 4.12$\times$ & 4.23$\times$ & 4.23$\times$ \\
+RG3 & 5.64$\times$ & 5.95$\times$ & 6.08$\times$ & 6.08$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Faster Decoding: Multi-State Decoding}
+\label{sec:multistate}
+
+\subsection{The bottleneck}
+
+A standard single-state ANS decoder has an inherent limitation: each symbol
+depends on the one before it. To decode symbol $N$ the decoder needs the state
+produced by symbol $N-1$, so the work cannot start early. With a table lookup
+taking roughly 4--5 CPU cycles, the loop is limited to about one symbol every
+few cycles, even though modern CPUs have 4--6 execution ports that remain
+largely idle. A single decode chain uses only one of them, leaving
+${\sim}75$--83\% of the CPU's capacity unused.
+
+\subsection{The approach}
+
+MIC runs \textbf{several independent decoders at once} on interleaved
+positions. With 8 chains, chain 0 handles positions $0, 8, 16, \ldots$; chain 1
+handles $1, 9, 17, \ldots$; and so on. The chains share nothing during
+decoding, each has its own state and its own stream of lookups, so the CPU's
+out-of-order engine can keep all of them in flight simultaneously.
+
+On the encoder side, the symbols are split into $N$ interleaved groups, each
+compressed independently, and the resulting streams are concatenated. They
+all share one decode table, and each chain's starting state is recorded in
+the header. The decoder just writes each chain's output back to its
+positions.
+
+\subsection{Measured speedup}
+
+In theory, $N$ chains could be up to $N\times$ faster. In practice the speedup
+is smaller because the chains share some bookkeeping (refilling the bit
+reader), the unrolled loop puts pressure on the instruction cache, and reading
+the compressed data has its own bandwidth limit~\cite{williams2009}. Measured
+on the FSE stage alone, \textbf{4 states} give $+$36\% on ARM64 and $+$12\% on
+AMD64 (relative to single state), and \textbf{8 states} a further $+$5\% on
+ARM64 and $+$1\% on AMD64, with \textbf{no change to the compressed file}.
+ARM64 continues to improve as chains double; AMD64 flattens out earlier because
+its core already extracts substantial parallelism from a single chain.
+Table~\ref{tab:latency} shows the simple latency model against the measured
+ARM64 speedup.
+
+\begin{table}[htbp]
+\centering
+\caption{Multi-state decoder latency model and empirical speedup.}
+\label{tab:latency}
+\begin{tabular}{clrr}
+\toprule
+States ($k$) & Amortized latency & Theoretical & Empirical (ARM64) \\
+\midrule
+1 & $L$ cy/sym & 1.0$\times$ & 1.0$\times$ \\
+2 & $L/2$ cy/sym & 2.0$\times$ & 1.3$\times$ \\
+4 & $L/4$ cy/sym & 4.0$\times$ & 1.5$\times$ \\
+8 & $L/8$ cy/sym & 8.0$\times$ & 1.6$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The decoder signals its mode with a short magic header (a reserved byte
+value that cannot be a valid single-state setting), so single-, two-, four-,
+and eight-state files all coexist without confusion. On AMD64 and ARM64 the
+inner loop uses each architecture's native variable-shift instructions; other
+platforms get a pure-Go fallback. Table~\ref{tab:format} summarises the
+on-disk layout of a single-frame stream.
+
+\begin{table}[htbp]
+\centering
+\caption{Single-frame MIC bitstream layout. All multi-byte fields are
+little-endian. \emph{States} $k$ is the number of interleaved FSE chains
+($k \in \{1,2,4,8\}$).}
+\label{tab:format}
+\scriptsize
+\begin{tabular}{p{2.4cm}rp{4.4cm}}
+\toprule
+Field & Size & Meaning \\
+\midrule
+Magic / mode byte & 1 B & Single-state: encodes \texttt{tableLog} (value 5--17). Multi-state: \texttt{0xFF}. \\
+Multi-state tag & 1 B & For multi-state streams, one of \texttt{0x02}, \texttt{0x04}, \texttt{0x84} indicating $k=2$, 4, or 8. \\
+Symbol count & 4 B & Number of decoded RLE symbols. \\
+TableLog & 1 B & Decode-table size: $2^{\textit{tableLog}}$ entries (multi-state path only; the single-state path overloads byte~0). \\
+Normalized counts & variable & FSE normalised symbol frequencies, serialised with the standard variable-length encoding. \\
+Per-chain initial states & $k \times 2$ B & Starting state for each FSE chain. \\
+Per-chain stream lengths & $k \times 4$ B & Compressed-stream length per chain (omitted when $k=1$). \\
+Per-chain compressed streams & variable & Concatenated chain payloads. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Evaluation Methodology}
+\label{sec:methodology}
+
+\textbf{Dataset.} 39 de-identified DICOM images across eleven modalities (CT,
+MR, CR, X-ray, mammography, digital radiography, nuclear medicine, PET,
+fluoroscopy, secondary capture, and tomosynthesis), drawn from the public NEMA
+WG-04 sample sets~\cite{nema_wg04}, the NEMA 1997 CD, a public
+breast-tomosynthesis case~\cite{clunie_tomo}, and additional grayscale slices
+from public GDCM and TCIA collections. Table~\ref{tab:dataset} lists the images.
+
+\begin{table}[htbp]
+\centering
+\caption{Test dataset: 39 clinical DICOM images spanning eleven modalities.}
+\label{tab:dataset}
+\scriptsize
+\begin{tabular}{llrr}
+\toprule
+Image & Modality & Dimensions & Raw (MB) \\
+\midrule
+MR   & Brain MRI      & $256{\times}256$   & 0.13 \\
+CT   & CT scan        & $512{\times}512$   & 0.50 \\
+CR   & Comp.\ radiography & $2140{\times}1760$ & 7.18 \\
+XR   & X-ray          & $2048{\times}2577$ & 10.1 \\
+MG1  & Mammography    & $2457{\times}1996$ & 9.35 \\
+MG2  & Mammography    & $2457{\times}1996$ & 9.35 \\
+MG3  & Mammography    & $4774{\times}3064$ & 27.3 \\
+MG4  & Mammography    & $4096{\times}3328$ & 26.0 \\
+CT1  & CT scan        & $512{\times}512$   & 0.50 \\
+CT2  & CT scan        & $512{\times}512$   & 0.50 \\
+MG-N & Mammography    & $3064{\times}4664$ & 27.3 \\
+MR1  & Brain MRI      & $512{\times}512$   & 0.50 \\
+MR2  & Brain MRI      & $1024{\times}1024$ & 2.00 \\
+MR3  & Brain MRI      & $512{\times}512$   & 0.50 \\
+MR4  & Brain MRI      & $512{\times}512$   & 0.50 \\
+NM1  & Nuclear med.   & $256{\times}1024$  & 0.50 \\
+RG1  & Radiography    & $1841{\times}1955$ & 6.86 \\
+RG2  & Radiography    & $1760{\times}2140$ & 7.18 \\
+RG3  & Radiography    & $1760{\times}1760$ & 5.91 \\
+SC1  & Sec.~capture   & $2048{\times}2487$ & 9.71 \\
+XA1  & Fluoroscopy    & $1024{\times}1024$ & 2.00 \\
+CT\_BRAIN    & CT scan             & $512{\times}512$   & 0.50 \\
+CT\_ANKLE    & CT scan             & $512{\times}512$   & 0.50 \\
+CT\_ORT      & CT scan             & $512{\times}512$   & 0.50 \\
+CT\_CHEST    & CT scan             & $400{\times}512$   & 0.39 \\
+MR\_HEAD     & Brain MRI           & $256{\times}256$   & 0.13 \\
+MR\_INTERA   & Brain MRI           & $1024{\times}1024$ & 2.00 \\
+DX\_HAND     & Digital radiography & $1480{\times}1410$ & 3.98 \\
+DX\_CHEST    & Digital radiography & $1416{\times}1420$ & 3.84 \\
+CR\_THORAX   & Comp.\ radiography  & $2076{\times}1876$ & 7.43 \\
+PET1         & PET                 & $256{\times}256$   & 0.13 \\
+PET2         & PET                 & $256{\times}256$   & 0.13 \\
+CT\_LUNG     & CT scan             & $512{\times}512$   & 0.50 \\
+CT\_PANCREAS & CT scan             & $512{\times}512$   & 0.50 \\
+MR\_BRAIN    & Brain MRI           & $320{\times}256$   & 0.16 \\
+MR\_BREAST   & Breast MRI          & $256{\times}256$   & 0.13 \\
+MR\_PROSTATE & Prostate MRI        & $320{\times}320$   & 0.20 \\
+PET\_PSMA    & PET                 & $200{\times}200$   & 0.08 \\
+PET\_LUNG    & PET                 & $200{\times}200$   & 0.08 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Baselines.} HTJ2K (via OpenJPH~\cite{openjph}), JPEG-LS (via
+CharLS~\cite{charls}), and Delta + Zstandard~\cite{rfc8878} at its maximum
+level. All were called in-process (no file or subprocess overhead) for a fair
+speed comparison.
+
+\textbf{Metrics.} Compression ratio (uncompressed $\div$ compressed), and
+decode and encode throughput in MB/s of uncompressed pixels.
+
+\textbf{Platforms.} Two reference machines: an ARM64 (Apple M4 Pro) and an
+AMD64 (AWS Intel Xeon 6). Go code used the standard compiler; C components were
+built with \texttt{-O3}. Each benchmark ran the full image 10 times;
+run-to-run variance stayed under 2\% on ARM64 and 5\% on AMD64.
+
+\textbf{The ``MIC'' decoder column.} The single ``MIC'' column in the result
+tables always refers to the fastest available C decoder configuration on each
+platform, so that the comparison against the baselines is C-against-C rather
+than mixing a pure-Go decoder with optimized C libraries. Concretely, this is
+the eight-state decoder: eight independent FSE chains decoded in parallel by the
+out-of-order engine (Section~\ref{sec:multistate}), which is the fastest of the
+1/2/4/8-state configurations on both reference machines. The entropy stage is
+identical across platforms; what differs is the vector width applied to the two
+stages that follow it. On AMD64 the run-length expansion and the
+prediction-reversal (delta-inverse) passes are accelerated with AVX-512, which
+widens those memory-bound loops to process more elements per instruction; on
+ARM64 the same passes run with NEON-width or scalar code. This is purely a
+code-generation difference: both builds read the \emph{identical} compressed
+bytes and produce bit-identical output, so a file encoded once decodes correctly
+on either platform, and the only thing the wider vectors change is decode speed,
+not the bitstream. The same eight-state stream is also what the strip-parallel
+mode (Section~\ref{sec:results}) and the JavaScript decoder consume; they reuse
+this decoder rather than defining a separate format.
+
+\textbf{Browser decoder.} A 20\,KB pure-JavaScript ES module (zero npm
+dependencies) plus a 2.5\,MB Go WebAssembly build. The JS decoder
+auto-detects 1/2/4/8-state streams and was benchmarked under Node.js on the
+ARM64 machine.
+
+% ============================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Compression ratio}
+
+JPEG-LS produces the smallest files on nearly every image (37 of 39); its
+context-adaptive predictor is difficult to beat on pure ratio. MIC, however, is
+not optimizing ratio alone; it targets the best balance of ratio, speed, and
+simplicity. Across the dataset MIC reaches a \textbf{3.36}$\times$
+geometric-mean ratio: about 88\% of JPEG-LS (3.84$\times$) and within about 2\%
+of HTJ2K (3.42$\times$), while decoding faster than both. Mammography compresses
+best (up to 8.79$\times$) because its smooth tissue produces long near-zero
+runs, and studies with large uniform backgrounds reach the highest single-image
+ratios (PET\_PSMA at 10.12$\times$, CT\_ANKLE at 9.48$\times$).
+Table~\ref{tab:ratios} gives the per-image ratios for all variants.
+
+\begin{table*}[t]
+\centering
+\caption{Lossless compression ratios: all codec variants, 39 images. Bold =
+best ratio per row.}
+\label{tab:ratios}
+\scriptsize
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Image & Raw (MB) & $\Delta$+Zstd-19 & MIC & Wavelet & PICS-4 & PICS-8 & HTJ2K & JPEG-LS \\
+\midrule
+MR             & 0.13 & 1.95$\times$ & 2.35$\times$ & 2.38$\times$ & 2.28$\times$ & 2.21$\times$ & 2.38$\times$ & \textbf{2.52$\times$} \\
+CT             & 0.50 & 2.05$\times$ & 2.24$\times$ & 1.67$\times$ & 2.15$\times$ & 1.96$\times$ & 1.77$\times$ & \textbf{2.68$\times$} \\
+CR             & 7.18 & 3.24$\times$ & 3.69$\times$ & 3.81$\times$ & 3.70$\times$ & 3.71$\times$ & 3.77$\times$ & \textbf{3.96$\times$} \\
+XR             & 10.1 & 1.43$\times$ & 1.74$\times$ & \textbf{1.76$\times$} & 1.75$\times$ & 1.75$\times$ & 1.67$\times$ & \textbf{1.76$\times$} \\
+MG1            & 9.35 & 7.20$\times$ & 8.79$\times$ & 8.66$\times$ & 8.84$\times$ & 8.87$\times$ & 8.25$\times$ & \textbf{8.91$\times$} \\
+MG2            & 9.35 & 7.21$\times$ & 8.77$\times$ & 8.65$\times$ & 8.83$\times$ & 8.85$\times$ & 8.24$\times$ & \textbf{8.90$\times$} \\
+MG3            & 27.3 & 2.09$\times$ & 2.24$\times$ & 2.31$\times$ & 2.31$\times$ & 2.33$\times$ & 2.22$\times$ & \textbf{2.38$\times$} \\
+MG4            & 26.0 & 3.10$\times$ & 3.47$\times$ & 3.59$\times$ & 3.58$\times$ & 3.62$\times$ & 3.51$\times$ & \textbf{3.71$\times$} \\
+CT1            & 0.50 & 2.47$\times$ & 2.79$\times$ & 2.48$\times$ & 2.54$\times$ & 2.29$\times$ & 2.70$\times$ & \textbf{3.19$\times$} \\
+CT2            & 0.50 & 3.24$\times$ & 3.48$\times$ & 2.87$\times$ & 3.11$\times$ & 2.72$\times$ & 3.29$\times$ & \textbf{4.54$\times$} \\
+MG-N           & 27.3 & 2.04$\times$ & 2.24$\times$ & 2.32$\times$ & 2.31$\times$ & 2.34$\times$ & 2.23$\times$ & \textbf{2.38$\times$} \\
+MR1            & 0.50 & 1.79$\times$ & 2.09$\times$ & 2.14$\times$ & 2.10$\times$ & 2.08$\times$ & 2.12$\times$ & \textbf{2.30$\times$} \\
+MR2            & 2.00 & 2.77$\times$ & 3.28$\times$ & 3.34$\times$ & 3.31$\times$ & 3.31$\times$ & 3.35$\times$ & \textbf{3.52$\times$} \\
+MR3            & 0.50 & 3.47$\times$ & 3.92$\times$ & 4.09$\times$ & 3.89$\times$ & 3.83$\times$ & 4.33$\times$ & \textbf{4.51$\times$} \\
+MR4            & 0.50 & 3.58$\times$ & 4.12$\times$ & 4.18$\times$ & 4.09$\times$ & 4.03$\times$ & 4.21$\times$ & \textbf{4.49$\times$} \\
+NM1            & 0.50 & 4.88$\times$ & 5.15$\times$ & 5.01$\times$ & 5.25$\times$ & 5.28$\times$ & 5.76$\times$ & \textbf{6.28$\times$} \\
+RG1            & 6.86 & 1.45$\times$ & 1.70$\times$ & 1.70$\times$ & 1.70$\times$ & 1.69$\times$ & 1.63$\times$ & \textbf{1.72$\times$} \\
+RG2            & 7.18 & 3.69$\times$ & 4.23$\times$ & 4.32$\times$ & 4.28$\times$ & 4.30$\times$ & 4.32$\times$ & \textbf{4.51$\times$} \\
+RG3            & 5.91 & 5.46$\times$ & 6.08$\times$ & 6.82$\times$ & 6.11$\times$ & 6.12$\times$ & 6.99$\times$ & \textbf{7.31$\times$} \\
+SC1            & 9.71 & 3.46$\times$ & 3.71$\times$ & 3.70$\times$ & 3.73$\times$ & 3.73$\times$ & 3.85$\times$ & \textbf{4.73$\times$} \\
+XA1            & 2.00 & 4.37$\times$ & 5.01$\times$ & 4.94$\times$ & 5.04$\times$ & 5.03$\times$ & 4.88$\times$ & \textbf{5.39$\times$} \\
+CT\_BRAIN      & 0.50 & 3.08$\times$ & 3.06$\times$ & 2.89$\times$ & 2.77$\times$ & 2.47$\times$ & 3.39$\times$ & \textbf{4.28$\times$} \\
+CT\_ANKLE      & 0.50 & 9.30$\times$ & \textbf{9.48$\times$} & 5.02$\times$ & 9.30$\times$ & 9.14$\times$ & 4.97$\times$ & 6.87$\times$ \\
+CT\_ORT        & 0.50 & 2.36$\times$ & 2.68$\times$ & 2.38$\times$ & 2.51$\times$ & 2.26$\times$ & 2.56$\times$ & \textbf{3.00$\times$} \\
+CT\_CHEST      & 0.39 & 2.46$\times$ & 2.82$\times$ & 2.10$\times$ & 2.52$\times$ & 2.21$\times$ & 2.23$\times$ & \textbf{3.22$\times$} \\
+MR\_HEAD       & 0.13 & 2.11$\times$ & 2.61$\times$ & 2.65$\times$ & 2.57$\times$ & 2.53$\times$ & 2.67$\times$ & \textbf{2.86$\times$} \\
+MR\_INTERA     & 2.00 & 4.71$\times$ & 3.68$\times$ & 4.05$\times$ & 3.75$\times$ & 3.78$\times$ & 5.04$\times$ & \textbf{5.08$\times$} \\
+DX\_HAND       & 3.98 & 1.99$\times$ & 2.24$\times$ & 2.35$\times$ & 2.26$\times$ & 2.25$\times$ & 2.37$\times$ & \textbf{2.48$\times$} \\
+DX\_CHEST      & 3.84 & 1.43$\times$ & 1.66$\times$ & \textbf{1.82$\times$} & 1.65$\times$ & 1.63$\times$ & 1.63$\times$ & 1.70$\times$ \\
+CR\_THORAX     & 7.43 & 1.61$\times$ & 1.82$\times$ & 1.81$\times$ & 1.84$\times$ & 1.83$\times$ & 1.81$\times$ & \textbf{1.90$\times$} \\
+PET1           & 0.13 & 2.37$\times$ & 2.74$\times$ & 2.81$\times$ & 2.64$\times$ & 2.52$\times$ & 3.02$\times$ & \textbf{3.21$\times$} \\
+PET2           & 0.13 & 3.39$\times$ & 3.39$\times$ & 3.48$\times$ & 3.16$\times$ & 2.58$\times$ & 4.37$\times$ & \textbf{4.74$\times$} \\
+CT\_LUNG       & 0.50 & 2.40$\times$ & 2.73$\times$ & 2.45$\times$ & 2.50$\times$ & 2.25$\times$ & 2.67$\times$ & \textbf{3.15$\times$} \\
+CT\_PANCREAS   & 0.50 & 2.09$\times$ & 2.36$\times$ & 1.76$\times$ & 2.18$\times$ & 1.98$\times$ & 1.85$\times$ & \textbf{2.70$\times$} \\
+MR\_BRAIN      & 0.16 & 6.17$\times$ & 7.27$\times$ & 6.75$\times$ & 7.31$\times$ & 7.24$\times$ & 7.62$\times$ & \textbf{8.46$\times$} \\
+MR\_BREAST     & 0.13 & 3.31$\times$ & 4.01$\times$ & 3.94$\times$ & 4.00$\times$ & 3.91$\times$ & 4.10$\times$ & \textbf{4.48$\times$} \\
+MR\_PROSTATE   & 0.20 & 2.04$\times$ & 2.30$\times$ & 2.34$\times$ & 2.28$\times$ & 2.26$\times$ & 2.49$\times$ & \textbf{2.65$\times$} \\
+PET\_PSMA      & 0.08 & 11.88$\times$ & 10.12$\times$ & 7.67$\times$ & 1.20$\times$ & 1.18$\times$ & 13.91$\times$ & \textbf{15.78$\times$} \\
+PET\_LUNG      & 0.08 & 4.56$\times$ & 2.97$\times$ & 2.97$\times$ & 1.00$\times$ & 1.03$\times$ & 5.21$\times$ & \textbf{5.62$\times$} \\
+\midrule
+\textbf{Geomean} & --- & \textbf{3.06$\times$} & \textbf{3.36$\times$} & \textbf{3.21$\times$} & \textbf{3.04$\times$} & \textbf{2.95$\times$} & \textbf{3.42$\times$} & \textbf{3.84$\times$} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Encoding speed}
+
+MIC encodes faster than the others on most images, on both platforms,
+because its encoder is a single pass (predict, run-length, table-driven
+entropy code) while HTJ2K and JPEG-LS do more work per pixel. On
+\textbf{ARM64}, MIC is fastest on 38 of 39 images: roughly 1.0--3.3$\times$
+HTJ2K, 1.0--7.1$\times$ JPEG-LS, and 30--320$\times$ Delta + Zstandard (whose
+max-level LZ77 search accounts for its low throughput); HTJ2K edges ahead only
+on the tiny PET\_LUNG study. On \textbf{AMD64}, MIC is fastest on 32 of 39;
+HTJ2K leads on the two largest mammography images, one radiography image, and
+four of the smaller new-corpus studies, because the AMD64 baselines are
+themselves heavily vectorized and per-image table-build overhead weighs more on
+tiny images.
+Table~\ref{tab:enc} gives the per-image encoding throughput.
+
+\begin{table*}[htbp]
+\centering
+\caption{Single-threaded encoding throughput (MB/s). MIC is the
+eight-state C encoder. Bold marks the fastest codec per row on each
+platform.}
+\label{tab:enc}
+\scriptsize
+\begin{tabular}{l|rrrr|rrrr}
+\toprule
+ & \multicolumn{4}{c|}{ARM64} & \multicolumn{4}{c}{AMD64} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
+\midrule
+MR             & \textbf{457} & 7 & 236 & 91 & \textbf{344} & 5 & 246 & 62 \\
+CT             & \textbf{476} & 7 & 183 & 126 & \textbf{280} & 5 & 207 & 97 \\
+CR             & \textbf{525} & 2 & 186 & 110 & \textbf{322} & 2 & 286 & 75 \\
+XR             & \textbf{661} & 3 & 229 & 113 & \textbf{400} & 4 & 256 & 84 \\
+MG1            & \textbf{1{,}057} & 11 & 414 & 277 & 532 & 8 & \textbf{632} & 211 \\
+MG2            & \textbf{1{,}047} & 12 & 407 & 284 & 552 & 8 & \textbf{629} & 209 \\
+MG3            & \textbf{639} & 2 & 211 & 132 & \textbf{352} & 2 & 245 & 104 \\
+MG4            & \textbf{883} & 5 & 342 & 196 & \textbf{457} & 6 & 408 & 151 \\
+CT1            & \textbf{615} & 9 & 243 & 176 & \textbf{321} & 7 & 271 & 125 \\
+CT2            & \textbf{536} & 7 & 204 & 172 & \textbf{285} & 5 & 271 & 124 \\
+MG-N           & \textbf{639} & 2 & 214 & 140 & \textbf{358} & 2 & 248 & 104 \\
+MR1            & \textbf{616} & 9 & 205 & 114 & \textbf{367} & 6 & 241 & 86 \\
+MR2            & \textbf{685} & 7 & 216 & 118 & \textbf{409} & 4 & 309 & 85 \\
+MR3            & \textbf{768} & 19 & 264 & 167 & \textbf{441} & 12 & 354 & 123 \\
+MR4            & \textbf{585} & 7 & 212 & 163 & \textbf{367} & 5 & 312 & 142 \\
+NM1            & \textbf{633} & 6 & 208 & 162 & \textbf{340} & 5 & 313 & 115 \\
+RG1            & \textbf{595} & 4 & 218 & 84 & \textbf{396} & 5 & 252 & 66 \\
+RG2            & \textbf{737} & 4 & 263 & 151 & \textbf{425} & 3 & 360 & 100 \\
+RG3            & \textbf{757} & 6 & 276 & 183 & 389 & 4 & \textbf{412} & 126 \\
+SC1            & \textbf{667} & 5 & 225 & 203 & \textbf{416} & 4 & 306 & 169 \\
+XA1            & \textbf{612} & 5 & 203 & 133 & \textbf{356} & 4 & 303 & 98 \\
+CT\_BRAIN      & \textbf{352} & 5 & 168 & 147 & 239 & 4 & \textbf{253} & 112 \\
+CT\_ANKLE      & \textbf{955} & 15 & 290 & 327 & \textbf{450} & 11 & 358 & 261 \\
+CT\_ORT        & \textbf{644} & 10 & 198 & 138 & \textbf{350} & 7 & 269 & 112 \\
+CT\_CHEST      & \textbf{463} & 6 & 177 & 133 & \textbf{267} & 4 & 234 & 100 \\
+MR\_HEAD       & \textbf{430} & 6 & 211 & 106 & \textbf{288} & 4 & 252 & 65 \\
+MR\_INTERA     & \textbf{415} & 4 & 180 & 115 & \textbf{269} & 3 & 268 & 89 \\
+DX\_HAND       & \textbf{587} & 4 & 218 & 102 & \textbf{378} & 3 & 261 & 65 \\
+DX\_CHEST      & \textbf{636} & 6 & 209 & 109 & \textbf{389} & 6 & 241 & 77 \\
+CR\_THORAX     & \textbf{585} & 4 & 226 & 91 & \textbf{397} & 4 & 261 & 68 \\
+PET1           & \textbf{479} & 7 & 240 & 129 & \textbf{295} & 5 & 252 & 111 \\
+PET2           & \textbf{550} & 6 & 236 & 145 & \textbf{269} & 4 & 256 & 103 \\
+CT\_LUNG       & \textbf{586} & 10 & 195 & 141 & \textbf{337} & 7 & 258 & 110 \\
+CT\_PANCREAS   & \textbf{454} & 7 & 193 & 130 & \textbf{292} & 5 & 240 & 98 \\
+MR\_BRAIN      & \textbf{607} & 7 & 229 & 191 & 338 & 6 & \textbf{351} & 141 \\
+MR\_BREAST     & \textbf{522} & 5 & 241 & 141 & \textbf{292} & 4 & 290 & 96 \\
+MR\_PROSTATE   & \textbf{465} & 8 & 195 & 97 & \textbf{313} & 6 & 250 & 66 \\
+PET\_PSMA      & \textbf{434} & 14 & 423 & 426 & 296 & 10 & \textbf{377} & 364 \\
+PET\_LUNG      & 232 & 6 & \textbf{245} & 235 & 144 & 5 & \textbf{260} & 167 \\
+\midrule
+\textbf{Geomean} & \textbf{582} & \textbf{6} & \textbf{231} & \textbf{148} & \textbf{343} & \textbf{5} & \textbf{293} & \textbf{110} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Decoding speed}
+
+Decoding is where MIC performs best. Its decoder is dominated by the compact
+FSE loop (one lookup, one bit read, one add) with no hard-to-predict branches.
+HTJ2K and JPEG-LS both have data-dependent branches that cause CPU
+mispredictions. Zstandard is the most comparable codec (same predictor, also
+uses FSE) but works on bytes, so it pays the 2$\times$ byte-splitting cost on
+wide data. On \textbf{ARM64}, MIC is fastest on all 39 images: roughly
+1.2--2.1$\times$ HTJ2K, 1.0--2.0$\times$ Zstandard, and 1.1--5.1$\times$
+JPEG-LS, with the largest margins on the smaller images. On \textbf{AMD64}, MIC
+is fastest on 36 of 39 images; on the three exceptions (CT\_BRAIN, MR\_INTERA,
+and the tiny PET\_LUNG study) in-process Zstandard is marginally faster. Across
+its wins MIC runs about 1.0--1.8$\times$ HTJ2K and 1.9--7.1$\times$ JPEG-LS, and
+stays within 0.7--1.8$\times$ of Zstandard.
+
+MIC therefore delivers both \textbf{a better ratio than Zstandard on most
+images} (34 of 39) and \textbf{faster decoding on nearly every image}, which
+reflects the 16-bit-native design. JPEG-LS retains about a 14\% ratio
+advantage, so the choice between them comes down to decode speed versus storage
+cost. Per-image numbers are in Table~\ref{tab:decomp}, and the entropy stage in
+isolation is in Table~\ref{tab:fse-combined}.
+
+\begin{table*}[htbp]
+\centering
+\caption{Single-threaded decompression throughput (MB/s). MIC is
+the eight-state C decoder (AVX-512 acceleration of the RLE and delta
+inverse stages on AMD64). Bold marks the fastest codec per row on
+each platform.}
+\label{tab:decomp}
+\scriptsize
+\begin{tabular}{l|rrrr|rrrr}
+\toprule
+ & \multicolumn{4}{c|}{ARM64} & \multicolumn{4}{c}{AMD64} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Image & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS & MIC & $\Delta$+Zstd & HTJ2K & JPEG-LS \\
+\midrule
+MR             & \textbf{649} & 389 & 328 & 137 & \textbf{614} & 360 & 453 & 91 \\
+CT             & \textbf{495} & 406 & 299 & 158 & \textbf{444} & 393 & 329 & 110 \\
+CR             & \textbf{580} & 527 & 316 & 181 & \textbf{570} & 479 & 445 & 124 \\
+XR             & \textbf{668} & 512 & 324 & 131 & \textbf{626} & 509 & 393 & 88 \\
+MG1            & \textbf{762} & 685 & 612 & 481 & \textbf{916} & 596 & 913 & 336 \\
+MG2            & \textbf{753} & 692 & 622 & 492 & \textbf{942} & 599 & 902 & 334 \\
+MG3            & \textbf{600} & 433 & 314 & 175 & \textbf{547} & 362 & 392 & 118 \\
+MG4            & \textbf{788} & 504 & 508 & 246 & \textbf{686} & 469 & 634 & 158 \\
+CT1            & \textbf{600} & 450 & 357 & 224 & \textbf{535} & 432 & 389 & 142 \\
+CT2            & \textbf{570} & 471 & 342 & 212 & \textbf{522} & 458 & 383 & 131 \\
+MG-N           & \textbf{600} & 408 & 289 & 180 & \textbf{549} & 357 & 398 & 118 \\
+MR1            & \textbf{734} & 365 & 342 & 149 & \textbf{586} & 381 & 392 & 93 \\
+MR2            & \textbf{700} & 445 & 363 & 211 & \textbf{682} & 460 & 486 & 131 \\
+MR3            & \textbf{839} & 523 & 432 & 289 & \textbf{742} & 497 & 520 & 192 \\
+MR4            & \textbf{692} & 466 & 326 & 220 & \textbf{664} & 496 & 433 & 152 \\
+NM1            & \textbf{778} & 499 & 384 & 260 & \textbf{597} & 515 & 485 & 171 \\
+RG1            & \textbf{469} & 383 & 318 & 123 & \textbf{547} & 340 & 363 & 80 \\
+RG2            & \textbf{652} & 510 & 383 & 225 & \textbf{716} & 503 & 544 & 154 \\
+RG3            & \textbf{685} & 642 & 432 & 294 & \textbf{719} & 564 & 641 & 195 \\
+SC1            & \textbf{699} & 511 & 366 & 263 & \textbf{673} & 483 & 457 & 184 \\
+XA1            & \textbf{662} & 501 & 346 & 244 & \textbf{670} & 541 & 501 & 165 \\
+CT\_BRAIN      & \textbf{528} & 466 & 326 & 190 & 420 & \textbf{477} & 354 & 122 \\
+CT\_ANKLE      & \textbf{853} & 587 & 452 & 426 & \textbf{774} & 562 & 537 & 282 \\
+CT\_ORT        & \textbf{538} & 442 & 348 & 190 & \textbf{565} & 430 & 384 & 124 \\
+CT\_CHEST      & \textbf{500} & 445 & 297 & 178 & \textbf{446} & 428 & 333 & 110 \\
+MR\_HEAD       & \textbf{595} & 372 & 280 & 167 & \textbf{679} & 371 & 406 & 100 \\
+MR\_INTERA     & \textbf{590} & 563 & 304 & 178 & 454 & \textbf{527} & 436 & 133 \\
+DX\_HAND       & \textbf{500} & 414 & 316 & 147 & \textbf{570} & 416 & 362 & 101 \\
+DX\_CHEST      & \textbf{476} & 352 & 307 & 121 & \textbf{547} & 349 & 358 & 83 \\
+CR\_THORAX     & \textbf{552} & 403 & 346 & 129 & \textbf{561} & 365 & 365 & 84 \\
+PET1           & \textbf{732} & 416 & 377 & 197 & \textbf{679} & 384 & 389 & 120 \\
+PET2           & \textbf{656} & 515 & 381 & 227 & \textbf{487} & 438 & 389 & 141 \\
+CT\_LUNG       & \textbf{522} & 316 & 348 & 189 & \textbf{534} & 420 & 383 & 122 \\
+CT\_PANCREAS   & \textbf{517} & 451 & 316 & 172 & \textbf{439} & 390 & 337 & 110 \\
+MR\_BRAIN      & \textbf{866} & 567 & 422 & 375 & \textbf{708} & 514 & 641 & 221 \\
+MR\_BREAST     & \textbf{640} & 545 & 350 & 221 & \textbf{759} & 449 & 510 & 156 \\
+MR\_PROSTATE   & \textbf{679} & 422 & 353 & 165 & \textbf{545} & 386 & 408 & 103 \\
+PET\_PSMA      & \textbf{759} & 678 & 475 & 684 & \textbf{747} & 655 & 539 & 395 \\
+PET\_LUNG      & \textbf{502} & 498 & 283 & 278 & 365 & \textbf{508} & 363 & 170 \\
+\midrule
+\textbf{Geomean} & \textbf{631} & \textbf{473} & \textbf{359} & \textbf{215} & \textbf{598} & \textbf{452} & \textbf{445} & \textbf{140} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{table}[htbp]
+\centering
+\caption{FSE decompression throughput (MB/s) for representative modalities,
+single-thread pure-Go decoder. Increasing the number of independent state
+chains exposes more instruction-level parallelism to the out-of-order
+engine. Per-image rows are ten representative modalities; both geometric
+means are over all 39 images.}
+\label{tab:fse-combined}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{ARM64 (MB/s)} & \multicolumn{3}{c}{AMD64 (MB/s)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Image & 1-st & 4-st & 8-st & 1-st & 4-st & 8-st \\
+\midrule
+MR       & 1,066 & 1,576 & 1,068 &   656 & 1,007 &   847 \\
+CT       & 1,001 & 1,549 & 2,142 &   972 & 1,034 & 1,362 \\
+CR       & 2,941 & 4,882 & 6,245 & 1,456 & 1,844 & 1,709 \\
+XR       & 3,597 & 6,081 & 6,030 & 1,745 & 2,341 & 2,014 \\
+MG1      & 3,558 & 4,865 & 4,885 & 2,216 & 1,487 & 1,975 \\
+MG-N     & 3,949 & 6,647 & 6,037 & 1,940 & 2,545 & 2,415 \\
+NM1      & 1,971 & 2,661 & 2,570 &   917 & 1,346 & 1,356 \\
+RG1      & 1,768 & 4,356 & 5,332 & 1,239 & 1,709 & 1,869 \\
+DX\_HAND & 2,120 & 3,163 & 4,816 & 1,245 & 1,833 & 1,520 \\
+PET1     & 1,105 & 1,252 & 1,530 &   575 &   763 &   616 \\
+\midrule
+\textbf{Geomean (39)} & \textbf{1,742} & \textbf{2,372} & \textbf{2,492} &
+\textbf{1,093} & \textbf{1,228} & \textbf{1,246} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Other MIC variants (for reference)}
+
+The main tables use one MIC column, but the codebase includes several variants
+that exist for different deployment needs rather than to compete on raw speed.
+The \textbf{pure Go} build runs the entire pipeline in Go with no C dependency,
+at roughly 40--60\% of the C decoder's speed; this is useful where C cannot be
+linked (mobile, WebAssembly, locked-down runtimes). The
+\textbf{1/2/4-state decoders} are the same C decoder with fewer chains; they
+serve as baselines for the multi-state comparison. \textbf{Wavelet-based MIC}
+replaces the predictor with a reversible 5/3 wavelet transform~\cite{legall1988}
+feeding the same back end; it is competitive on a few images but generally
+slower on this corpus, since smooth medical images do not reward the wavelet's
+additional cost. The eight-state C decoder is both the simplest and the fastest
+configuration on this dataset.
+
+\subsection{Multi-threaded decoding}
+
+MIC can also split an image into horizontal strips and decode them on
+separate threads. This scales nearly linearly up to four threads on both
+platforms and keeps scaling to eight threads on images above ${\sim}1$\,MB,
+hitting about \textbf{4.3\,GB/s} on the largest mammography images on ARM64.
+Small images do not benefit: thread setup costs more than it saves, and on the
+two 0.08\,MB PET images the strips fall back toward raw storage, so strip
+parallelism does not apply. We report this separately because the other codecs
+run single-threaded in our pipeline, so a direct comparison would not be fair.
+Table~\ref{tab:pics} gives the per-image strip-parallel numbers.
+
+\begin{table*}[htbp]
+\centering
+\caption{Multi-threaded decompression throughput (MB/s) for MIC's
+strip-parallel mode. The ``MIC'' column reproduces the single-threaded
+eight-state baseline from Table~\ref{tab:decomp} exactly; $N$-strip columns
+decode the same compressed bytes in $N$ parallel threads. Both ARM64 and AMD64
+columns cover all 39 images.}
+\label{tab:pics}
+\scriptsize
+\begin{tabular}{l|rrrr|rrrr}
+\toprule
+ & \multicolumn{4}{c|}{ARM64} & \multicolumn{4}{c}{AMD64} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Image & MIC & 2-strip & 4-strip & 8-strip & MIC & 2-strip & 4-strip & 8-strip \\
+\midrule
+MR                   & 649 & 698 & 939 & 1{,}033 & 614 & 281 & 369 & 291\,$^\dagger$ \\
+CT                   & 495 & 511 & 987 & 1{,}549 & 444 & 379 & 641 & 736 \\
+CR                   & 580 & 865 & 1{,}771 & 3{,}227 & 570 & 768 & 1{,}404 & 2{,}236 \\
+XR                   & 668 & 888 & 1{,}728 & 3{,}197 & 626 & 787 & 1{,}408 & 2{,}252 \\
+MG1                  & 762 & 1{,}415 & 2{,}403 & 4{,}342 & 916 & 1{,}330 & 1{,}924 & 3{,}575 \\
+MG2                  & 753 & 1{,}369 & 2{,}226 & 4{,}109 & 942 & 1{,}302 & 1{,}698 & 3{,}011 \\
+MG3                  & 600 & 934 & 1{,}763 & 3{,}158 & 547 & 868 & 1{,}597 & 2{,}781 \\
+MG4                  & 788 & 1{,}263 & 2{,}185 & 4{,}120 & 686 & 1{,}258 & 1{,}957 & 3{,}107 \\
+CT1                  & 600 & 779 & 1{,}178 & 1{,}639 & 535 & 477 & 743 & 797 \\
+CT2                  & 570 & 773 & 1{,}249 & 1{,}296 & 522 & 475 & 718 & 806 \\
+MG-N                 & 600 & 988 & 1{,}852 & 3{,}569 & 549 & 871 & 1{,}644 & 2{,}913 \\
+MR1                  & 734 & 931 & 1{,}375 & 1{,}898 & 586 & 517 & 729 & 827 \\
+MR2                  & 700 & 1{,}003 & 1{,}699 & 2{,}750 & 682 & 786 & 1{,}064 & 1{,}476 \\
+MR3                  & 839 & 919 & 1{,}381 & 2{,}035 & 742 & 627 & 861 & 853 \\
+MR4                  & 692 & 954 & 1{,}301 & 2{,}063 & 664 & 573 & 813 & 877 \\
+NM1                  & 778 & 964 & 1{,}410 & 1{,}868 & 597 & 561 & 777 & 771 \\
+RG1                  & 469 & 586 & 1{,}068 & 1{,}964 & 547 & 626 & 1{,}113 & 1{,}833 \\
+RG2                  & 652 & 1{,}095 & 1{,}887 & 3{,}269 & 716 & 922 & 1{,}523 & 2{,}494 \\
+RG3                  & 685 & 1{,}081 & 2{,}027 & 3{,}289 & 719 & 991 & 1{,}596 & 2{,}504 \\
+SC1                  & 699 & 1{,}171 & 2{,}005 & 3{,}174 & 673 & 1{,}042 & 1{,}690 & 2{,}598 \\
+XA1                  & 662 & 973 & 1{,}692 & 2{,}404 & 670 & 806 & 1{,}170 & 1{,}443 \\
+CT\_BRAIN            & 528 & 627 & 1{,}025 & 1{,}291 & 420 & 426 & 630 & 681 \\
+CT\_ANKLE            & 853 & 1{,}082 & 1{,}745 & 1{,}713 & 774 & 654 & 869 & 877 \\
+CT\_ORT              & 538 & 679 & 1{,}099 & 1{,}316 & 565 & 485 & 726 & 778 \\
+CT\_CHEST            & 500 & 622 & 1{,}042 & 1{,}354 & 446 & 409 & 633 & 691 \\
+MR\_HEAD             & 595 & 620 & 915 & 880 & 679 & 306 & 417 & 307 \\
+MR\_INTERA           & 590 & 910 & 1{,}575 & 2{,}405 & 454 & 618 & 940 & 1{,}329 \\
+DX\_HAND             & 500 & 605 & 1{,}113 & 2{,}051 & 570 & 619 & 1{,}133 & 1{,}697 \\
+DX\_CHEST            & 476 & 566 & 1{,}003 & 1{,}971 & 547 & 592 & 990 & 1{,}712 \\
+CR\_THORAX           & 552 & 588 & 1{,}128 & 1{,}733 & 561 & 624 & 1{,}141 & 1{,}937 \\
+PET1                 & 732 & 637 & 854 & 854 & 679 & 289 & 406 & 317 \\
+PET2                 & 656 & 669 & 776 & 923 & 487 & 341 & 356 & 320 \\
+CT\_LUNG             & 522 & 689 & 1{,}107 & 1{,}462 & 534 & 468 & 752 & 808 \\
+CT\_PANCREAS         & 517 & 506 & 1{,}018 & 1{,}316 & 439 & 390 & 652 & 688 \\
+MR\_BRAIN            & 866 & 815 & 999 & 1{,}143 & 708 & 435 & 490 & 448 \\
+MR\_BREAST           & 640 & 653 & 920 & 956 & 759 & 288 & 396 & 337 \\
+MR\_PROSTATE         & 679 & 742 & 1{,}093 & 1{,}279 & 545 & 321 & 507 & 455 \\
+PET\_PSMA$^\ddagger$ & 759 & 727 & -- & -- & 747 & 282 & -- & -- \\
+PET\_LUNG$^\ddagger$ & 502 & 359 & -- & -- & 365 & 208 & -- & -- \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+{\scriptsize $^\dagger$The 130\,KB MR image is too small to benefit from 8-way
+parallelism on AMD64: synchronization overhead exceeds the per-strip work, so
+4-strip is faster than 8-strip. $^\ddagger$On the two 0.08\,MB PET images,
+splitting into four or more strips drives the strip-compressed size to or above
+the single-stream size, so their 4- and 8-strip figures reflect near-raw
+copying rather than entropy decoding and are omitted.}
+\end{table*}
+
+Practical guidance: to decode many small images, use single-threaded MIC
+per request, which is already fast. To decode one large image on a multi-core
+machine, use strip-parallel mode with four to eight threads.
+
+\subsection{In the browser}
+
+The JavaScript decoder performs well. Notably, the \textbf{four-state}
+variant runs 6--21\% \emph{faster} than eight-state in JavaScript, even on the
+same hardware where eight states win in C. The reason is the JavaScript engine
+(V8): it can keep four independent chains busy but not eight, so the extra
+chains add overhead without shortening the critical path. The eight-state
+path still works in JavaScript (it lets one decoder accept C-encoded files
+without conversion), but four states is the best configuration for the
+browser.
+
+Concretely, a 9.35\,MB mammography image decodes in 17.1\,ms (547\,MB/s) using
+four-state strips across worker threads. That means a web DICOM viewer can pull
+a \texttt{.mic} file straight from object storage and decode it client-side,
+with no server doing compression or format conversion. (These numbers are from
+Node.js; full in-browser benchmarking is future work.)
+Tables~\ref{tab:js-perf} and~\ref{tab:pics-js} give the JS numbers.
+
+\begin{table}[htbp]
+\centering
+\caption{JavaScript decoder throughput on the ARM64 reference (Apple
+M4~Pro, Node.js v22.16), for the four-state and eight-state FSE
+variants. Median over 20 iterations after three warm-up runs.}
+\label{tab:js-perf}
+\begin{tabular}{lrrrrrr}
+\toprule
+ & & & \multicolumn{2}{c}{4-state} & \multicolumn{2}{c}{8-state} \\
+\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Image & Dimensions & Ratio & ms & MB/s & ms & MB/s \\
+\midrule
+MR\,$^\dagger$ & $256{\times}256$   & 2.35$\times$ &   2.9 &  43 &   2.7 &  46 \\
+CT  & $512{\times}512$   & 2.24$\times$ &  12.3 &  41 &  13.1 &  38 \\
+CR  & $2140{\times}1760$ & 3.69$\times$ & 137.2 &  52 & 165.5 &  43 \\
+MG1 & $2457{\times}1996$ & 8.79$\times$ &  70.4 & 133 &  80.0 & 117 \\
+MG3 & $4774{\times}3064$ & 2.29$\times$ & 560.8 &  50 & 607.1 &  46 \\
+DX\_HAND & $1480{\times}1410$ & 2.24$\times$ &  82.6 &  48 &  96.1 &  41 \\
+PET1 & $256{\times}256$   & 2.74$\times$ &   2.1 &  60 &   2.5 &  50 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+{\scriptsize $^\dagger$MR's 0.13\,MB image decodes in under 3\,ms, at the
+JavaScript timing floor; the four-state advantage seen on the larger images
+is within run-to-run noise here.}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{PICS parallel JavaScript decoder (\texttt{worker\_threads}) on
+the ARM64 reference, with four-state and eight-state FSE per strip.
+Worker count was swept over $\{1,2,4,8,14\}$; the best wall-time for
+each variant is reported.}
+\label{tab:pics-js}
+\begin{tabular}{lrrrrr}
+\toprule
+ & & \multicolumn{2}{c}{4-state strips} & \multicolumn{2}{c}{8-state strips} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Image & Strips &   ms & MB/s &   ms & MB/s \\
+\midrule
+MR  & 4 &   0.9 & 134 &   0.9 & 135 \\
+CT  & 4 &   4.1 & 123 &   4.5 & 112 \\
+CR  & 8 &  22.9 & 313 &  28.0 & 257 \\
+MG1 & 8 &  17.1 & 547 &  16.7 & 559 \\
+DX\_HAND & 8 &  17.1 & 233 &  17.8 & 224 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Reading the results together}
+
+Three observations tie the numbers together. First, MIC's \textbf{ratio
+advantage over Zstandard} (about 10\% in geometric mean, higher on 34 of 39
+images) comes mainly from working on 16-bit residuals directly instead of
+splitting them into bytes, and that same choice removes the per-byte branches
+that slow decoding. Second, on the largest mammography images on AMD64,
+\textbf{HTJ2K's block coder} regains the speed lead by amortizing its setup
+over many pixels; MIC stays within 0--20\% there.
+Third, \textbf{multi-state decoding} is what makes MIC's decoder competitive
+with HTJ2K's vectorized block coder, and it costs nothing in file size.
+
+\subsection{Clinical Workflow: Real-Time Multi-Frame Viewing}
+\label{sec:clinical-workflow}
+
+The primary use case motivating MIC is real-time, multi-frame DICOM study
+viewing in web-based Picture Archiving and Communication Systems (PACS)
+viewers: a radiologist scrolling through a tomosynthesis stack, a multi-slice
+CT series, or a cine loop must see each frame decoded and displayed without a
+perceptible stall. In that setting, decode speed has to be balanced against
+compression ratio rather than optimized for ratio alone, since a codec that
+produces smaller files but cannot sustain frame rate degrades the viewing
+experience regardless of its archival efficiency; that is a different
+objective from an archival codec whose files are written once and read
+rarely, where ratio dominates. Based on prior experience building clinical
+PACS viewer software, the practical bottleneck for multi-frame studies is
+sustaining 25--60 frames per second (FPS) of decoded pixels for smooth
+scrolling and cine playback.
+
+In-browser cine-playback measurements (headless Chromium, Apple M2~Max,
+seven multi-frame studies spanning cardiac cine MR, XA angiography,
+nuclear-medicine gated heart, enhanced CT, breast tomosynthesis, and CT axial
+series, using the multi-frame benchmark harness in the accompanying code's
+\texttt{web/} directory) confirm that MIC's parallel decode path meets this
+target across modalities. Single-threaded MIC-4state decodes cardiac cine MR
+at approximately 460\,FPS, XA angiography at approximately 140\,FPS, and a CT
+axial series at approximately 86\,FPS, all comfortably above the 60\,FPS
+ceiling of the target range. The heaviest case, breast tomosynthesis at
+native tile size (about 9.3\,MB per frame, comparable to a full mammography
+image), drops single-threaded throughput to approximately 17\,FPS; the
+strip-parallel decoder (Section~\ref{sec:results}) recovers approximately
+51\,FPS with eight strips, which falls inside the target range.
+Table~\ref{tab:cine} summarises these results.
+
+\begin{table}[htbp]
+\centering
+\caption{In-browser cine-playback throughput (headless Chromium, Apple
+M2~Max), MIC-4state single-threaded vs.\ strip-parallel decode.}
+\label{tab:cine}
+\scriptsize
+\begin{tabular}{lrr}
+\toprule
+Study & MIC-4state & MIC-PICS \\
+\midrule
+Cardiac cine MR (16 frames)      & ${\sim}460$\,FPS & ${\sim}650$\,FPS (4-strip) \\
+XA angiography (12 frames)       & ${\sim}140$\,FPS & ${\sim}290$\,FPS (8-strip) \\
+Enhanced CT (2 frames)           & ${\sim}210$\,FPS & ${\sim}440$\,FPS (4-strip) \\
+CT axial series (16 frames)      & ${\sim}86$\,FPS  & ${\sim}218$\,FPS (8-strip) \\
+Breast tomosynthesis (16 frames) & ${\sim}17$\,FPS  & ${\sim}51$\,FPS (8-strip) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This distinguishes MIC's goal from archival-ratio-focused codecs such as
+JPEG-LS: a viewer that must sustain frame rate across an entire multi-frame
+study benefits more from a codec with bounded, fast per-frame decode time than
+from one that reduces file size a further few percent at the cost of decode
+latency. The tomosynthesis case above is the one dataset in this evaluation
+heavy enough to approach the lower edge of the target frame-rate range on a
+single thread, and it is also the case where strip-parallel decoding provides
+the clearest clinical benefit.
+
+\subsection{Choosing a codec}
+
+For \textbf{low-latency viewing} (PACS, thumbnails, tomosynthesis playback),
+single-threaded MIC is a sensible default (${\sim}600$--900\,MB/s per request),
+with strip-parallel MIC for one large image at a time. For \textbf{smallest
+archival files}, JPEG-LS keeps a ${\sim}14\%$ better ratio, at the cost of
+decoding 1.6--5.7$\times$ slower on ARM64. Where \textbf{DICOM transfer-syntax
+compatibility} is required, HTJ2K is the appropriate choice, since it is a
+standard and is particularly strong on large mammography images on AMD64. Where
+\textbf{no native code is permitted} (browsers, sandboxes), the pure-Go
+reference or the 20\,KB JavaScript decoder runs at about half the C decoder's
+speed.
+
+A more structured comparison---a Pareto view of ratio vs.\ decode
+speed~\cite{geldreich_pareto,jpegxl_pareto}, plus a weighted decision matrix
+over ratio, speed, platform coverage, and deployment
+ease~\cite{saaty_ahp,sayood}, following deployment taxonomies for DICOM
+compression~\cite{clunie_miit2009,liu2017}---puts MIC, HTJ2K, and JPEG-LS on
+the efficiency frontier (MIC for throughput, JPEG-LS for ratio, HTJ2K in
+between), with Delta + Zstandard dominated by MIC on both axes. HTJ2K remains
+the choice whenever standard compatibility is a hard requirement that the
+scoring does not capture.
+Table~\ref{tab:decision-matrix} reports the weighted matrix.
+
+\begin{table}[htbp]
+\centering
+\caption{Codec selection matrix. Each criterion is normalised so the
+best codec on that row scores~1.00. Quantitative rows are geometric
+means across the 39-image set. Browser compatibility: shipped
+purpose-built JS or WASM decoder used in production~=~1.00; WASM port of
+the native library used in clinical viewers~=~0.85; no browser
+path~=~0.0. Deployment ease: zero external runtime dependencies~=~1.00;
+ubiquitous system dependency~=~0.90; C/C++ library requiring CMake build
+and link integration~=~0.70. Weight columns $w_P$, $w_A$, $w_B$ reflect
+typical priorities for (P)~PACS viewer / low-latency decode, (A)~archival
+storage, (B)~browser delivery.}
+\label{tab:decision-matrix}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+Criterion & $w_P$ & $w_A$ & $w_B$ & MIC & HTJ2K & JPEG-LS \\
+\midrule
+Compression ratio                & 0.20 & 0.50 & 0.10 & 0.88 & 0.89 & \textbf{1.00} \\
+Decompression throughput (ARM64) & 0.30 & 0.10 & 0.15 & \textbf{1.00} & 0.57 & 0.34 \\
+Encoding throughput (ARM64)      & 0.05 & 0.10 & 0.05 & \textbf{1.00} & 0.40 & 0.25 \\
+AMD64 native                     & 0.10 & 0.05 & 0.05 & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} \\
+ARM64 native                     & 0.10 & 0.05 & 0.05 & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} \\
+Browser compatibility            & 0.05 & 0.00 & 0.40 & \textbf{1.00} & 0.85 & 0.85 \\
+Deployment ease                  & 0.20 & 0.20 & 0.20 & \textbf{1.00} & 0.70 & 0.70 \\
+\midrule
+\textbf{Weighted score (P) viewer}   & --- & --- & --- & \textbf{0.98} & 0.75 & 0.70 \\
+\textbf{Weighted score (A) archival} & --- & --- & --- & \textbf{0.94} & 0.78 & 0.80 \\
+\textbf{Weighted score (B) browser}  & --- & --- & --- & \textbf{0.99} & 0.77 & 0.74 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Future Work}
+
+\textbf{Validation on larger datasets.} The evaluation rests on 39 images across eleven
+modalities. This is varied enough to exercise a wide range of pixel statistics,
+from smooth mammography to noisy computed tomography, but it is far smaller than
+a real clinical archive and is not drawn from a controlled multi-site
+collection. Several modalities are represented by only two or three images, so
+their per-modality means carry little statistical weight, and the geometric
+means can be moved noticeably by a single outlier such as a large-background PET
+study. The dataset also says nothing about how MIC behaves on acquisition
+conditions absent here, such as different reconstruction kernels, vendors,
+bit depths beyond the 10--16-bit range tested, or images with substantial
+acquisition noise. The numbers should therefore be read as evidence on this
+specific set, not as population-level claims; validation on larger,
+multi-hospital datasets with per-modality breakdowns is needed before the ratio
+and speed margins can be treated as general.
+
+\textbf{Held-out parameter tuning.} The adaptive table-size thresholds ($\beta >
+128$, $C_r > 32$) and the choice of the average predictor were informed by this
+same dataset, so there is a risk that they are fitted to it rather than to
+medical images in general. Two factors limit, but do not eliminate, that risk:
+the rules are deliberately coarse (two integer thresholds and a single fixed
+predictor, with no per-image search), and the thresholds gate a modest 1--10\%
+ratio gain on a minority of images rather than driving the headline result.
+Even so, a properly held-out study, with the thresholds frozen on one collection
+and measured on a disjoint one, is required to show they generalize.
+
+\textbf{Stronger baselines.} The comparison covers HTJ2K, JPEG-LS, and Delta +
+Zstandard, but omits baselines that would more sharply isolate where MIC's
+advantage comes from. In particular, a byte-oriented pipeline with an explicit
+byte- or bit-shuffle stage before Zstandard, and the basic DICOM run-length
+syntax, would separate the benefit of the 16-bit-native entropy stage from the
+benefit of prediction alone. Research codecs that compress better on natural
+images, such as CALIC~\cite{wu1997} and FLIF~\cite{sneyers2016}, are also not
+included because they are not DICOM-deployable today; their absence means the
+upper end of achievable lossless ratio is not bracketed here. A full
+quantitative comparison against JPEG~XL on the reference ARM64 and AMD64
+platforms of Section~\ref{sec:methodology}, following the same in-process
+methodology used for HTJ2K and JPEG-LS, is likewise left to future work;
+Section~\ref{sec:related} reports the direction of that gap (a modest ratio
+disadvantage and a marked speed advantage for MIC) from informal testing.
+Adding these baselines is left to future work.
+
+\subsection{Adding MIC as a DICOM Transfer Syntax}
+
+The evaluation so far operates on the extracted pixel array. To be usable in a
+real clinical workflow, MIC has to be carried inside a DICOM object that
+existing systems can route, store, and display, which means defining it as a
+DICOM transfer syntax. We sketch the path here.
+
+\textbf{Encapsulation.} A transfer syntax specifies how the pixel data is
+serialised into the Pixel Data element (7FE0,0010). MIC fits the existing
+\emph{encapsulated} pixel-data model that JPEG~2000 and JPEG-LS already use:
+the element is encoded with undefined length as a sequence of fragments
+preceded by a Basic Offset Table, and each frame's MIC bitstream is stored as
+one (or more) fragment items. Because MIC already produces a self-contained
+per-image bitstream with its own header (Table~\ref{tab:format}), and a
+multi-frame container for tomosynthesis, the mapping to fragments is direct and
+does not require changing the codec.
+
+\textbf{Identification and attributes.} The syntax needs a registered Transfer
+Syntax UID under the DICOM root, and the associated image-pixel attributes
+(Bits Allocated, Bits Stored, High Bit, Pixel Representation, Photometric
+Interpretation, Planar Configuration) must be defined so that a receiver can
+reconstruct the array unambiguously. Because MIC is lossless and operates on
+the native sample values, these attributes carry over from the source object
+without the value re-scaling that lossy syntaxes require.
+
+\textbf{Standardisation path and an interim option.} Formal adoption would
+proceed through a DICOM Change Proposal: a public specification of the
+bitstream, the encapsulation rules, and conformance test vectors, reviewed by
+the relevant DICOM Working Group. In the interim, two of the partners on a link
+can negotiate MIC as a privately agreed transfer syntax (a private UID) or carry
+the bitstream in a private data element, which allows deployment inside a
+controlled environment before standardisation completes. A reference encoder and
+decoder, plus a published set of conformance images, would be the practical
+prerequisites for either route, and are the natural next deliverable beyond the
+open-source codec.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+MIC is a 16-bit-native lossless codec for medical images: spatial prediction,
+16-bit run-length coding, a large-alphabet table-based entropy coder, and a
+multi-state decoder for speed. On 39 DICOM images it reaches a geometric-mean
+ratio of 3.36$\times$ (within ${\sim}2\%$ of HTJ2K, ${\sim}88\%$ of JPEG-LS)
+while being the fastest decoder on all 39 images on ARM64 and 36/39 on AMD64,
+and the fastest encoder on 38/39 ARM64 images and 32/39 on AMD64. A 20\,KB JavaScript
+decoder and a WebAssembly build show the format can be decoded client-side in a
+browser. Future work: larger multi-hospital datasets; stronger shuffle-based
+baselines; defining MIC as a DICOM transfer syntax; an ARM64 vector kernel for
+the wavelet variant; and benchmarking the JavaScript decoder in real browsers.
+MIC is open source: \url{https://github.com/pappuks/medical-image-codec}.
+
+% ============================================================
+\begin{thebibliography}{99}
+
+\bibitem{dicom}
+NEMA, ``Digital Imaging and Communications in Medicine (DICOM),''
+PS3.5---Data Structures and Encoding,
+\url{https://www.dicomstandard.org/}, 2024.
+
+\bibitem{taubman2002}
+D.\,S.\,Taubman and M.\,W.\,Marcellin,
+\textit{JPEG2000: Image Compression Fundamentals, Standards and Practice}.
+Springer, 2002.
+
+\bibitem{htj2k2019}
+D.\,S.\,Taubman, ``High throughput JPEG 2000 (HTJ2K): Algorithm, performance
+evaluation, and potential,'' \textit{Proc.\ SPIE}, vol.\,11137, 2019.
+
+\bibitem{taubman2022}
+D.\,Taubman \textit{et al.},
+``High Throughput JPEG~2000 for Video Content Production and Delivery Over IP
+Networks,''
+\textit{Front.\ Signal Process.}, vol.\,2, Article 885644, Apr.\,2022.
+
+\bibitem{loco1}
+M.\,J.\,Weinberger, G.\,Seroussi, and G.\,Sapiro,
+``The LOCO-I lossless image compression algorithm: Principles and
+standardization into JPEG-LS,''
+\textit{IEEE Trans.\ Image Process.}, vol.\,9, no.\,8, pp.\,1309--1324, 2000.
+
+\bibitem{wu1997}
+X.\,Wu and N.\,Memon,
+``Context-based, adaptive, lossless image coding,''
+\textit{IEEE Trans.\ Commun.}, vol.\,45, no.\,4, pp.\,437--444, 1997.
+
+\bibitem{sneyers2016}
+J.\,Sneyers and P.\,Wuille,
+``FLIF: Free Lossless Image Format based on MANIAC Compression,''
+\textit{Proc.\ IEEE ICIP}, 2016.
+
+\bibitem{jpegxl}
+J.\,Alakuijala \textit{et al.},
+``JPEG XL next-generation image compression architecture and coding tools,''
+\textit{Proc.\ SPIE 11137}, Sep.\,2019.
+
+\bibitem{mentzer2019l3c}
+F.\,Mentzer, E.\,Agustsson, M.\,Tschannen, R.\,Timofte, and L.\,Van Gool,
+``Practical Full Resolution Learned Lossless Image Compression,''
+\textit{Proc.\ IEEE/CVF CVPR}, pp.\,10629--10638, 2019.
+
+\bibitem{cao2020srec}
+S.\,Cao, C.-Y.\,Wu, and P.\,Kr\"ahenb\"uhl,
+``Lossless Image Compression through Super-Resolution,''
+arXiv:2004.02872, 2020.
+
+\bibitem{duda2009}
+J.\,Duda, ``Asymmetric numeral systems,'' arXiv:0902.0271, 2009.
+
+\bibitem{duda2013}
+J.\,Duda, ``Asymmetric numeral systems: entropy coding combining speed of
+Huffman coding with compression rate of arithmetic coding,''
+arXiv:1311.2540, 2013.
+
+\bibitem{fse}
+Y.\,Collet, ``Finite State Entropy---A new breed of entropy coder,''
+\url{https://github.com/Cyan4973/FiniteStateEntropy}, 2013.
+
+\bibitem{rfc8878}
+Y.\,Collet and M.\,Kucherawy,
+``Zstandard Compression and the `application/zstd' Media Type,''
+RFC~8878, IETF, Feb.\,2021.
+
+\bibitem{mahapatra2007}
+S.\,Mahapatra and K.\,Singh,
+``An FPGA-based implementation of multi-alphabet arithmetic coding,''
+\textit{IEEE Trans.\ Circuits Syst.\ I}, vol.\,54, no.\,8, pp.\,1678--1686,
+2007.
+
+\bibitem{giesen2014}
+F.\,Giesen, ``Interleaved entropy coders,'' arXiv:1402.3392, 2014.
+
+\bibitem{lin2023}
+F.\,Lin, K.\,Arunruangsirilert, H.\,Sun, and J.\,Katto,
+``Recoil: Parallel rANS Decoding with Decoder-Adaptive Scalability,''
+\textit{Proc.\ 52nd ICPP '23}, pp.\,31--40, 2023.
+
+\bibitem{weissenberger2019}
+A.\,Weissenberger and B.\,Schmidt,
+``Massively Parallel ANS Decoding on GPUs,''
+\textit{Proc.\ 48th ICPP '19}, Article~100, 2019.
+
+\bibitem{legall1988}
+D.\,Le Gall and A.\,Tabatabai,
+``Sub-band coding of digital images using symmetric short kernel filters and
+arithmetic coding techniques,'' \textit{Proc.\ IEEE ICASSP}, pp.\,761--764,
+1988.
+
+\bibitem{png}
+W3C, ``Portable Network Graphics (PNG) Specification (Second Edition),''
+ISO/IEC 15948:2003, Nov.\,2003.
+
+\bibitem{williams2009}
+S.\,Williams, A.\,Waterman, and D.\,Patterson,
+``Roofline: An insightful visual performance model for multicore
+architectures,''
+\textit{Commun.\ ACM}, vol.\,52, no.\,4, pp.\,65--76, Apr.\,2009.
+
+\bibitem{liu2017}
+F.\,Liu \textit{et al.},
+``The Current Role of Image Compression Standards in Medical Imaging,''
+\textit{Information}, vol.\,8, no.\,4, p.\,131, Oct.\,2017.
+
+\bibitem{clunie2000}
+D.\,A.\,Clunie,
+``Lossless Compression of Grayscale Medical Images: Effectiveness of
+Traditional and State-of-the-Art Approaches,''
+\textit{Proc.\ SPIE Medical Imaging}, 2000.
+
+\bibitem{openjph}
+A.\,N.\,Aous,
+``OpenJPH: An open-source implementation of High-Throughput JPEG~2000,''
+\url{https://github.com/aous72/OpenJPH}, 2024.
+
+\bibitem{charls}
+Team CharLS,
+``CharLS: A C/C++ JPEG-LS library implementation,''
+\url{https://github.com/team-charls/charls}, 2024.
+
+\bibitem{nema_wg04}
+NEMA Working Group~4 (WG-04),
+``DICOM Compression Sample Images,''
+National Electrical Manufacturers Association,
+\url{https://www.dicomstandard.org/Resources/Open-Content/Compression-Samples},
+2024.
+
+\bibitem{clunie_tomo}
+D.\,A.\,Clunie,
+``Breast Tomosynthesis Case~1,'' DICOM sample images,
+\url{http://www.dclunie.com/pixelmedimagecases/tomo/case1/}, 2009.
+
+\bibitem{geldreich_pareto}
+R.\,Geldreich, ``Quick survey of the lossless decompression Pareto frontier,''
+2015, \url{http://richg42.blogspot.com/2015/11/the-lossless-decompression-pareto.html}.
+
+\bibitem{jpegxl_pareto}
+J.\,Sneyers, ``JPEG XL and the Pareto front,'' Cloudinary Blog, 2022,
+\url{https://cloudinary.com/blog/jpeg-xl-and-the-pareto-front}.
+
+\bibitem{saaty_ahp}
+T.\,L.\,Saaty, \textit{The Analytic Hierarchy Process: Planning, Priority
+Setting, Resource Allocation}. New York, NY, USA: McGraw-Hill, 1980.
+
+\bibitem{sayood}
+K.\,Sayood, \textit{Introduction to Data Compression}, 5th ed.
+Burlington, MA, USA: Morgan Kaufmann, 2017.
+
+\bibitem{clunie_miit2009}
+D.\,A.\,Clunie, ``DICOM support for compression: More than JPEG,''
+\textit{Medical Imaging Informatics and Teleradiology (MIIT)}, 2009,
+\url{https://www.dclunie.com/papers/MIIT_2009_DicomCompression_Clunie.pdf}.
+
+\end{thebibliography}
+
+\end{document}

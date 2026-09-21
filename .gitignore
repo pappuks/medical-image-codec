@@ -1,0 +1,24 @@
+testdata/mg-mf-dcm.dcm
+.venv/
+testdata/Series*/
+testdata/0acbebb*/
+*.so
+*.o
+.venv-fig/
+# PACS ingest — downloaded DICOM sources (do not commit)
+pacs-data/
+/mic-pacs-encode
+/mic-pacs-refgen
+
+# Subagent handoff workspace (design/implementation notes — not committed)
+.claude/agent-workspace/
+
+# Playwright run artifacts
+test-results/
+
+# AI pipeline build artifacts (regenerate with `make -C ai`)
+ai/libmic_pics.dylib
+ai/libmic_pics.so
+ai/__pycache__/
+ai/.pytest_cache/
+ai/tests/__pycache__/

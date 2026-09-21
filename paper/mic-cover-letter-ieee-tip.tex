@@ -1,0 +1,136 @@
+% Cover Letter — IEEE Transactions on Image Processing submission
+% NOTE: TIP states that submissions lacking a detailed cover letter
+%       may be returned without review.
+% Compile: pdflatex mic-cover-letter-ieee-tip.tex
+\documentclass[12pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{parskip}
+\usepackage{microtype}
+
+\hypersetup{
+  colorlinks=true,
+  urlcolor=blue!70!black,
+}
+
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{flushright}
+Kuldeep Singh\\
+Innovaccer Inc.\\
+\href{mailto:kuldeep.singh@innovaccer.com}{kuldeep.singh@innovaccer.com}\\
+ORCID: 0009-0004-8476-0118\\[6pt]
+May 2, 2026
+\end{flushright}
+
+\bigskip
+
+Editor-in-Chief\\
+\textit{IEEE Transactions on Image Processing}
+
+\bigskip
+
+\noindent Dear Editor-in-Chief,
+
+\medskip
+
+I am submitting the manuscript \textbf{``A 16-Bit-Native Entropy Coding
+Pipeline for Lossless Compression of High-Bit-Depth Images''} for consideration
+as a Full Paper in \textit{IEEE Transactions on Image Processing}.
+
+\medskip
+\noindent\textbf{Summary and core contribution.}
+This paper addresses a fundamental mismatch in lossless image compression:
+most entropy coders are optimized for 8-bit byte streams, yet high-bit-depth
+images (medical scanners, scientific instruments, HDR cameras) store pixel
+data at 10--16 bits per sample. Applying a byte-oriented coder to 16-bit data
+requires splitting each pixel into a byte pair before entropy coding, losing
+the mutual information between the two bytes. I quantify this structural cost
+as 0.3--1.1 bits per symbol after spatial prediction, and present MIC---a
+lossless codec that eliminates it by coding 16-bit residuals as atomic symbols.
+
+MIC combines spatial prediction, a 16-bit-native run-length representation,
+and an extended Finite State Entropy (FSE/ANS) coder supporting up to
+65,535-symbol alphabets. This contrasts with Zstandard's FSE capped at 4,096
+symbols and Huffman coding, which becomes impractical above roughly 4,096
+symbols. The codec also includes a four-state interleaved decoder that exploits
+instruction-level parallelism (ILP), yielding a geometric-mean 68\% isolated
+decompression speedup on ARM64 (43\% on AMD64) with no compressed-size
+penalty.
+
+\medskip
+\noindent\textbf{Relevance to IEEE TIP.}
+The manuscript makes contributions in image coding, entropy coding, and
+decoder algorithm design---all within the core scope of IEEE TIP. The work:
+\begin{itemize}
+  \item proposes and analyzes a new entropy coding approach for large symbol
+  alphabets arising in high-bit-depth image residual streams;
+  \item provides an information-theoretic analysis (mutual information of
+  byte-split residuals) that explains and predicts the compression advantage;
+  \item evaluates a multi-state decoder design that improves throughput via
+  instruction-level parallelism, a technique of broad relevance to image codec
+  design.
+\end{itemize}
+The evaluation uses 21 de-identified high-bit-depth images (nine modalities,
+sizes up to $4774 \times 3064$ pixels), with fair in-process comparisons
+against High-Throughput JPEG~2000 (HTJ2K) and JPEG-LS, two codecs within
+IEEE TIP's reference space.
+
+\medskip
+\noindent\textbf{Suggested EDICS categories.}
+\texttt{COD-CMP} (Compression); \texttt{COD-ENT} (Entropy Coding);
+\texttt{ANA-BIO} (Biomedical image analysis) as a secondary category.
+
+\medskip
+\noindent\textbf{Originality.}
+This work has not been submitted to, or published in, any other journal.
+The manuscript is an original work; no prior conference or workshop version
+has been published.
+
+\medskip
+\noindent\textbf{Open-source reproducibility.}
+The complete implementation, benchmark harness, and test data references
+are at \url{https://github.com/pappuks/medical-image-codec}. All reported
+results are reproducible using the commands in the repository.
+
+\medskip
+\noindent\textbf{Ethics.}
+All 21 test images are from publicly available, de-identified DICOM datasets
+(NEMA WG-04 compsamples, NEMA 1997~CD, Clunie Breast Tomosynthesis Case~1).
+No human subjects research was conducted; no IRB approval is required.
+
+\medskip
+\noindent\textbf{Conflict of interest.}
+The author declares no competing financial interests or personal relationships
+that could have influenced this work.
+
+\medskip
+\noindent\textbf{Suggested reviewers.}
+Researchers active in ANS/FSE entropy coding, image coding standards (HTJ2K,
+JPEG-LS), or high-throughput codec design would be well placed to review
+this work. Authors of OpenJPH and CharLS are compared against in the paper
+and may have a conflict of interest at the Editor's discretion.
+
+\bigskip
+
+I confirm this is a single-author submission and that the manuscript complies
+with IEEE Transactions on Image Processing formatting requirements, including
+the 13-page initial-submission limit and the 150--250 word abstract.
+
+\bigskip
+
+\noindent Sincerely,
+
+\bigskip\bigskip
+
+\noindent Kuldeep Singh\\
+Innovaccer Inc.\\
+\href{mailto:kuldeep.singh@innovaccer.com}{kuldeep.singh@innovaccer.com}\\
+ORCID: 0009-0004-8476-0118\\
+\url{https://github.com/pappuks/medical-image-codec}
+
+\end{document}

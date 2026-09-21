@@ -1,0 +1,27 @@
+goos: linux
+goarch: amd64
+pkg: mic
+cpu: Intel(R) Xeon(R) 6975P-C
+BenchmarkWaveletV2SIMDRLEFSECompress/MR-16 	      10	   1453445 ns/op	  90.18 MB/s	         0.05250 comp	       688.0 fps	         0.1250 original	         2.381 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/CT-16 	      10	   7262448 ns/op	  72.19 MB/s	         0.2995 comp	       137.7 fps	         0.5000 original	         1.669 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/CR-16 	      10	  70075555 ns/op	 107.50 MB/s	         1.885 comp	        14.27 fps	         7.184 original	         3.811 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/XR-16 	      10	  90970255 ns/op	 116.03 MB/s	         5.705 comp	        10.99 fps	        10.07 original	         1.764 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MG1-16         	      10	  85102676 ns/op	 115.25 MB/s	         1.080 comp	        11.75 fps	         9.354 original	         8.665 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MG2-16         	      10	  83014568 ns/op	 118.15 MB/s	         1.081 comp	        12.05 fps	         9.354 original	         8.651 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MG3-16         	      10	 330768221 ns/op	  86.41 MB/s	        11.78 comp	         3.023 fps	        27.26 original	         2.315 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MG4-16         	      10	 395932718 ns/op	  68.86 MB/s	         7.233 comp	         2.526 fps	        26.00 original	         3.594 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/CT1-16         	      10	   6718353 ns/op	  78.04 MB/s	         0.2012 comp	       148.8 fps	         0.5000 original	         2.485 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/CT2-16         	      10	   6711732 ns/op	  78.12 MB/s	         0.1745 comp	       149.0 fps	         0.5000 original	         2.865 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MG-N-16        	      10	 312356517 ns/op	  91.50 MB/s	        11.77 comp	         3.201 fps	        27.26 original	         2.316 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MR1-16         	      10	   6327212 ns/op	  82.86 MB/s	         0.2334 comp	       158.0 fps	         0.5000 original	         2.142 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MR2-16         	      10	  41714006 ns/op	  50.27 MB/s	         0.5983 comp	        23.97 fps	         2.000 original	         3.343 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MR3-16         	      10	   5647024 ns/op	  92.84 MB/s	         0.1224 comp	       177.1 fps	         0.5000 original	         4.086 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/MR4-16         	      10	   6054260 ns/op	  86.60 MB/s	         0.1196 comp	       165.2 fps	         0.5000 original	         4.180 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/NM1-16         	      10	   5620298 ns/op	  93.28 MB/s	         0.09970 comp	       177.9 fps	         0.5000 original	         5.015 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/RG1-16         	      10	  62642172 ns/op	 114.91 MB/s	         4.042 comp	        15.96 fps	         6.865 original	         1.698 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/RG2-16         	      10	  64217257 ns/op	 117.30 MB/s	         1.661 comp	        15.57 fps	         7.184 original	         4.324 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/RG3-16         	      10	  49686896 ns/op	 124.68 MB/s	         0.8668 comp	        20.13 fps	         5.908 original	         6.816 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/SC1-16         	      10	 241782020 ns/op	  42.13 MB/s	         2.628 comp	         4.136 fps	         9.715 original	         3.696 ratio	       0 B/op	       0 allocs/op
+BenchmarkWaveletV2SIMDRLEFSECompress/XA1-16         	      10	  42238394 ns/op	  49.65 MB/s	         0.4048 comp	        23.68 fps	         2.000 original	         4.940 ratio	       0 B/op	       0 allocs/op
+PASS
+ok  	mic	27.486s

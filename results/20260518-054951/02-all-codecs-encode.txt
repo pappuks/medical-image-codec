@@ -1,0 +1,286 @@
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+mic_decompress_c.c:22:44: warning: excess elements in array initializer
+   22 |     0x3FFFFFFFu, 0x7FFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+      |                                            ^~~~~~~~~~~
+mic_decompress_c.c:22:44: note: (near initialization for ‘nbits_mask32’)
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+goos: linux
+goarch: amd64
+pkg: mic/ojph
+cpu: Intel(R) Xeon(R) 6975P-C
+BenchmarkAllCodecsEncode/MIC-Go/MR-16         	      10	    966562 ns/op	 135.61 MB/s	         2.353 ratio	 1927824 B/op	     369 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MR-16     	      10	   1021331 ns/op	 128.33 MB/s	         2.353 ratio	 1927824 B/op	     369 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MR-16     	      10	   1105496 ns/op	 118.56 MB/s	         2.352 ratio	 1927809 B/op	     369 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MR-16   	      10	    481913 ns/op	 271.98 MB/s	         2.353 ratio	  270345 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MR-16   	      10	    387358 ns/op	 338.37 MB/s	         2.352 ratio	  270345 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MR-16          	      10	    520093 ns/op	 252.02 MB/s	         2.353 ratio	  270345 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MR-16   	      10	   1767687 ns/op	  74.15 MB/s	         2.381 ratio	 2711441 B/op	     223 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MR-16          	      10	    573360 ns/op	 228.60 MB/s	         2.379 ratio	  196616 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MR-16         	      10	   2116171 ns/op	  61.94 MB/s	         2.523 ratio	  196616 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MR-16         	      10	   1083674 ns/op	 120.95 MB/s	         2.325 ratio	 3081273 B/op	     380 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MR-16         	      10	   1343947 ns/op	  97.53 MB/s	         2.284 ratio	 5339129 B/op	     405 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MR-16         	      10	   1697244 ns/op	  77.23 MB/s	         2.214 ratio	 9618819 B/op	     450 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/CT-16         	      10	   3472257 ns/op	 150.99 MB/s	         2.237 ratio	 5352724 B/op	     622 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/CT-16     	      10	   3192474 ns/op	 164.23 MB/s	         2.237 ratio	 5352723 B/op	     622 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/CT-16     	      10	   3247102 ns/op	 161.46 MB/s	         2.237 ratio	 5352726 B/op	     622 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/CT-16   	      10	   1976478 ns/op	 265.26 MB/s	         2.237 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/CT-16   	      10	   1794611 ns/op	 292.15 MB/s	         2.237 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/CT-16          	      10	   2114907 ns/op	 247.90 MB/s	         2.237 ratio	 1056779 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/CT-16   	      10	   7721781 ns/op	  67.90 MB/s	         1.669 ratio	 7932758 B/op	     703 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/CT-16          	      10	   2542992 ns/op	 206.17 MB/s	         1.771 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/CT-16         	      10	   5408753 ns/op	  96.93 MB/s	         2.676 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/CT-16         	      10	   3165373 ns/op	 165.63 MB/s	         2.214 ratio	 7092857 B/op	     541 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/CT-16         	      10	   2661616 ns/op	 196.98 MB/s	         2.145 ratio	 9862326 B/op	     404 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/CT-16         	      10	   2174184 ns/op	 241.14 MB/s	         1.962 ratio	17257382 B/op	     134 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/CR-16         	      10	  33498070 ns/op	 224.87 MB/s	         3.693 ratio	32801268 B/op	   52414 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/CR-16     	      10	  33833279 ns/op	 222.64 MB/s	         3.693 ratio	32801265 B/op	   52414 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/CR-16     	      10	  33110065 ns/op	 227.51 MB/s	         3.693 ratio	32801267 B/op	   52414 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/CR-16   	      10	  22808737 ns/op	 330.26 MB/s	         3.693 ratio	15073289 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/CR-16   	      10	  23407814 ns/op	 321.81 MB/s	         3.693 ratio	15073289 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/CR-16          	      10	  23572481 ns/op	 319.56 MB/s	         3.693 ratio	15073289 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/CR-16   	      10	  74845729 ns/op	 100.64 MB/s	         3.811 ratio	73932240 B/op	   56496 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/CR-16          	      10	  26496842 ns/op	 284.29 MB/s	         3.770 ratio	 7602185 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/CR-16         	      10	 100294502 ns/op	  75.11 MB/s	         3.956 ratio	 7602184 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/CR-16         	      10	  19447660 ns/op	 387.34 MB/s	         3.691 ratio	35995721 B/op	   52411 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/CR-16         	      10	  11660062 ns/op	 646.03 MB/s	         3.698 ratio	38231489 B/op	   52405 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/CR-16         	      10	   9309336 ns/op	 809.17 MB/s	         3.714 ratio	42784960 B/op	   52474 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/XR-16         	      10	  45819921 ns/op	 230.37 MB/s	         1.738 ratio	70935611 B/op	   16962 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/XR-16     	      10	  45325518 ns/op	 232.88 MB/s	         1.738 ratio	70935612 B/op	   16962 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/XR-16     	      10	  44295521 ns/op	 238.29 MB/s	         1.738 ratio	70935612 B/op	   16962 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/XR-16   	      10	  27620139 ns/op	 382.16 MB/s	         1.738 ratio	21118985 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/XR-16   	      10	  26055637 ns/op	 405.11 MB/s	         1.738 ratio	21118985 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/XR-16          	      10	  26820674 ns/op	 393.55 MB/s	         1.738 ratio	21118985 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/XR-16   	      10	 102688481 ns/op	 102.79 MB/s	         1.764 ratio	141068000 B/op	    6811 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/XR-16          	      10	  42233850 ns/op	 249.93 MB/s	         1.670 ratio	10625032 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/XR-16         	      10	 126161897 ns/op	  83.67 MB/s	         1.761 ratio	10625035 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/XR-16         	      10	  33330898 ns/op	 316.68 MB/s	         1.748 ratio	78056931 B/op	   17177 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/XR-16         	      10	  20496402 ns/op	 514.99 MB/s	         1.753 ratio	80210812 B/op	   17752 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/XR-16         	      10	  14124736 ns/op	 747.30 MB/s	         1.755 ratio	84929412 B/op	   17570 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MG1-16        	      10	  28560200 ns/op	 343.43 MB/s	         8.786 ratio	32259403 B/op	   28274 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MG1-16    	      10	  28986014 ns/op	 338.38 MB/s	         8.785 ratio	32259403 B/op	   28274 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MG1-16    	      10	  29188137 ns/op	 336.04 MB/s	         8.784 ratio	32259401 B/op	   28274 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MG1-16  	      10	  19077628 ns/op	 514.13 MB/s	         8.785 ratio	19628041 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MG1-16  	      10	  17977109 ns/op	 545.60 MB/s	         8.784 ratio	19628041 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MG1-16         	      10	  18101296 ns/op	 541.86 MB/s	         8.786 ratio	19628040 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MG1-16  	      10	  89891299 ns/op	 109.11 MB/s	         8.665 ratio	76719720 B/op	   10400 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MG1-16         	      10	  15167659 ns/op	 646.66 MB/s	         8.251 ratio	 9879561 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MG1-16        	      10	  47016979 ns/op	 208.61 MB/s	         8.911 ratio	 9879561 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MG1-16        	      10	  17614965 ns/op	 556.82 MB/s	         8.797 ratio	34512203 B/op	   28298 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MG1-16        	      10	  11569106 ns/op	 847.80 MB/s	         8.839 ratio	36762985 B/op	   28331 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MG1-16        	      10	   7990693 ns/op	1227.47 MB/s	         8.869 ratio	41269318 B/op	   28407 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MG2-16        	      10	  29119456 ns/op	 336.83 MB/s	         8.774 ratio	32255556 B/op	   28889 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MG2-16    	      10	  28942989 ns/op	 338.88 MB/s	         8.773 ratio	32255553 B/op	   28889 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MG2-16    	      10	  28618584 ns/op	 342.73 MB/s	         8.773 ratio	32255553 B/op	   28889 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MG2-16  	      10	  18874372 ns/op	 519.66 MB/s	         8.773 ratio	19628041 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MG2-16  	      10	  18135495 ns/op	 540.84 MB/s	         8.773 ratio	19628041 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MG2-16         	      10	  18096591 ns/op	 542.00 MB/s	         8.774 ratio	19628040 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MG2-16  	      10	  88413724 ns/op	 110.94 MB/s	         8.651 ratio	76743664 B/op	   10459 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MG2-16         	      10	  15180168 ns/op	 646.13 MB/s	         8.238 ratio	 9879560 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MG2-16        	      10	  46948498 ns/op	 208.92 MB/s	         8.901 ratio	 9879561 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MG2-16        	      10	  16673134 ns/op	 588.27 MB/s	         8.786 ratio	34516507 B/op	   28904 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MG2-16        	      10	  11043628 ns/op	 888.15 MB/s	         8.827 ratio	36759915 B/op	   28956 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MG2-16        	      10	   7834998 ns/op	1251.86 MB/s	         8.854 ratio	41265814 B/op	   29035 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MG3-16        	      10	 117243471 ns/op	 243.77 MB/s	         2.237 ratio	149689396 B/op	   38349 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MG3-16    	      10	 116109543 ns/op	 246.16 MB/s	         2.236 ratio	149689393 B/op	   38349 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MG3-16    	      10	 116847759 ns/op	 244.60 MB/s	         2.236 ratio	149697587 B/op	   38349 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MG3-16  	      10	  90364929 ns/op	 316.28 MB/s	         2.236 ratio	58515465 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MG3-16  	      10	  85994445 ns/op	 332.36 MB/s	         2.236 ratio	58515465 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MG3-16         	      10	  85201372 ns/op	 335.45 MB/s	         2.237 ratio	58515464 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MG3-16  	      10	 387109619 ns/op	  73.83 MB/s	         2.315 ratio	325250968 B/op	   28002 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MG3-16         	      10	 113669504 ns/op	 251.44 MB/s	         2.223 ratio	29327368 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MG3-16        	      10	 275376991 ns/op	 103.79 MB/s	         2.378 ratio	29327371 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MG3-16        	      10	  72831778 ns/op	 392.42 MB/s	         2.271 ratio	163243281 B/op	   38355 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MG3-16        	      10	  44326434 ns/op	 644.78 MB/s	         2.308 ratio	174296131 B/op	   38406 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MG3-16        	      10	  32639303 ns/op	 875.66 MB/s	         2.335 ratio	187750633 B/op	   38472 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MG4-16        	      10	  88705158 ns/op	 307.34 MB/s	         3.474 ratio	98258776 B/op	   23128 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MG4-16    	      10	  89548405 ns/op	 304.45 MB/s	         3.473 ratio	98258777 B/op	   23128 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MG4-16    	      10	  89713913 ns/op	 303.89 MB/s	         3.473 ratio	98258776 B/op	   23128 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MG4-16  	      10	  65515677 ns/op	 416.13 MB/s	         3.473 ratio	54534153 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MG4-16  	      10	  63203905 ns/op	 431.35 MB/s	         3.473 ratio	54534153 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MG4-16         	      10	  61456052 ns/op	 443.62 MB/s	         3.474 ratio	54534153 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MG4-16  	      10	 382569340 ns/op	  71.26 MB/s	         3.594 ratio	235670944 B/op	   29777 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MG4-16         	      10	  65671237 ns/op	 415.14 MB/s	         3.506 ratio	27328520 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MG4-16        	      10	 181170807 ns/op	 150.48 MB/s	         3.705 ratio	27328523 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MG4-16        	      10	  48688986 ns/op	 559.94 MB/s	         3.517 ratio	107073921 B/op	   23146 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MG4-16        	      10	  29081281 ns/op	 937.48 MB/s	         3.585 ratio	109088912 B/op	   23185 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MG4-16        	      10	  23293379 ns/op	1170.42 MB/s	         3.618 ratio	113571785 B/op	   23251 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/CT1-16        	      10	   2833558 ns/op	 185.03 MB/s	         2.789 ratio	 3738419 B/op	     891 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/CT1-16    	      10	   2770923 ns/op	 189.21 MB/s	         2.789 ratio	 3738417 B/op	     891 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/CT1-16    	      10	   2889017 ns/op	 181.48 MB/s	         2.788 ratio	 3738419 B/op	     891 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/CT1-16  	      10	   1766510 ns/op	 296.79 MB/s	         2.789 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/CT1-16  	      10	   1592011 ns/op	 329.32 MB/s	         2.788 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/CT1-16         	      10	   1863562 ns/op	 281.34 MB/s	         2.789 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/CT1-16  	      10	   6523853 ns/op	  80.36 MB/s	         2.485 ratio	 6711672 B/op	    1572 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/CT1-16         	      10	   1891060 ns/op	 277.25 MB/s	         2.704 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/CT1-16        	      10	   4188583 ns/op	 125.17 MB/s	         3.190 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/CT1-16        	      10	   2548488 ns/op	 205.73 MB/s	         2.696 ratio	 5458011 B/op	     788 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/CT1-16        	      10	   2125487 ns/op	 246.67 MB/s	         2.542 ratio	 8956585 B/op	     458 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/CT1-16        	      10	   2222008 ns/op	 235.95 MB/s	         2.294 ratio	16077408 B/op	     117 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/CT2-16        	      10	   3381174 ns/op	 155.06 MB/s	         3.486 ratio	 3611953 B/op	    2929 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/CT2-16    	      10	   3230308 ns/op	 162.30 MB/s	         3.485 ratio	 3611955 B/op	    2929 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/CT2-16    	      10	   3174469 ns/op	 165.16 MB/s	         3.485 ratio	 3611953 B/op	    2929 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/CT2-16  	      10	   1865087 ns/op	 281.11 MB/s	         3.485 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/CT2-16  	      10	   1835487 ns/op	 285.64 MB/s	         3.485 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/CT2-16         	      10	   2121260 ns/op	 247.16 MB/s	         3.486 ratio	 1056779 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/CT2-16  	      10	   7476424 ns/op	  70.13 MB/s	         2.865 ratio	 6590396 B/op	    4150 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/CT2-16         	      10	   1971268 ns/op	 265.96 MB/s	         3.294 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/CT2-16        	      10	   4209307 ns/op	 124.55 MB/s	         4.539 ratio	  589835 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/CT2-16        	      10	   2849239 ns/op	 184.01 MB/s	         3.348 ratio	 5326736 B/op	    2254 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/CT2-16        	      10	   2191326 ns/op	 239.26 MB/s	         3.108 ratio	 8796993 B/op	    1236 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/CT2-16        	      10	   2333488 ns/op	 224.68 MB/s	         2.724 ratio	15986070 B/op	     116 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MG-N-16       	      10	 116351442 ns/op	 245.64 MB/s	         2.238 ratio	147021769 B/op	   37656 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MG-N-16   	      10	 116724482 ns/op	 244.86 MB/s	         2.238 ratio	147021769 B/op	   37656 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MG-N-16   	      10	 114948312 ns/op	 248.64 MB/s	         2.238 ratio	147021771 B/op	   37656 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MG-N-16 	      10	  88950969 ns/op	 321.31 MB/s	         2.238 ratio	57171977 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MG-N-16 	      10	  84244016 ns/op	 339.26 MB/s	         2.238 ratio	57171977 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MG-N-16        	      10	  87813901 ns/op	 325.47 MB/s	         2.238 ratio	57171977 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MG-N-16 	      10	 360501092 ns/op	  79.28 MB/s	         2.316 ratio	318845016 B/op	   27442 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MG-N-16        	      10	 117552070 ns/op	 243.13 MB/s	         2.226 ratio	28647433 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MG-N-16       	      10	 275224698 ns/op	 103.85 MB/s	         2.378 ratio	28647435 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MG-N-16       	      10	  71319213 ns/op	 400.75 MB/s	         2.273 ratio	160565444 B/op	   37678 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MG-N-16       	      10	  43817561 ns/op	 652.27 MB/s	         2.309 ratio	171432977 B/op	   37719 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MG-N-16       	      10	  30868459 ns/op	 925.90 MB/s	         2.336 ratio	184704419 B/op	   37905 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MR1-16        	      10	   2759715 ns/op	 189.98 MB/s	         2.087 ratio	 4528793 B/op	     888 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MR1-16    	      10	   2781538 ns/op	 188.49 MB/s	         2.087 ratio	 4528796 B/op	     888 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MR1-16    	      10	   2715234 ns/op	 193.09 MB/s	         2.086 ratio	 4528793 B/op	     888 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MR1-16  	      10	   1578308 ns/op	 332.18 MB/s	         2.087 ratio	 1056779 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MR1-16  	      10	   1522937 ns/op	 344.26 MB/s	         2.086 ratio	 1056779 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MR1-16         	      10	   1508414 ns/op	 347.58 MB/s	         2.087 ratio	 1056779 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MR1-16  	      10	   6306603 ns/op	  83.13 MB/s	         2.142 ratio	 7684102 B/op	     694 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MR1-16         	      10	   2144730 ns/op	 244.45 MB/s	         2.125 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MR1-16        	      10	   6105242 ns/op	  85.88 MB/s	         2.297 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MR1-16        	      10	   2763124 ns/op	 189.74 MB/s	         2.092 ratio	 5947408 B/op	     899 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MR1-16        	      10	   2205450 ns/op	 237.72 MB/s	         2.098 ratio	 8259532 B/op	     946 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MR1-16        	      10	   2480217 ns/op	 211.39 MB/s	         2.081 ratio	12648049 B/op	    1049 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MR2-16        	      10	   8473054 ns/op	 247.51 MB/s	         3.283 ratio	 9586953 B/op	    6815 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MR2-16    	      10	   8377627 ns/op	 250.33 MB/s	         3.282 ratio	 9586953 B/op	    6815 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MR2-16    	      10	   8369388 ns/op	 250.57 MB/s	         3.282 ratio	 9586953 B/op	    6815 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MR2-16  	      10	   5510356 ns/op	 380.58 MB/s	         3.282 ratio	 4202505 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MR2-16  	      10	   5276950 ns/op	 397.42 MB/s	         3.282 ratio	 4202505 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MR2-16         	      10	   5340501 ns/op	 392.69 MB/s	         3.283 ratio	 4202504 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MR2-16  	      10	  31085462 ns/op	  67.46 MB/s	         3.343 ratio	21167332 B/op	    7020 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MR2-16         	      10	   6986405 ns/op	 300.18 MB/s	         3.347 ratio	 2162697 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MR2-16        	      10	  24887670 ns/op	  84.26 MB/s	         3.523 ratio	 2162699 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MR2-16        	      10	   5963109 ns/op	 351.69 MB/s	         3.298 ratio	11348908 B/op	    6836 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MR2-16        	      10	   4654655 ns/op	 450.55 MB/s	         3.308 ratio	13618064 B/op	    6879 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MR2-16        	      10	   3854922 ns/op	 544.02 MB/s	         3.305 ratio	18082225 B/op	    6927 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MR3-16        	      10	   2389153 ns/op	 219.45 MB/s	         3.926 ratio	 2614907 B/op	     916 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MR3-16    	      10	   2125914 ns/op	 246.62 MB/s	         3.925 ratio	 2614907 B/op	     916 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MR3-16    	      10	   2209515 ns/op	 237.29 MB/s	         3.925 ratio	 2614907 B/op	     916 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MR3-16  	      10	   1208139 ns/op	 433.96 MB/s	         3.925 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MR3-16  	      10	   1224658 ns/op	 428.11 MB/s	         3.925 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MR3-16         	      10	   1246876 ns/op	 420.48 MB/s	         3.926 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MR3-16  	      10	   5292076 ns/op	  99.07 MB/s	         4.086 ratio	 5449136 B/op	    2099 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MR3-16         	      10	   1486580 ns/op	 352.68 MB/s	         4.333 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MR3-16        	      10	   4257835 ns/op	 123.13 MB/s	         4.514 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MR3-16        	      10	   2046223 ns/op	 256.22 MB/s	         3.912 ratio	 3899344 B/op	     912 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MR3-16        	      10	   1876840 ns/op	 279.35 MB/s	         3.887 ratio	 6165132 B/op	     883 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MR3-16        	      10	   2024120 ns/op	 259.02 MB/s	         3.835 ratio	10509905 B/op	     916 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/MR4-16        	      10	   2503155 ns/op	 209.45 MB/s	         4.124 ratio	 2986651 B/op	    1893 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/MR4-16    	      10	   2409140 ns/op	 217.62 MB/s	         4.124 ratio	 2986651 B/op	    1893 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/MR4-16    	      10	   2474663 ns/op	 211.86 MB/s	         4.123 ratio	 2986651 B/op	    1893 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/MR4-16  	      10	   1568397 ns/op	 334.28 MB/s	         4.124 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/MR4-16  	      10	   1465229 ns/op	 357.82 MB/s	         4.123 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/MR4-16         	      10	   1566572 ns/op	 334.67 MB/s	         4.124 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/MR4-16  	      10	   5866812 ns/op	  89.37 MB/s	         4.180 ratio	 5891968 B/op	    3362 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/MR4-16         	      10	   1650871 ns/op	 317.58 MB/s	         4.214 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/MR4-16        	      10	   3724680 ns/op	 140.76 MB/s	         4.490 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/MR4-16        	      10	   2089021 ns/op	 250.97 MB/s	         4.117 ratio	 4261912 B/op	    1899 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/MR4-16        	      10	   1884434 ns/op	 278.22 MB/s	         4.089 ratio	 6573316 B/op	    1883 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/MR4-16        	      10	   2487689 ns/op	 210.75 MB/s	         4.030 ratio	10984561 B/op	    1863 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/NM1-16        	      10	   2722046 ns/op	 192.61 MB/s	         5.149 ratio	 2821099 B/op	    4643 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/NM1-16    	      10	   2606412 ns/op	 201.15 MB/s	         5.149 ratio	 2821097 B/op	    4643 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/NM1-16    	      10	   2730281 ns/op	 192.03 MB/s	         5.149 ratio	 2821097 B/op	    4643 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/NM1-16  	      10	   1518052 ns/op	 345.37 MB/s	         5.149 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/NM1-16  	      10	   1560722 ns/op	 335.93 MB/s	         5.149 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/NM1-16         	      10	   1581406 ns/op	 331.53 MB/s	         5.149 ratio	 1056777 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/NM1-16  	      10	   5916133 ns/op	  88.62 MB/s	         5.015 ratio	 5671518 B/op	    7284 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/NM1-16         	      10	   1679078 ns/op	 312.25 MB/s	         5.759 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/NM1-16        	      10	   4511723 ns/op	 116.21 MB/s	         6.284 ratio	  589833 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/NM1-16        	      10	   2083971 ns/op	 251.58 MB/s	         5.204 ratio	 4021284 B/op	    4656 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/NM1-16        	      10	   1930860 ns/op	 271.53 MB/s	         5.255 ratio	 6225585 B/op	    4677 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/NM1-16        	      10	   2473542 ns/op	 211.96 MB/s	         5.276 ratio	10565292 B/op	    5094 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/RG1-16        	      10	  35430723 ns/op	 203.17 MB/s	         1.698 ratio	56965036 B/op	    3513 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/RG1-16    	      10	  32281082 ns/op	 222.99 MB/s	         1.698 ratio	56965038 B/op	    3513 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/RG1-16    	      10	  32157508 ns/op	 223.85 MB/s	         1.698 ratio	56965036 B/op	    3513 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/RG1-16  	      10	  20459542 ns/op	 351.83 MB/s	         1.698 ratio	14401547 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/RG1-16  	      10	  18343288 ns/op	 392.42 MB/s	         1.698 ratio	14401545 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/RG1-16         	      10	  22608521 ns/op	 318.39 MB/s	         1.698 ratio	14401545 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/RG1-16  	      10	  61550983 ns/op	 116.95 MB/s	         1.698 ratio	88154856 B/op	    2094 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/RG1-16         	      10	  28774124 ns/op	 250.17 MB/s	         1.631 ratio	 7266313 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/RG1-16        	      10	 110402402 ns/op	  65.20 MB/s	         1.716 ratio	 7266315 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/RG1-16        	      10	  26422522 ns/op	 272.43 MB/s	         1.698 ratio	62866784 B/op	    3514 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/RG1-16        	      10	  15736284 ns/op	 457.43 MB/s	         1.696 ratio	66159568 B/op	    3543 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/RG1-16        	      10	  10947737 ns/op	 657.52 MB/s	         1.689 ratio	72822078 B/op	    3542 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/RG2-16        	      10	  27057212 ns/op	 278.40 MB/s	         4.230 ratio	27472483 B/op	   24337 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/RG2-16    	      10	  27257788 ns/op	 276.35 MB/s	         4.230 ratio	27472484 B/op	   24337 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/RG2-16    	      10	  27279635 ns/op	 276.13 MB/s	         4.230 ratio	27472483 B/op	   24337 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/RG2-16  	      10	  18415076 ns/op	 409.06 MB/s	         4.230 ratio	15073289 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/RG2-16  	      10	  18125634 ns/op	 415.59 MB/s	         4.230 ratio	15073289 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/RG2-16         	      10	  18689183 ns/op	 403.06 MB/s	         4.230 ratio	15073288 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/RG2-16  	      10	  66293479 ns/op	 113.63 MB/s	         4.324 ratio	66882768 B/op	   22641 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/RG2-16         	      10	  21172625 ns/op	 355.78 MB/s	         4.316 ratio	 7602185 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/RG2-16        	      10	  76215466 ns/op	  98.84 MB/s	         4.507 ratio	 7602184 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/RG2-16        	      10	  16566202 ns/op	 454.71 MB/s	         4.252 ratio	30364345 B/op	   24351 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/RG2-16        	      10	  10129584 ns/op	 743.64 MB/s	         4.278 ratio	32601744 B/op	   24367 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/RG2-16        	      10	   7994212 ns/op	 942.28 MB/s	         4.297 ratio	37156784 B/op	   24485 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/RG3-16        	      10	  23551218 ns/op	 263.05 MB/s	         6.080 ratio	22518016 B/op	   35773 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/RG3-16    	      10	  23789817 ns/op	 260.41 MB/s	         6.079 ratio	22518019 B/op	   35773 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/RG3-16    	      10	  23655340 ns/op	 261.89 MB/s	         6.079 ratio	22518019 B/op	   35773 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/RG3-16  	      10	  16348338 ns/op	 378.95 MB/s	         6.079 ratio	12394505 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/RG3-16  	      10	  15624240 ns/op	 396.51 MB/s	         6.079 ratio	12394505 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/RG3-16         	      10	  15832284 ns/op	 391.30 MB/s	         6.080 ratio	12394504 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/RG3-16  	      10	  51038158 ns/op	 121.38 MB/s	         6.816 ratio	51952576 B/op	   16974 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/RG3-16         	      10	  15208202 ns/op	 407.36 MB/s	         6.988 ratio	 6266889 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/RG3-16        	      10	  49286645 ns/op	 125.70 MB/s	         7.311 ratio	 6266888 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/RG3-16        	      10	  14116120 ns/op	 438.87 MB/s	         6.072 ratio	24687892 B/op	   35791 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/RG3-16        	      10	   9641858 ns/op	 642.53 MB/s	         6.106 ratio	26938974 B/op	   35809 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/RG3-16        	      10	   6817576 ns/op	 908.71 MB/s	         6.122 ratio	31467651 B/op	   35820 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/SC1-16        	      10	  36457498 ns/op	 279.41 MB/s	         3.712 ratio	30647883 B/op	   24513 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/SC1-16    	      10	  36296874 ns/op	 280.65 MB/s	         3.710 ratio	30647880 B/op	   24513 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/SC1-16    	      10	  36244086 ns/op	 281.06 MB/s	         3.709 ratio	30647881 B/op	   24513 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/SC1-16  	      10	  25619484 ns/op	 397.62 MB/s	         3.710 ratio	20381705 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/SC1-16  	      10	  25002072 ns/op	 407.44 MB/s	         3.709 ratio	20381705 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/SC1-16         	      10	  24722988 ns/op	 412.04 MB/s	         3.712 ratio	20381705 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/SC1-16  	      10	 149530311 ns/op	  68.12 MB/s	         3.696 ratio	87653336 B/op	   55074 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/SC1-16         	      10	  32915043 ns/op	 309.49 MB/s	         3.850 ratio	10256392 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/SC1-16        	      10	  60551507 ns/op	 168.23 MB/s	         4.732 ratio	10256395 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/SC1-16        	      10	  21497372 ns/op	 473.86 MB/s	         3.725 ratio	34527536 B/op	   24500 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/SC1-16        	      10	  12893423 ns/op	 790.07 MB/s	         3.730 ratio	36814796 B/op	   24492 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/SC1-16        	      10	  10038127 ns/op	1014.81 MB/s	         3.735 ratio	41437760 B/op	   24480 allocs/op
+BenchmarkAllCodecsEncode/MIC-Go/XA1-16        	      10	   9348348 ns/op	 224.33 MB/s	         5.010 ratio	 8941963 B/op	   15185 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state/XA1-16    	      10	   9163342 ns/op	 228.86 MB/s	         5.009 ratio	 8941963 B/op	   15185 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state/XA1-16    	      10	   9182761 ns/op	 228.38 MB/s	         5.009 ratio	 8941963 B/op	   15185 allocs/op
+BenchmarkAllCodecsEncode/MIC-4state-C/XA1-16  	      10	   6051195 ns/op	 346.57 MB/s	         5.009 ratio	 4202505 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-8state-C/XA1-16  	      10	   5852211 ns/op	 358.35 MB/s	         5.009 ratio	 4202505 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/MIC-C/XA1-16         	      10	   6090804 ns/op	 344.31 MB/s	         5.010 ratio	 4202504 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/Wavelet+SIMD/XA1-16  	      10	  30893306 ns/op	  67.88 MB/s	         4.940 ratio	19693176 B/op	   14627 allocs/op
+BenchmarkAllCodecsEncode/HTJ2K/XA1-16         	      10	   6757744 ns/op	 310.33 MB/s	         4.883 ratio	 2162697 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/JPEGLS/XA1-16        	      10	  21608588 ns/op	  97.05 MB/s	         5.389 ratio	 2162696 B/op	       2 allocs/op
+BenchmarkAllCodecsEncode/PICS-2/XA1-16        	      10	   5967363 ns/op	 351.44 MB/s	         5.016 ratio	10469752 B/op	   15195 allocs/op
+BenchmarkAllCodecsEncode/PICS-4/XA1-16        	      10	   4582867 ns/op	 457.61 MB/s	         5.035 ratio	12649606 B/op	   15233 allocs/op
+BenchmarkAllCodecsEncode/PICS-8/XA1-16        	      10	   3599607 ns/op	 582.61 MB/s	         5.033 ratio	17047665 B/op	   15272 allocs/op
+PASS
+ok  	mic/ojph	95.468s

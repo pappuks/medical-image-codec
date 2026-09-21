@@ -1,0 +1,48 @@
+goos: darwin
+goarch: arm64
+pkg: mic
+cpu: Apple M4 Pro
+BenchmarkDeltaZstdDecompress/MR/MIC-14         	      10	    600529 ns/op	 218.26 MB/s	         2.353 ratio	 1230848 B/op	       9 allocs/op
+BenchmarkDeltaZstdDecompress/MR/zstd-19-14     	      10	   5165450 ns/op	  25.37 MB/s	         1.945 ratio	    9833 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/CT/MIC-14         	      10	   3017846 ns/op	 173.73 MB/s	         2.238 ratio	 3629081 B/op	      10 allocs/op
+BenchmarkDeltaZstdDecompress/CT/zstd-19-14     	      10	   4439200 ns/op	 118.10 MB/s	         2.049 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/CR/MIC-14         	      10	  23822012 ns/op	 316.21 MB/s	         3.693 ratio	39212065 B/op	      13 allocs/op
+BenchmarkDeltaZstdDecompress/CR/zstd-19-14     	      10	  10041067 ns/op	 750.20 MB/s	         3.241 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/XR/MIC-14         	      10	  32345154 ns/op	 326.34 MB/s	         1.738 ratio	46346251 B/op	      10 allocs/op
+BenchmarkDeltaZstdDecompress/XR/zstd-19-14     	      10	  11667817 ns/op	 904.66 MB/s	         1.434 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MG1/MIC-14        	      10	  18708367 ns/op	 524.28 MB/s	         8.786 ratio	23221249 B/op	      12 allocs/op
+BenchmarkDeltaZstdDecompress/MG1/zstd-19-14    	      10	   8249817 ns/op	1188.92 MB/s	         7.200 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MG2/MIC-14        	      10	  18962625 ns/op	 517.25 MB/s	         8.774 ratio	23221248 B/op	      12 allocs/op
+BenchmarkDeltaZstdDecompress/MG2/zstd-19-14    	      10	   8420325 ns/op	1164.84 MB/s	         7.206 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MG3/MIC-14        	      10	  87091062 ns/op	 328.17 MB/s	         2.237 ratio	134926347 B/op	      11 allocs/op
+BenchmarkDeltaZstdDecompress/MG3/zstd-19-14    	      10	  38179854 ns/op	 748.59 MB/s	         2.042 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MG4/MIC-14        	      10	  60902996 ns/op	 447.65 MB/s	         3.474 ratio	73297932 B/op	      10 allocs/op
+BenchmarkDeltaZstdDecompress/MG4/zstd-19-14    	      10	  26269275 ns/op	1037.83 MB/s	         3.104 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/CT1/MIC-14        	      10	   2238058 ns/op	 234.26 MB/s	         2.790 ratio	 2727936 B/op	       9 allocs/op
+BenchmarkDeltaZstdDecompress/CT1/zstd-19-14    	      10	   4393821 ns/op	 119.32 MB/s	         2.465 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/CT2/MIC-14        	      10	   2283362 ns/op	 229.61 MB/s	         3.486 ratio	 2711552 B/op	       9 allocs/op
+BenchmarkDeltaZstdDecompress/CT2/zstd-19-14    	      10	   4021862 ns/op	 130.36 MB/s	         3.244 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MG-N/MIC-14       	      10	  87252729 ns/op	 327.57 MB/s	         2.239 ratio	134197292 B/op	      11 allocs/op
+BenchmarkDeltaZstdDecompress/MG-N/zstd-19-14   	      10	  39263733 ns/op	 727.92 MB/s	         2.042 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MR1/MIC-14        	      10	   1753608 ns/op	 298.98 MB/s	         2.088 ratio	 2879488 B/op	      10 allocs/op
+BenchmarkDeltaZstdDecompress/MR1/zstd-19-14    	      10	   4386354 ns/op	 119.53 MB/s	         1.790 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MR2/MIC-14        	      10	   6121104 ns/op	 342.61 MB/s	         3.283 ratio	10105856 B/op	      12 allocs/op
+BenchmarkDeltaZstdDecompress/MR2/zstd-19-14    	      10	   5568862 ns/op	 376.59 MB/s	         2.765 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MR3/MIC-14        	      10	   1334467 ns/op	 392.88 MB/s	         3.927 ratio	 2017280 B/op	       9 allocs/op
+BenchmarkDeltaZstdDecompress/MR3/zstd-19-14    	      10	   4007012 ns/op	 130.84 MB/s	         3.473 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/MR4/MIC-14        	      10	   1586233 ns/op	 330.52 MB/s	         4.125 ratio	 2314251 B/op	      10 allocs/op
+BenchmarkDeltaZstdDecompress/MR4/zstd-19-14    	      10	   4165275 ns/op	 125.87 MB/s	         3.579 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/NM1/MIC-14        	      10	   1483400 ns/op	 353.44 MB/s	         5.149 ratio	 2238987 B/op	      10 allocs/op
+BenchmarkDeltaZstdDecompress/NM1/zstd-19-14    	      10	   4947300 ns/op	 105.97 MB/s	         4.878 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/RG1/MIC-14        	      10	  36993100 ns/op	 194.59 MB/s	         1.698 ratio	33013760 B/op	      10 allocs/op
+BenchmarkDeltaZstdDecompress/RG1/zstd-19-14    	      10	  14941342 ns/op	 481.77 MB/s	         1.447 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/RG2/MIC-14        	      10	  19633017 ns/op	 383.68 MB/s	         4.231 ratio	28423201 B/op	      12 allocs/op
+BenchmarkDeltaZstdDecompress/RG2/zstd-19-14    	      10	   9655054 ns/op	 780.19 MB/s	         3.685 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/RG3/MIC-14        	      10	  15725017 ns/op	 393.97 MB/s	         6.079 ratio	22500363 B/op	      13 allocs/op
+BenchmarkDeltaZstdDecompress/RG3/zstd-19-14    	      10	   7131429 ns/op	 868.72 MB/s	         5.457 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/SC1/MIC-14        	      10	  25054088 ns/op	 406.59 MB/s	         3.714 ratio	33509376 B/op	      11 allocs/op
+BenchmarkDeltaZstdDecompress/SC1/zstd-19-14    	      10	  11046412 ns/op	 922.18 MB/s	         3.464 ratio	    9832 B/op	      47 allocs/op
+BenchmarkDeltaZstdDecompress/XA1/MIC-14        	      10	   6162979 ns/op	 340.28 MB/s	         5.010 ratio	10717707 B/op	      13 allocs/op
+BenchmarkDeltaZstdDecompress/XA1/zstd-19-14    	      10	   5212617 ns/op	 402.32 MB/s	         4.366 ratio	    9832 B/op	      47 allocs/op
+PASS
+ok  	mic	50.059s

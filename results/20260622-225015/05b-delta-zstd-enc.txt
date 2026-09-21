@@ -1,0 +1,90 @@
+# mic/ojph.test
+ld: warning: duplicate -rpath '/usr/local/lib' ignored
+ld: warning: duplicate -rpath '/opt/homebrew/lib' ignored
+ld: warning: duplicate -rpath '/home/dibba/.local/lib' ignored
+ld: warning: ignoring duplicate libraries: '-lc++'
+ld: warning: search path '/home/dibba/.local/lib' not found
+goos: darwin
+goarch: arm64
+pkg: mic/ojph
+cpu: Apple M4 Pro
+BenchmarkMICCDeltaZstdEnc/MR/MIC-4state-C-14         	      10	    327971 ns/op	 399.65 MB/s	  270344 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR/Zstd-19-14              	      10	  18147417 ns/op	   7.22 MB/s	  401419 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT/MIC-4state-C-14         	      10	   1207800 ns/op	 434.09 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT/Zstd-19-14              	      10	  74638167 ns/op	   7.02 MB/s	 1589248 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CR/MIC-4state-C-14         	      10	  13822112 ns/op	 544.98 MB/s	15073850 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CR/Zstd-19-14              	      10	3064247450 ns/op	   2.46 MB/s	22642688 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/XR/MIC-4state-C-14         	      10	  16078150 ns/op	 656.51 MB/s	21118990 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/XR/Zstd-19-14              	      10	3391143542 ns/op	   3.11 MB/s	31711233 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG1/MIC-4state-C-14        	      10	   8614783 ns/op	1138.55 MB/s	19628044 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG1/Zstd-19-14             	      10	 885886846 ns/op	  11.07 MB/s	29466624 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG2/MIC-4state-C-14        	      10	   9201275 ns/op	1065.98 MB/s	19628046 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG2/Zstd-19-14             	      10	 833423104 ns/op	  11.77 MB/s	29466624 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG3/MIC-4state-C-14        	      10	  41919071 ns/op	 697.89 MB/s	58515468 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG3/Zstd-19-14             	      10	15109075738 ns/op	   1.94 MB/s	87891968 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG4/MIC-4state-C-14        	      10	  30290817 ns/op	 900.04 MB/s	54534158 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG4/Zstd-19-14             	      10	5220264629 ns/op	   5.22 MB/s	81903627 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT1/MIC-4state-C-14        	      10	   1034808 ns/op	 506.65 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT1/Zstd-19-14             	      10	  56256192 ns/op	   9.32 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT2/MIC-4state-C-14        	      10	   1135008 ns/op	 461.92 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT2/Zstd-19-14             	      10	  77678721 ns/op	   6.75 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG-N/MIC-4state-C-14       	      10	  41598462 ns/op	 687.07 MB/s	57171979 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MG-N/Zstd-19-14            	      10	15765382129 ns/op	   1.81 MB/s	85860352 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR1/MIC-4state-C-14        	      10	    924304 ns/op	 567.22 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR1/Zstd-19-14             	      10	  59259675 ns/op	   8.85 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR2/MIC-4state-C-14        	      10	   2875888 ns/op	 729.22 MB/s	 4202508 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR2/Zstd-19-14             	      10	 293356583 ns/op	   7.15 MB/s	 6307840 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR3/MIC-4state-C-14        	      10	    629804 ns/op	 832.46 MB/s	 1056777 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR3/Zstd-19-14             	      10	  27983792 ns/op	  18.74 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR4/MIC-4state-C-14        	      10	    823833 ns/op	 636.40 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR4/Zstd-19-14             	      10	  71353471 ns/op	   7.35 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/NM1/MIC-4state-C-14        	      10	    898229 ns/op	 583.69 MB/s	 1056790 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/NM1/Zstd-19-14             	      10	  86886267 ns/op	   6.03 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/RG1/MIC-4state-C-14        	      10	  13773671 ns/op	 522.61 MB/s	14401548 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/RG1/Zstd-19-14             	      10	1777627112 ns/op	   4.05 MB/s	21635072 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/RG2/MIC-4state-C-14        	      10	  10935521 ns/op	 688.84 MB/s	15073292 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/RG2/Zstd-19-14             	      10	1785958367 ns/op	   4.22 MB/s	22642688 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/RG3/MIC-4state-C-14        	      10	   8784462 ns/op	 705.25 MB/s	12394507 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/RG3/Zstd-19-14             	      10	1096561738 ns/op	   5.65 MB/s	18620416 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/SC1/MIC-4state-C-14        	      10	  14231167 ns/op	 715.81 MB/s	20381708 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/SC1/Zstd-19-14             	      10	2058848733 ns/op	   4.95 MB/s	30605312 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/XA1/MIC-4state-C-14        	      10	   3376479 ns/op	 621.11 MB/s	 4202505 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/XA1/Zstd-19-14             	      10	 387973504 ns/op	   5.41 MB/s	 6307840 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_BRAIN/MIC-4state-C-14   	      10	   1562667 ns/op	 335.51 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_BRAIN/Zstd-19-14        	      10	 107505771 ns/op	   4.88 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_ANKLE/MIC-4state-C-14   	      10	    671342 ns/op	 780.96 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_ANKLE/Zstd-19-14        	      10	  35828046 ns/op	  14.63 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_ORT/MIC-4state-C-14     	      10	    960642 ns/op	 545.77 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_ORT/Zstd-19-14          	      10	  53784483 ns/op	   9.75 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_CHEST/MIC-4state-C-14   	      10	   1032379 ns/op	 396.75 MB/s	  827401 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_CHEST/Zstd-19-14        	      10	  68196704 ns/op	   6.01 MB/s	 1236992 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_HEAD/MIC-4state-C-14    	      10	    273275 ns/op	 479.63 MB/s	  270344 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_HEAD/Zstd-19-14         	      10	  23190450 ns/op	   5.65 MB/s	  401408 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_INTERA/MIC-4state-C-14  	      10	   4743096 ns/op	 442.15 MB/s	 4202505 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_INTERA/Zstd-19-14       	      10	 507983496 ns/op	   4.13 MB/s	 6307840 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/DX_HAND/MIC-4state-C-14    	      10	   7554825 ns/op	 552.44 MB/s	 8355851 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/DX_HAND/Zstd-19-14         	      10	1043424112 ns/op	   4.00 MB/s	12541952 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/DX_CHEST/MIC-4state-C-14   	      10	   7950050 ns/op	 505.84 MB/s	 8052745 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/DX_CHEST/Zstd-19-14        	      10	 618243858 ns/op	   6.50 MB/s	12083200 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CR_THORAX/MIC-4state-C-14  	      10	  14365642 ns/op	 542.21 MB/s	15589387 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CR_THORAX/Zstd-19-14       	      10	1931176733 ns/op	   4.03 MB/s	23404544 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET1/MIC-4state-C-14       	      10	    268162 ns/op	 488.78 MB/s	  270344 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET1/Zstd-19-14            	      10	  19265038 ns/op	   6.80 MB/s	  401408 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET2/MIC-4state-C-14       	      10	    309796 ns/op	 423.09 MB/s	  270344 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET2/Zstd-19-14            	      10	  23350183 ns/op	   5.61 MB/s	  401408 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_LUNG/MIC-4state-C-14    	      10	   1099775 ns/op	 476.72 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_LUNG/Zstd-19-14         	      10	  55011008 ns/op	   9.53 MB/s	 1581056 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_PANCREAS/MIC-4state-C-14         	      10	   1256588 ns/op	 417.23 MB/s	 1056779 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/CT_PANCREAS/Zstd-19-14              	      10	  74103250 ns/op	   7.08 MB/s	 1589248 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_BRAIN/MIC-4state-C-14            	      10	    322833 ns/op	 507.51 MB/s	  335881 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_BRAIN/Zstd-19-14                 	      10	  22666046 ns/op	   7.23 MB/s	  499712 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_BREAST/MIC-4state-C-14           	      10	    252021 ns/op	 520.08 MB/s	  270344 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_BREAST/Zstd-19-14                	      10	  26222958 ns/op	   5.00 MB/s	  401408 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_PROSTATE/MIC-4state-C-14         	      10	    401433 ns/op	 510.17 MB/s	  417801 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/MR_PROSTATE/Zstd-19-14              	      10	  25367175 ns/op	   8.07 MB/s	  622592 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET_PSMA/MIC-4state-C-14            	      10	    187538 ns/op	 426.58 MB/s	  172040 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET_PSMA/Zstd-19-14                 	      10	   5753850 ns/op	  13.90 MB/s	  245760 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET_LUNG/MIC-4state-C-14            	      10	    427446 ns/op	 187.16 MB/s	  172040 B/op	       2 allocs/op
+BenchmarkMICCDeltaZstdEnc/PET_LUNG/Zstd-19-14                 	      10	  12880204 ns/op	   6.21 MB/s	  245760 B/op	       2 allocs/op
+PASS
+ok  	mic/ojph	630.492s

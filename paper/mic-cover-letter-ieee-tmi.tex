@@ -1,0 +1,128 @@
+% Cover Letter — IEEE Transactions on Medical Imaging submission
+% Compile: pdflatex mic-cover-letter-ieee-tmi.tex
+\documentclass[12pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{parskip}
+\usepackage{microtype}
+
+\hypersetup{
+  colorlinks=true,
+  urlcolor=blue!70!black,
+}
+
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{flushright}
+Kuldeep Singh\\
+Innovaccer Inc.\\
+\href{mailto:kuldeep.singh@innovaccer.com}{kuldeep.singh@innovaccer.com}\\
+ORCID: 0009-0004-8476-0118\\[6pt]
+May 2, 2026
+\end{flushright}
+
+\bigskip
+
+Editor-in-Chief\\
+\textit{IEEE Transactions on Medical Imaging}
+
+\bigskip
+
+\noindent Dear Editor-in-Chief,
+
+\medskip
+
+I am submitting the manuscript \textbf{``A 16-Bit-Native Entropy Coding
+Pipeline for Lossless Medical Image Compression''} for consideration as a Full
+Paper in \textit{IEEE Transactions on Medical Imaging}.
+
+\medskip
+\noindent\textbf{Summary.}
+This paper presents MIC, a lossless compression codec for high-bit-depth
+Digital Imaging and Communications in Medicine (DICOM) images. The central
+contribution is a pipeline that performs spatial prediction, 16-bit-native
+run-length encoding, and large-alphabet Finite State Entropy (FSE) coding
+directly on 16-bit residuals, rather than splitting pixels into byte pairs
+before entropy coding. I show theoretically and empirically that byte-splitting
+incurs a structural information loss of 0.3--1.1 bits per symbol on
+delta-coded medical residuals (8--22\% of total entropy), and that a
+16-bit-native coder recovers this cost. The paper additionally contributes a
+four-state interleaved FSE decoder that improves decompression throughput by a
+geometric mean of 68\% on ARM64 and 43\% on AMD64 with no change to
+compressed size, a parallel strip (PICS) mode that exceeds High-Throughput
+JPEG~2000 (HTJ2K) decompression speed on all 21 tested images on both
+platforms, and a approximately 20-kilobyte pure JavaScript decoder enabling
+client-side in-browser DICOM viewing without server-side transcoding.
+
+\medskip
+\noindent\textbf{Relevance to IEEE TMI.}
+The manuscript addresses lossless compression for clinical DICOM data---a
+core challenge in medical image storage, PACS transmission, and diagnostic
+viewing of 10--16 bit pixel data. Results are reported on 21 de-identified
+clinical DICOM images spanning nine modalities (CT, MRI, mammography,
+computed radiography, radiography, fluoroscopy, nuclear medicine, secondary
+capture, X-ray), with fair in-process comparison against HTJ2K (OpenJPH)
+and JPEG-LS (CharLS). The combination of compression-ratio analysis,
+throughput benchmarking, and browser deployment feasibility is directly
+relevant to the TMI readership working on medical image informatics systems.
+
+\medskip
+\noindent\textbf{Originality.}
+This work has not been submitted to, or published in, any other journal.
+The manuscript represents a complete original work; no prior conference or
+workshop version has been published.
+
+\medskip
+\noindent\textbf{Open-source reproducibility.}
+The complete implementation, benchmark harness, and test data references are
+available at \url{https://github.com/pappuks/medical-image-codec}. All results
+are reproducible using the commands documented in the repository.
+
+\medskip
+\noindent\textbf{Ethics.}
+The evaluation dataset consists entirely of publicly available, de-identified
+DICOM images from the NEMA WG-04 compsamples archive, the NEMA 1997~CD, and
+the Clunie Breast Tomosynthesis public case. No human subjects research was
+conducted; no institutional ethics approval is required per DICOM PS~3.15
+Appendix~E.
+
+\medskip
+\noindent\textbf{Conflict of interest.}
+The author declares no competing financial interests or personal relationships
+that could have influenced this work.
+
+\medskip
+\noindent\textbf{Suggested Associate Editor area.}
+Medical Image Compression; Medical Image Storage and Transmission; Medical
+Imaging Informatics Systems.
+
+\medskip
+\noindent\textbf{Note on suggested reviewers.}
+I note that the paper compares against OpenJPH and CharLS; authors of those
+libraries may have a conflict of interest and could reasonably be excluded
+at the Editor's discretion.
+
+\bigskip
+
+I confirm this is a single-author submission and that the manuscript has been
+prepared in accordance with IEEE Transactions on Medical Imaging author
+guidelines, including the 10-page limit, the 250-word abstract limit, and the
+use of de-identified public datasets.
+
+\bigskip
+
+\noindent Sincerely,
+
+\bigskip\bigskip
+
+\noindent Kuldeep Singh\\
+Innovaccer Inc.\\
+\href{mailto:kuldeep.singh@innovaccer.com}{kuldeep.singh@innovaccer.com}\\
+ORCID: 0009-0004-8476-0118\\
+\url{https://github.com/pappuks/medical-image-codec}
+
+\end{document}

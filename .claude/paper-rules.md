@@ -1,0 +1,389 @@
+# MIC Paper Editorial Rules
+
+Apply these rules whenever editing or creating versions of the MIC IEEE paper
+(`paper/mic-paper-*.tex`). They capture peer-review feedback received after v4
+and applied in v5.
+
+---
+
+## 1. SE Explainability
+
+### Plain-language sentences
+Every major concept introduced for the first time must be followed by a
+plain-language sentence that a software engineer unfamiliar with compression
+research can understand. Examples:
+
+- When introducing 16-bit-native coding, add: "In contrast to codecs that split
+  16-bit pixels into byte pairs, MIC treats each predicted residual as a single
+  16-bit symbol, allowing the entropy model to capture correlations between the
+  high and low byte directly."
+- When introducing residuals, add a numeric example: "For example, if the
+  predicted value is 1020 and the true pixel is 1023, the residual is +3."
+- When introducing byte-splitting cost, give a concrete example with small
+  signed residuals (-2, -1, 0, +1) and explain why the high byte is nearly
+  deterministic.
+
+### FSE overview
+Section III.D or wherever FSE is first explained must include a "FSE in one
+paragraph" that describes the decode loop in plain terms: one table lookup, one
+bit read, one addition per symbol — no divisions or multiplications.
+
+### RLE midCount protocol
+Section III.C must fully specify:
+- `midCount = 32767` (half of uint16 range)
+- Counts stored as uint16 values
+- `c ≤ midCount` → same run of length `c`; `c > midCount` → diff run of length `c - midCount`
+- Maximum run length = 32767 symbols; long runs are split transparently
+- Include an encoding example showing both same and diff runs with actual byte values
+
+### Overflow coding (Section III.B)
+Must include:
+- A small table showing residual → emitted code(s) for a representative bit depth
+- A decoding pseudocode paragraph (read c; if c ≠ D recover residual; if c = D read raw pixel)
+- Explicit statement that residual zero maps to `deltaThreshold`
+- Explicit statement that the threshold is strict `<`, not `≤`
+
+### symbolLen / symbolDensity (Section III.E)
+Must be defined precisely:
+- `symbolLen` = number of distinct symbols in the observed RLE output (equivalently, max_value - min_value + 1, counting all positions in that range)
+- `inputLength` = total number of symbols in the RLE output fed to FSE
+- `symbolDensity = inputLength / symbolLen`
+
+### Huffman backend slowness (Section III.F)
+When mentioning that Huffman is slower than FSE despite being "simpler," explain
+why: the large alphabet requires wider, less-predictable variable-length code
+lookups, whereas FSE uses a fixed-width table transition that the CPU branch
+predictor handles more efficiently.
+
+### Four-state bitstream format (Section IV)
+Must describe: four independent streams encoded separately, concatenated with
+boundary offsets stored in a header, shared FSE decode table, initial states
+stored per chain, and how the decoder reorders output.
+
+### Magic header explanation (Section IV.B / Signaling)
+Must explain what the first byte normally means in single-state mode (it encodes
+`tableLog`; max valid `tableLog` is 17), and why 0xFF is safe as an
+extended-format marker.
+
+### Compiler flags (Section V.D)
+Must clarify:
+- Go uses the gc compiler with default optimization
+- `-O3` (and `-march=native` on AMD64) applies only to CGO-linked C components
+- These are separate compilers with separate flag sets
+
+### Variant table (Section V.D)
+Always include `tab:variants`: a table listing each codec variant with columns
+for language, FSE decoder type, SIMD, and whether the compressed format differs
+from MIC-Go.
+
+### Practitioner takeaway
+After the JavaScript results section, add a "Practitioner takeaway" paragraph:
+- Pure Go / JS for simplicity
+- MIC-4state-C for maximum single-threaded server throughput
+- PICS-C-8 for large images on multicore systems
+
+---
+
+## 2. Acronym Rules
+
+Expand every acronym on first use. Required expansions (in order of typical
+first appearance):
+
+| Acronym | Full form |
+|---------|-----------|
+| MIC | (codec name, not an acronym — say "MIC, the proposed codec" or define if named) |
+| ANS | asymmetric numeral systems |
+| FSE | Finite State Entropy |
+| DICOM | Digital Imaging and Communications in Medicine |
+| HTJ2K | High-Throughput JPEG 2000 |
+| ILP | instruction-level parallelism |
+| CT | computed tomography |
+| MR | magnetic resonance imaging |
+| CR | computed radiography |
+| XR | plain X-ray / radiography |
+| DBT | digital breast tomosynthesis |
+| PACS | Picture Archiving and Communication Systems |
+| RLE | run-length encoding |
+| JPEG-LS | (describe as "a lossless/near-lossless predictive JPEG standard") |
+| EBCOT | Embedded Block Coding with Optimized Truncation |
+| MED | Median Edge Detector |
+| CALIC | Context-based Adaptive Lossless Image Codec |
+| FLIF | Free Lossless Image Format |
+| tANS | table-based asymmetric numeral systems |
+| rANS | range asymmetric numeral systems |
+| LZ77 | Lempel-Ziv 1977 |
+| Zstd | Zstandard |
+| SIMD | Single Instruction, Multiple Data |
+| AVX2 | Advanced Vector Extensions 2 |
+| BMI2 | Bit Manipulation Instruction Set 2 |
+| CGO | Go's C foreign-function interface |
+| WASM | WebAssembly |
+| JS | JavaScript |
+| npm | Node Package Manager |
+| RGB | red-green-blue |
+| YCoCg-R | reversible YCoCg color transform (luma/chroma, maps RGB integers to integers without loss) |
+| MIC2 | (explain: "2" = version 2 of the container format, multi-frame grayscale) |
+| MICR | (explain: "R" = RGB, single-frame RGB format) |
+| AMD64 | x86-64/AMD64 |
+| ARM64 | ARM64/AArch64 |
+| ILP | instruction-level parallelism |
+| LOC | source lines (spell out in tables: "Source lines") |
+
+Avoid unexplained table abbreviations: "Gen." → "General-purpose", "Part." →
+"Partial", "Config." → "Configurable".
+
+---
+
+## 3. Em Dash (---) Usage
+
+### Acceptable IEEE-style uses (do NOT change):
+- `Abstract---` and `Index Terms---` (required by IEEE style)
+- Table/figure captions using `---` as a subtitle separator where a colon
+  would read awkwardly
+
+### Replace em dashes with cleaner alternatives in body text:
+
+| Original pattern | Replacement |
+|-----------------|-------------|
+| `slices---e.g., N frames` | `slices (for example, N frames)` |
+| `systems---X, Y, and Z---were designed` | `systems, including X, Y, and Z, were designed` |
+| `given $X_L$---yet must still be encoded` | `given $X_L$, but it must still be encoded` |
+| `pipeline---Raw pixels are` | `pipeline. Raw pixels are` (caption) |
+| `client-side---zero server-side compute` | `without server-side compute or transcoding latency` |
+| `code---approximately 18×` | `code, about 18×` |
+| Table captions: `summary---geometric means` | `summary: geometric means` |
+
+### Avoid promotional-sounding constructions:
+- Not: "decode it client-side—zero server-side compute, zero transcoding latency."
+- Use: "decode it client-side without server-side compute or transcoding latency."
+
+---
+
+## 4. Avoiding Duplication
+
+### Claims that appear too often — consolidate:
+
+**"JPEG-LS achieves the highest ratio on all 21 images"**
+- Keep in: Results (analysis paragraph) and Conclusion
+- Remove from: Related Work (replace with neutral positioning)
+- Related Work should say: "JPEG-LS is an important baseline as a standardized
+  predictive codec widely deployed in medical PACS."
+- Do NOT use in table captions
+
+**"5–22%, geomean +14% over Delta+Zstandard"**
+- Keep exact numbers in: Results and Conclusion
+- Contributions: shorten to "consistently outperforms Delta+Zstandard on all 21 images"
+- Abstract: headline only, no repetition of exact numbers
+
+**Multi-state speedup (+68% ARM64, +43% AMD64)**
+- Keep exact numbers in: Section IV results tables and Conclusion
+- Abstract: include headline geomean only
+- Contributions: say "evaluated multi-state decoding" without repeating all numbers
+
+**Browser/client-side decoder**
+- Keep detailed description in: Section V.E (JS evaluation) and Discussion C
+- Conclusion: one bullet only
+- Do not restate in multiple consecutive sections
+
+**Dataset description (21 images, 10 modalities)**
+- Keep full description in: Dataset section (V.A)
+- Abstract and Conclusion: mention "21 DICOM images spanning 10 modalities" at most once each
+
+---
+
+## 5. Numerical Consistency and Precision
+
+| Issue | Rule |
+|-------|------|
+| "within 1%" | Always write "within 1% relative to" to avoid confusion with absolute percentage points |
+| "18× less" | Always write "18× fewer source lines" — "less" is incorrect for countable items |
+| 4,095 vs 4,096 | Use **4,096** consistently for Zstandard's FSE symbol limit |
+| 65,535 vs 65,536 | Use **65,535** for MIC's FSE symbol limit; clarify that one code (2^16−1) is reserved as the overflow delimiter |
+| "approximately 91%" | Always specify which MIC variant and platform: "On ARM64, MIC-4state-C achieves approximately 91% of JPEG-LS's geometric mean ratio" |
+| "-benchtime=10x" | Clarify this means 10 iterations per benchmark, not 10 seconds |
+
+---
+
+## 6. CPU / Platform Descriptions
+
+**Rule.** From v8-tmi onward the paper uses only the generic architecture
+labels **ARM64** and **AMD64** in tables, captions, and prose. All
+specific CPU/instance names live in a single subsection — Benchmark
+Procedure (`\subsection{Benchmark Procedure}`) — and nowhere else. The
+authoritative reference platforms are listed in
+[`.claude/benchmark-rules.md`](benchmark-rules.md).
+
+Concretely, when editing the paper:
+- Captions: "Decompression throughput (MB/s) on ARM64." — never name the
+  CPU.
+- Prose: "On AMD64, MIC decodes…" — never "On Intel Xeon 6…" or
+  "On the c8i instance…".
+- The single Benchmark Procedure subsection introduces the reference
+  hardware once, in a bulleted list, and labels itself
+  `\label{subsec:bench-procedure}` so JS captions can cross-reference it.
+
+Other guidance:
+- The XA1 outlier on AMD64 is due to small-image effects and the
+  scheduling of the reference machine — do NOT call it "within
+  measurement noise" unless repeated measurements confirm variance that
+  large.
+
+---
+
+## 7. Browser Deployment Claims
+
+Always hedge browser-decoder availability claims with "at the time of writing":
+
+- Not: "no production-ready WebAssembly or JavaScript decoder exists for HTJ2K"
+- Use: "we did not identify a production-ready npm-distributed WebAssembly or
+  JavaScript decoder for HTJ2K at the time of writing"
+
+---
+
+## 8. PICS Definition
+
+Define PICS (Parallel Image Compressed Strips) at first use in the Methodology
+section before using the acronym in results tables. Include:
+- What PICS does: splits image into N horizontal strips
+- Each strip has its own FSE table
+- Strips are independently decodable
+- Decompression uses a C pthreads worker pool
+
+---
+
+## 9. Table Caption Style
+
+- Use colon (`:`) not em dash (`---`) as subtitle separator in table captions
+- Expand all abbreviations in table headers and footers (no "Gen.", "Part.", etc.)
+- "LOC" → "Source lines" in table headers
+
+---
+
+## 10. First-Submission Voice
+
+The paper is written for journal reviewers and readers who are seeing it
+for the first time. Internally we may iterate through many local
+revisions (v3, v6, v7, v8, ...) and may change reference platforms or
+benchmark code between iterations, but **the paper itself must read as if
+this is the first and only version**. Anything that betrays revision
+history must be removed before the file is sent for review.
+
+### Remove from prose, captions, and comments:
+
+- Inline file-header changelogs (e.g., "% Changes from v6: ...") — strip
+  the whole block; LaTeX source comments are still copied with the file
+  and reviewers can see them.
+- Phrases that reference a prior measurement run: "previously 13/21 on
+  M2 Max", "the +68% gain reported on M2 Max in v6", "have not been
+  refreshed for the M4 Pro reference platform", "rose from 1,418 to
+  2,403 MB/s between platforms".
+- Phrases that reference upcoming work as "next revision": prefer "left
+  to future work" or list under the Future Work paragraph.
+- Words that imply a timeline relative to a prior version: "today",
+  "now" (when contrasting with an earlier state), "currently"
+  (when implying the value will change in a later revision), "refresh",
+  "carried over from v6".
+- Cross-version comparisons between reference platforms (M2 Max vs
+  M4 Pro, old vs new Intel chip, etc.). Identify the platform a number
+  was measured on, but do not narrate the upgrade.
+
+### Keep:
+
+- A single clean platform identification block in the Benchmark
+  Procedure subsection. All specific CPU/instance names live there and
+  nowhere else (see §6). Every other table, caption, and paragraph uses
+  only "ARM64" / "AMD64".
+- "Prior work" references to the published literature — that is the
+  standard academic meaning and is not a self-version reference.
+- Future Work bullets that describe extensions (e.g., "extend the
+  JavaScript decoder evaluation to the AMD64 platform"). These look
+  forward and do not imply a prior version.
+
+### Quick checklist before submission
+
+1. `grep -n "v[0-9]" mic-paper-*.tex` — any hit other than `\$x\_L\$`
+   style math or platform-version (e.g. `Node.js v24.8`) is suspect.
+2. `grep -in "previous\|earlier\|refresh\|next revision\|in v6\|in v7\|in v8"` — should return nothing in prose.
+3. `grep -in "M2 Max\|M4 Pro\|285K\|Core Ultra\|c8i\|Xeon\|Granite Rapids\|Apple M"` —
+   every hit must be inside the single Benchmark Procedure subsection.
+   Any hit elsewhere in the paper is a violation of §6.
+
+---
+
+## 11. Tone and Readability
+
+Apply these rules to all versions, and especially to the plain-language
+("simplified") edition (`mic-paper-simplified-ieee.tex`). The simplified
+edition must stay **accessible and easy to read, but the register is measured
+and formal** — explain things simply without sounding casual, dramatic, or
+promotional. Accessible is not the same as casual.
+
+### No contractions
+Expand all contractions in prose, captions, and bullets: `it's` → `it is`,
+`isn't`/`aren't` → `is not`/`are not`, `don't`/`doesn't` → `do not`/`does not`,
+`can't` → `cannot`, `won't` → `will not`, `that's` → `that is`, `there's` →
+`there is`, `we've` → `we have`, `we're`/`you're` → `we are`/`you are`,
+`wouldn't`/`couldn't` → `would not`/`could not`. Possessive `'s` is fine.
+
+Check with:
+`grep -nE "\b(it's|isn't|aren't|don't|doesn't|won't|can't|that's|there's|we've|we're|you're|wouldn't|couldn't)\b" mic-paper-*.tex`
+
+### No second person or rhetorical questions
+Do not address the reader as "you" or pose rhetorical questions in body text.
+Rewrite in the third person or imperative.
+
+- Not: "when you run several streams at once" → "when several streams are
+  decoded at once".
+- Not: "Decode many small images? Use single-threaded MIC." → "To decode many
+  small images, use single-threaded MIC."
+
+### Replace colloquial and dramatic wording
+Prefer neutral, precise verbs and adjectives over informal or promotional ones:
+
+| Avoid | Prefer |
+|-------|--------|
+| stumble, choke | perform poorly, struggle |
+| chopping / chop up | splitting |
+| throws away | discards |
+| the catch / the gotcha | the limitation |
+| dethrone, crush, beat (as a headline) | outperform, surpass |
+| a hair ahead, a touch faster | marginally ahead |
+| sweet spot | best configuration / optimal point |
+| rule of thumb | practical guidance |
+| bad options | poor options |
+| big (jumps, alphabet, box, image) | large |
+| edges it out / wins (in prose) | is faster / is fastest |
+| squeeze out | remove |
+| love / hate (anthropomorphizing code) | exploit well / handle poorly |
+| just how X works | inherent to how X works |
+| the signature of X | which reflects X |
+| runs well, runs great | performs well |
+| ends up being | is |
+| a lot of / lots of data | a great deal of / a large volume of data |
+| tops 2 GB | exceeds 2 GB |
+| sitting idle | remaining idle |
+| the fix | the approach / the solution |
+
+Use verbs like "wins" only inside results prose where the comparison is
+explicit and quantified; prefer "is fastest" / "is the fastest codec" in
+headline sentences. Keep the measured-claims discipline from §10: do not call
+results "strongest", "remarkable", or "dramatic" — state the number and let it
+speak.
+
+### Neutral section and subsection headers
+Headers state the topic, not a slogan. Avoid "… in One Page", "Going Faster:",
+"The fix", "How much it helps", "How We Measured It", "Which codec to pick".
+Use topical equivalents: "Related Work", "Faster Decoding: …", "The approach",
+"Measured speedup", "Evaluation Methodology", "Choosing a codec".
+
+### Keep
+- Plain-language explanations, numeric examples, and the "FSE in one paragraph"
+  style sentences required by §1 — these stay; only the colloquial register is
+  removed.
+- Bold lead-in phrases that introduce a paragraph's topic
+  (e.g. `\textbf{Why 16-bit RLE matters.}`).
+
+### Scope of a tone pass
+A tone pass is prose-only: do not alter numbers, table data, references,
+labels, or `\cite`/`\ref` keys. The em-dash reductions in §3 are part of the
+same readability discipline; apply them together.

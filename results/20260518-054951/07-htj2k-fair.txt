@@ -1,0 +1,76 @@
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+mic_decompress_c.c:22:44: warning: excess elements in array initializer
+   22 |     0x3FFFFFFFu, 0x7FFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+      |                                            ^~~~~~~~~~~
+mic_decompress_c.c:22:44: note: (near initialization for ‘nbits_mask32’)
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+# mic/ojph [mic/ojph.test]
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+cc1: warning: ‘-mavx10.1’ is aliased to 512 bit since GCC14.3 and GCC15.1 while ‘-mavx10.1-256’ and ‘-mavx10.1-512’ will be deprecated in GCC 16 due to all machines 512 bit vector size supported
+goos: linux
+goarch: amd64
+pkg: mic/ojph
+cpu: Intel(R) Xeon(R) 6975P-C
+BenchmarkHTJ2KFairDecomp/MIC/MR-16         	      10	    720401 ns/op	 181.94 MB/s	         0.1250 orig-MB	         2.353 ratio	 1231980 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR-16       	      10	    329594 ns/op	 397.68 MB/s	         0.1250 orig-MB	         2.379 ratio	  131072 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT-16         	      10	   3244339 ns/op	 161.60 MB/s	         0.5000 orig-MB	         2.237 ratio	 3629057 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT-16       	      10	   1589184 ns/op	 329.91 MB/s	         0.5000 orig-MB	         1.771 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CR-16         	      10	  32554558 ns/op	 231.39 MB/s	         7.184 orig-MB	         3.693 ratio	39212041 B/op	      13 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CR-16       	      10	  16836255 ns/op	 447.42 MB/s	         7.184 orig-MB	         3.770 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/XR-16         	      10	  41209464 ns/op	 256.14 MB/s	        10.07 orig-MB	         1.738 ratio	46346241 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/XR-16       	      10	  27704069 ns/op	 381.01 MB/s	        10.07 orig-MB	         1.670 ratio	10559488 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG1-16        	      10	  23692970 ns/op	 413.98 MB/s	         9.354 orig-MB	         8.786 ratio	23221248 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG1-16      	      10	  10607141 ns/op	 924.69 MB/s	         9.354 orig-MB	         8.251 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG2-16        	      10	  23343305 ns/op	 420.18 MB/s	         9.354 orig-MB	         8.774 ratio	23221248 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG2-16      	      10	  10034258 ns/op	 977.49 MB/s	         9.354 orig-MB	         8.238 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG3-16        	      10	 111683206 ns/op	 255.91 MB/s	        27.26 orig-MB	         2.237 ratio	134926336 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG3-16      	      10	  70849930 ns/op	 403.40 MB/s	        27.26 orig-MB	         2.223 ratio	29261824 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG4-16        	      10	  70547356 ns/op	 386.45 MB/s	        26.00 orig-MB	         3.474 ratio	73297920 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG4-16      	      10	  41466294 ns/op	 657.47 MB/s	        26.00 orig-MB	         3.506 ratio	27262985 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT1-16        	      10	   2420971 ns/op	 216.56 MB/s	         0.5000 orig-MB	         2.789 ratio	 2727936 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT1-16      	      10	   1356694 ns/op	 386.45 MB/s	         0.5000 orig-MB	         2.704 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT2-16        	      10	   2573352 ns/op	 203.74 MB/s	         0.5000 orig-MB	         3.486 ratio	 2711552 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT2-16      	      10	   1357674 ns/op	 386.17 MB/s	         0.5000 orig-MB	         3.294 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG-N-16       	      10	 104230354 ns/op	 274.21 MB/s	        27.26 orig-MB	         2.238 ratio	134197248 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG-N-16     	      10	  70819144 ns/op	 403.58 MB/s	        27.26 orig-MB	         2.226 ratio	28581888 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR1-16        	      10	   2363821 ns/op	 221.80 MB/s	         0.5000 orig-MB	         2.087 ratio	 2879497 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR1-16      	      10	   1330534 ns/op	 394.04 MB/s	         0.5000 orig-MB	         2.125 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR2-16        	      10	   8372116 ns/op	 250.49 MB/s	         2.000 orig-MB	         3.283 ratio	10105865 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR2-16      	      10	   4336710 ns/op	 483.58 MB/s	         2.000 orig-MB	         3.347 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR3-16        	      10	   1908267 ns/op	 274.75 MB/s	         0.5000 orig-MB	         3.926 ratio	 2017299 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR3-16      	      10	    950226 ns/op	 551.75 MB/s	         0.5000 orig-MB	         4.333 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR4-16        	      10	   2231202 ns/op	 234.98 MB/s	         0.5000 orig-MB	         4.124 ratio	 2314240 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR4-16      	      10	   1141750 ns/op	 459.20 MB/s	         0.5000 orig-MB	         4.214 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/NM1-16        	      10	   2196706 ns/op	 238.67 MB/s	         0.5000 orig-MB	         5.149 ratio	 2238976 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/NM1-16      	      10	   1156253 ns/op	 453.44 MB/s	         0.5000 orig-MB	         5.759 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/RG1-16        	      10	  33306360 ns/op	 216.12 MB/s	         6.865 orig-MB	         1.698 ratio	33013760 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/RG1-16      	      10	  20069581 ns/op	 358.67 MB/s	         6.865 orig-MB	         1.631 ratio	 7200768 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/RG2-16        	      10	  23544244 ns/op	 319.94 MB/s	         7.184 orig-MB	         4.230 ratio	28423168 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/RG2-16      	      10	  14091336 ns/op	 534.57 MB/s	         7.184 orig-MB	         4.316 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/RG3-16        	      10	  19188947 ns/op	 322.85 MB/s	         5.908 orig-MB	         6.080 ratio	22500352 B/op	      13 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/RG3-16      	      10	   9672065 ns/op	 640.53 MB/s	         5.908 orig-MB	         6.988 ratio	 6201344 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/SC1-16        	      10	  30276566 ns/op	 336.46 MB/s	         9.715 orig-MB	         3.712 ratio	33517568 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/SC1-16      	      10	  22743441 ns/op	 447.90 MB/s	         9.715 orig-MB	         3.850 ratio	10190848 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/XA1-16        	      10	   7674786 ns/op	 273.25 MB/s	         2.000 orig-MB	         5.010 ratio	10717705 B/op	      13 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/XA1-16      	      10	   4090907 ns/op	 512.64 MB/s	         2.000 orig-MB	         4.883 ratio	 2097152 B/op	       1 allocs/op
+PASS
+ok  	mic/ojph	12.339s

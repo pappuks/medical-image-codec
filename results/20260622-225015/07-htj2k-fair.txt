@@ -1,0 +1,90 @@
+# mic/ojph.test
+ld: warning: duplicate -rpath '/usr/local/lib' ignored
+ld: warning: duplicate -rpath '/opt/homebrew/lib' ignored
+ld: warning: duplicate -rpath '/home/dibba/.local/lib' ignored
+ld: warning: ignoring duplicate libraries: '-lc++'
+ld: warning: search path '/home/dibba/.local/lib' not found
+goos: darwin
+goarch: arm64
+pkg: mic/ojph
+cpu: Apple M4 Pro
+BenchmarkHTJ2KFairDecomp/MIC/MR-14         	      10	    490658 ns/op	 267.13 MB/s	         0.1250 orig-MB	         2.353 ratio	 1231442 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR-14       	      10	    444100 ns/op	 295.14 MB/s	         0.1250 orig-MB	         2.379 ratio	  131072 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT-14         	      10	   2829512 ns/op	 185.29 MB/s	         0.5000 orig-MB	         2.237 ratio	 3629637 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT-14       	      10	   1733450 ns/op	 302.45 MB/s	         0.5000 orig-MB	         1.771 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CR-14         	      10	  23120362 ns/op	 325.81 MB/s	         7.184 orig-MB	         3.693 ratio	39212068 B/op	      13 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CR-14       	      10	  23589017 ns/op	 319.34 MB/s	         7.184 orig-MB	         3.770 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/XR-14         	      10	  31460229 ns/op	 335.52 MB/s	        10.07 orig-MB	         1.738 ratio	46346252 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/XR-14       	      10	  33127179 ns/op	 318.63 MB/s	        10.07 orig-MB	         1.670 ratio	10559488 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG1-14        	      10	  19225392 ns/op	 510.18 MB/s	         9.354 orig-MB	         8.786 ratio	23221259 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG1-14      	      10	  16757242 ns/op	 585.32 MB/s	         9.354 orig-MB	         8.251 ratio	 9814027 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG2-14        	      10	  19460108 ns/op	 504.02 MB/s	         9.354 orig-MB	         8.774 ratio	23221248 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG2-14      	      10	  16451871 ns/op	 596.18 MB/s	         9.354 orig-MB	         8.239 ratio	 9814016 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG3-14        	      10	  85789662 ns/op	 333.15 MB/s	        27.26 orig-MB	         2.237 ratio	134926392 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG3-14      	      10	  91419875 ns/op	 312.63 MB/s	        27.26 orig-MB	         2.223 ratio	29261824 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG4-14        	      10	  60573362 ns/op	 450.08 MB/s	        26.00 orig-MB	         3.474 ratio	73297920 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG4-14      	      10	  56842933 ns/op	 479.62 MB/s	        26.00 orig-MB	         3.506 ratio	27262976 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT1-14        	      10	   2173608 ns/op	 241.21 MB/s	         0.5000 orig-MB	         2.789 ratio	 2727936 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT1-14      	      10	   1775183 ns/op	 295.34 MB/s	         0.5000 orig-MB	         2.704 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT2-14        	      10	   2015833 ns/op	 260.08 MB/s	         0.5000 orig-MB	         3.486 ratio	 2711552 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT2-14      	      10	   1593596 ns/op	 329.00 MB/s	         0.5000 orig-MB	         3.294 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MG-N-14       	      10	  81582096 ns/op	 350.33 MB/s	        27.26 orig-MB	         2.238 ratio	134197259 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MG-N-14     	      10	  87779821 ns/op	 325.60 MB/s	        27.26 orig-MB	         2.226 ratio	28581888 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR1-14        	      10	   1793258 ns/op	 292.37 MB/s	         0.5000 orig-MB	         2.087 ratio	 2879489 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR1-14      	      10	   1599850 ns/op	 327.71 MB/s	         0.5000 orig-MB	         2.126 ratio	  524856 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR2-14        	      10	   5882162 ns/op	 356.53 MB/s	         2.000 orig-MB	         3.283 ratio	10105856 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR2-14      	      10	   5973650 ns/op	 351.07 MB/s	         2.000 orig-MB	         3.347 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR3-14        	      10	   1315746 ns/op	 398.47 MB/s	         0.5000 orig-MB	         3.926 ratio	 2017280 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR3-14      	      10	   1327425 ns/op	 394.97 MB/s	         0.5000 orig-MB	         4.333 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR4-14        	      10	   1806892 ns/op	 290.16 MB/s	         0.5000 orig-MB	         4.124 ratio	 2314240 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR4-14      	      10	   1448992 ns/op	 361.83 MB/s	         0.5000 orig-MB	         4.215 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/NM1-14        	      10	   1399746 ns/op	 374.56 MB/s	         0.5000 orig-MB	         5.149 ratio	 2238987 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/NM1-14      	      10	   1572683 ns/op	 333.37 MB/s	         0.5000 orig-MB	         5.760 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/RG1-14        	      10	  29189133 ns/op	 246.61 MB/s	         6.865 orig-MB	         1.698 ratio	33013782 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/RG1-14      	      10	  21498550 ns/op	 334.83 MB/s	         6.865 orig-MB	         1.631 ratio	 7200768 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/RG2-14        	      10	  19813662 ns/op	 380.18 MB/s	         7.184 orig-MB	         4.230 ratio	28423212 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/RG2-14      	      10	  20099746 ns/op	 374.77 MB/s	         7.184 orig-MB	         4.316 ratio	 7536640 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/RG3-14        	      10	  15100400 ns/op	 410.27 MB/s	         5.908 orig-MB	         6.080 ratio	22500352 B/op	      13 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/RG3-14      	      10	  14368592 ns/op	 431.16 MB/s	         5.908 orig-MB	         6.989 ratio	 6201344 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/SC1-14        	      10	  24685908 ns/op	 412.65 MB/s	         9.715 orig-MB	         3.712 ratio	33517568 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/SC1-14      	      10	  29133133 ns/op	 349.66 MB/s	         9.715 orig-MB	         3.850 ratio	10190848 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/XA1-14        	      10	   5878400 ns/op	 356.76 MB/s	         2.000 orig-MB	         5.010 ratio	10717696 B/op	      13 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/XA1-14      	      10	   5999654 ns/op	 349.55 MB/s	         2.000 orig-MB	         4.883 ratio	 2097163 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT_BRAIN-14   	      10	   2743904 ns/op	 191.07 MB/s	         0.5000 orig-MB	         3.055 ratio	 3186699 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT_BRAIN-14 	      10	   1637842 ns/op	 320.11 MB/s	         0.5000 orig-MB	         3.387 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT_ANKLE-14   	      10	   1180404 ns/op	 444.16 MB/s	         0.5000 orig-MB	         9.486 ratio	 1634304 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT_ANKLE-14 	      10	   1134938 ns/op	 461.95 MB/s	         0.5000 orig-MB	         4.968 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT_ORT-14     	      10	   2222829 ns/op	 235.87 MB/s	         0.5000 orig-MB	         2.681 ratio	 2777088 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT_ORT-14   	      10	   1588629 ns/op	 330.03 MB/s	         0.5000 orig-MB	         2.562 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT_CHEST-14   	      10	   1961192 ns/op	 208.85 MB/s	         0.3906 orig-MB	         2.817 ratio	 2547712 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT_CHEST-14 	      10	   1339300 ns/op	 305.83 MB/s	         0.3906 orig-MB	         2.234 ratio	  409600 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR_HEAD-14    	      10	    470138 ns/op	 278.80 MB/s	         0.1250 orig-MB	         2.608 ratio	 1053696 B/op	       8 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR_HEAD-14  	      10	    427450 ns/op	 306.64 MB/s	         0.1250 orig-MB	         2.667 ratio	  131072 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR_INTERA-14  	      10	   6662350 ns/op	 314.78 MB/s	         2.000 orig-MB	         3.683 ratio	 9316352 B/op	      12 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR_INTERA-14         	      10	   6311038 ns/op	 332.30 MB/s	         2.000 orig-MB	         5.036 ratio	 2097152 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/DX_HAND-14             	      10	  16764167 ns/op	 248.96 MB/s	         3.980 orig-MB	         2.244 ratio	20520971 B/op	      11 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/DX_HAND-14           	      10	  12547279 ns/op	 332.63 MB/s	         3.980 orig-MB	         2.371 ratio	 4177920 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/DX_CHEST-14            	      10	  16762950 ns/op	 239.90 MB/s	         3.835 orig-MB	         1.664 ratio	19505185 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/DX_CHEST-14          	      10	  12986617 ns/op	 309.66 MB/s	         3.835 orig-MB	         1.629 ratio	 4022272 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CR_THORAX-14           	      10	  32171929 ns/op	 242.11 MB/s	         7.428 orig-MB	         1.823 ratio	33832971 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CR_THORAX-14         	      10	  23986004 ns/op	 324.74 MB/s	         7.428 orig-MB	         1.813 ratio	 7790592 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/PET1-14                	      10	    453404 ns/op	 289.08 MB/s	         0.1250 orig-MB	         2.742 ratio	 1036288 B/op	       8 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/PET1-14              	      10	    350346 ns/op	 374.12 MB/s	         0.1250 orig-MB	         3.025 ratio	  131072 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/PET2-14                	      10	    416504 ns/op	 314.70 MB/s	         0.1250 orig-MB	         3.387 ratio	 1024000 B/op	       8 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/PET2-14              	      10	    341867 ns/op	 383.40 MB/s	         0.1250 orig-MB	         4.374 ratio	  131072 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT_LUNG-14             	      10	   2207438 ns/op	 237.51 MB/s	         0.5000 orig-MB	         2.733 ratio	 2752512 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT_LUNG-14           	      10	   1571483 ns/op	 333.63 MB/s	         0.5000 orig-MB	         2.672 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/CT_PANCREAS-14         	      10	   2714042 ns/op	 193.18 MB/s	         0.5000 orig-MB	         2.357 ratio	 3547136 B/op	      10 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/CT_PANCREAS-14       	      10	   1606579 ns/op	 326.34 MB/s	         0.5000 orig-MB	         1.853 ratio	  524288 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR_BRAIN-14            	      10	    424458 ns/op	 386.00 MB/s	         0.1562 orig-MB	         7.270 ratio	  977408 B/op	       8 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR_BRAIN-14          	      10	    368229 ns/op	 444.94 MB/s	         0.1562 orig-MB	         7.619 ratio	  163840 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR_BREAST-14           	      10	    402408 ns/op	 325.72 MB/s	         0.1250 orig-MB	         4.013 ratio	 1001472 B/op	       8 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR_BREAST-14         	      10	    338962 ns/op	 386.69 MB/s	         0.1250 orig-MB	         4.099 ratio	  131072 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/MR_PROSTATE-14         	      10	    678021 ns/op	 302.06 MB/s	         0.1953 orig-MB	         2.302 ratio	 1414144 B/op	       9 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/MR_PROSTATE-14       	      10	    623242 ns/op	 328.60 MB/s	         0.1953 orig-MB	         2.492 ratio	  204800 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/PET_PSMA-14            	      10	    227458 ns/op	 351.71 MB/s	         0.07629 orig-MB	        10.12 ratio	  857344 B/op	       8 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/PET_PSMA-14          	      10	    185058 ns/op	 432.30 MB/s	         0.07629 orig-MB	        13.92 ratio	   81920 B/op	       1 allocs/op
+BenchmarkHTJ2KFairDecomp/MIC/PET_LUNG-14            	      10	    377117 ns/op	 212.14 MB/s	         0.07629 orig-MB	         2.972 ratio	 1190528 B/op	       8 allocs/op
+BenchmarkHTJ2KFairDecomp/HTJ2K/PET_LUNG-14          	      10	    203996 ns/op	 392.16 MB/s	         0.07629 orig-MB	         5.215 ratio	   81920 B/op	       1 allocs/op
+PASS
+ok  	mic/ojph	13.804s
